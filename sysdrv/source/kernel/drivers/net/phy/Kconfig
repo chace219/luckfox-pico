@@ -216,6 +216,11 @@ config MICROCHIP_T1_PHY
 	help
 	  Supports the LAN87XX PHYs.
 
+config MICROCHIP_T1S_PHY
+	tristate "Microchip 10BASE-T1S PHYs"
+	help
+	  Supports the LAN8650/LAN8651 internal 10BASE-T1S PHY.
+
 config MICROSEMI_PHY
 	tristate "Microsemi PHYs"
 	depends on MACSEC || MACSEC=n

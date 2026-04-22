@@ -12,9 +12,10 @@ TARGET3 = luckfox_pwm_test
 TARGET4 = luckfox_i2c_test
 TARGET5 = luckfox_uart_test
 TARGET6 = luckfox_spi_test
+TARGET7 = lan8651_plca_ctrl
 
 
-all: $(TARGET1) $(TARGET2) $(TARGET3) $(TARGET4) $(TARGET5) $(TARGET6)
+all: $(TARGET1) $(TARGET2) $(TARGET3) $(TARGET4) $(TARGET5) $(TARGET6) $(TARGET7)
 
 $(TARGET1):  $(TARGET1).o $(OBJ)
 	@$(CC) $(CFLAGS) $(TARGET1).o $(OBJ) -o $@
@@ -34,6 +35,9 @@ $(TARGET5):  $(TARGET5).o $(OBJ)
 $(TARGET6):  $(TARGET6).o $(OBJ)
 	@$(CC) $(CFLAGS) $(TARGET6).o $(OBJ) -o $@
 
+$(TARGET7):  $(TARGET7).o $(OBJ)
+	@$(CC) $(CFLAGS) $(TARGET7).o $(OBJ) -o $@
+
 install:
 	@mv -f $(TARGET1) $(LUCKFOX_OUT_DIR)/bin
 	@mv -f $(TARGET2) $(LUCKFOX_OUT_DIR)/bin
@@ -41,6 +45,7 @@ install:
 	@mv -f $(TARGET4) $(LUCKFOX_OUT_DIR)/bin
 	@mv -f $(TARGET5) $(LUCKFOX_OUT_DIR)/bin
 	@mv -f $(TARGET6) $(LUCKFOX_OUT_DIR)/bin
+	@mv -f $(TARGET7) $(LUCKFOX_OUT_DIR)/bin
 
 
 clean:
@@ -50,4 +55,5 @@ clean:
 	@rm -f $(TARGET4)
 	@rm -f $(TARGET5)
 	@rm -f $(TARGET6)
+	@rm -f $(TARGET7)
 	@rm -f $(OBJS)

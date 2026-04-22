@@ -54,4 +54,15 @@ config LAN743X
 	  To compile this driver as a module, choose M here. The module will be
 	  called lan743x.
 
+config LAN865X
+	tristate "LAN8650/LAN8651 support"
+	depends on SPI
+	depends on OA_TC6
+	select MICROCHIP_T1S_PHY
+	help
+	  Support for the Microchip LAN8650/LAN8651 10BASE-T1S SPI MAC-PHY.
+
+	  To compile this driver as a module, choose M here. The module will be
+	  called lan865x.
+
 endif # NET_VENDOR_MICROCHIP

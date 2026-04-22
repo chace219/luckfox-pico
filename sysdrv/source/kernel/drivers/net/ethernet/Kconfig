@@ -15,6 +15,14 @@ if ETHERNET
 config MDIO
 	tristate
 
+config OA_TC6
+	tristate "OPEN Alliance TC6 MAC-PHY framework"
+	depends on SPI
+	depends on PHYLIB
+	help
+	  Support the OPEN Alliance TC6 serial transport used by 10BASE-T1S
+	  MAC-PHY devices such as the Microchip LAN8650/LAN8651.
+
 config SUNGEM_PHY
 	tristate
 
