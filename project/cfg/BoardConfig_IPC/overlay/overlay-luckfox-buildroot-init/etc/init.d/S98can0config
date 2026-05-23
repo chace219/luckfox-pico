@@ -1,0 +1,75 @@
+#!/bin/sh
+
+CAN_IFACE="${CAN_IFACE:-can0}"
+CAN_BITRATE="${CAN_BITRATE:-500000}"
+CAN_LOOPBACK="${CAN_LOOPBACK:-0}"
+CAN_TOOL="/usr/bin/can-tool.py"
+PYTHON_BIN="${PYTHON_BIN:-/usr/bin/python3}"
+MAX_WAIT_SECS=10
+
+wait_for_iface() {
+	count=0
+	while [ ! -d "/sys/class/net/${CAN_IFACE}" ] && [ "$count" -lt "$MAX_WAIT_SECS" ]; do
+		sleep 1
+		count=$((count + 1))
+	done
+
+	[ -d "/sys/class/net/${CAN_IFACE}" ]
+}
+
+start() {
+	if [ ! -f "$CAN_TOOL" ]; then
+		echo "CAN boot config skipped: ${CAN_TOOL} not found"
+		return 0
+	fi
+
+	if [ ! -x "$PYTHON_BIN" ]; then
+		echo "CAN boot config skipped: ${PYTHON_BIN} not found"
+		return 0
+	fi
+
+	if ! wait_for_iface; then
+		echo "CAN boot config skipped: ${CAN_IFACE} did not appear"
+		return 0
+	fi
+
+	echo "Configuring ${CAN_IFACE} at ${CAN_BITRATE} bit/s"
+	if [ "$CAN_LOOPBACK" = "1" ]; then
+		"$PYTHON_BIN" "$CAN_TOOL" --iface "$CAN_IFACE" setup --bitrate "$CAN_BITRATE" --loopback
+	else
+		"$PYTHON_BIN" "$CAN_TOOL" --iface "$CAN_IFACE" setup --bitrate "$CAN_BITRATE"
+	fi
+	return $?
+}
+
+stop() {
+	if [ ! -f "$CAN_TOOL" ] || [ ! -x "$PYTHON_BIN" ] || [ ! -d "/sys/class/net/${CAN_IFACE}" ]; then
+		return 0
+	fi
+
+	"$PYTHON_BIN" "$CAN_TOOL" --iface "$CAN_IFACE" down >/dev/null 2>&1 || true
+	return 0
+}
+
+restart() {
+	stop
+	start
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart|reload)
+		restart
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+	esac
+
+exit $?
