@@ -53,7 +53,7 @@
 
 	mcp2515 {
 		mcp2515_int_pin: mcp2515-int-pin {
-			rockchip,pins = <1 RK_PC7 RK_FUNC_GPIO &pcfg_pull_up>;
+			rockchip,pins = <2 RK_PA7 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 	};
 };
@@ -193,8 +193,8 @@
 		reg = <0>;
 		spi-max-frequency = <10000000>;
 		clocks = <&mcp2515_osc>;
-		interrupt-parent = <&gpio1>;
-		interrupts = <RK_PC7 IRQ_TYPE_EDGE_FALLING>;
+		interrupt-parent = <&gpio2>;
+		interrupts = <RK_PA7 IRQ_TYPE_EDGE_FALLING>;
 		status = "okay";
 	};
 
