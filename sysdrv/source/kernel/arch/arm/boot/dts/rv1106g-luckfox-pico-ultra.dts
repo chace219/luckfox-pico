@@ -13,6 +13,12 @@
 	model = "Luckfox Pico Ultra";
 	compatible = "rockchip,rv1103g-38x38-ipc-v10", "rockchip,rv1106g3";
 
+	mcp2515_osc: mcp2515-osc {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <12000000>;
+	};
+
 	restart-poweroff {
 		compatible = "restart-poweroff";
 	};
@@ -31,6 +37,24 @@
 		pinctrl-1 = <&uart1_gpios>;
 		BT,wake_gpio     = <&gpio0 RK_PA2 GPIO_ACTIVE_HIGH>;
 		status = "okay";
+	};
+};
+
+&pinctrl {
+	lan8651 {
+		lan8651_cs_pin: lan8651-cs-pin {
+			rockchip,pins = <1 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		lan8651_int_pin: lan8651-int-pin {
+			rockchip,pins = <1 RK_PB3 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+
+	mcp2515 {
+		mcp2515_int_pin: mcp2515-int-pin {
+			rockchip,pins = <2 RK_PA7 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
 	};
 };
 
@@ -122,6 +146,23 @@
 	status = "okay";
 };
 
+/**********RGB**********/
+&backlight {
+	status = "disabled";
+};
+
+&panel {
+	status = "disabled";
+};
+
+&rgb {
+	status = "disabled";
+};
+
+&rgb_in_vop {
+	status = "disabled";
+};
+
 /**********BT**********/
 &uart1 {
 	status = "okay";
@@ -139,8 +180,33 @@
 
 /**********SPI**********/
 &spi0 {
-	status = "disabled";
-	spidev@0 {
-		spi-max-frequency = <50000000>;
+	status = "okay";
+	num-cs = <2>;
+	cs-gpios = <0>, <&gpio1 RK_PB2 GPIO_ACTIVE_LOW>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi0m0_clk &spi0m0_miso &spi0m0_mosi &spi0m0_cs0
+				     &lan8651_cs_pin &lan8651_int_pin &mcp2515_int_pin>;
+	/delete-node/ spidev@0;
+
+	mcp2515: can@0 {
+		compatible = "microchip,mcp2515";
+		reg = <0>;
+		spi-max-frequency = <10000000>;
+		clocks = <&mcp2515_osc>;
+		interrupt-parent = <&gpio2>;
+		interrupts = <RK_PA7 IRQ_TYPE_EDGE_FALLING>;
+		status = "okay";
+	};
+
+	lan8651: ethernet@1 {
+		compatible = "microchip,lan8651";
+		reg = <1>;
+		spi-max-frequency = <10000000>;
+		interrupt-parent = <&gpio1>;
+		interrupts = <RK_PB3 IRQ_TYPE_EDGE_FALLING>;
+		microchip,plca-enable;
+		microchip,plca-node-id = <1>;
+		microchip,plca-node-count = <8>;
+		status = "okay";
 	};
 };
