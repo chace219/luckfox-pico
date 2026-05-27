@@ -1,0 +1,3 @@
+[submodule "media/joral/intelligence-edge"]
+	path = media/joral/intelligence-edge
+	url = git@github.com:Joral-LLC/intelligence-edge.git
