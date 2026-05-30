@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-can-tool.py  –  Configure MCP2515 and test CAN frames WITHOUT iproute2 or can-utils.
+can-tool.py  –  Configure a SocketCAN interface and test CAN frames WITHOUT iproute2 or can-utils.
 
 Works with BusyBox images that lack 'ip link type can' or candump/cansend.
 Uses Python's built-in netlink and AF_CAN socket support.
@@ -247,7 +247,7 @@ def recv_frames(ifname, timeout=5.0):
 def run_diag(ifname, bitrate=500000):
     """
     Enable CAN hardware loopback, send a known frame, verify reception.
-    The MCP2515 internal loopback echoes TX back to RX without touching the bus.
+    The controller internal loopback echoes TX back to RX without touching the bus.
     """
     print(f"[diag] Bringing {ifname} down for configuration ...")
     try:
@@ -269,7 +269,7 @@ def run_diag(ifname, bitrate=500000):
         r, _, _ = select.select([s], [], [], 2.0)
         if not r:
             print("[diag] FAIL – no frame received within 2 s")
-            print("       Possible causes: MCP2515 not powered, SPI wiring error,")
+            print("       Possible causes: controller not powered, SPI wiring error,")
             print("       oscillator absent, or driver probe failed.")
             return False
         raw = s.recv(16)
@@ -346,7 +346,7 @@ def main():
     s_setup = sub.add_parser('setup', help='Configure bitrate and bring interface up')
     s_setup.add_argument('--bitrate', type=int, default=500000)
     s_setup.add_argument('--loopback', action='store_true',
-                         help='Enable MCP2515 internal loopback (test only)')
+                         help='Enable controller internal loopback (test only)')
     s_setup.set_defaults(func=cmd_setup)
 
     # up / down
@@ -370,7 +370,7 @@ def main():
     s_recv.set_defaults(func=cmd_recv)
 
     # diag
-    s_diag = sub.add_parser('diag', help='Hardware loopback self-test (checks MCP2515 is alive)')
+    s_diag = sub.add_parser('diag', help='Hardware loopback self-test (checks the controller path)')
     s_diag.add_argument('--bitrate', type=int, default=500000)
     s_diag.set_defaults(func=cmd_diag)
 
