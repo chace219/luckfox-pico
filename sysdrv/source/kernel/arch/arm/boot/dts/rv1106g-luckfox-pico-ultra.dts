@@ -201,7 +201,7 @@
 	lan8651: ethernet@1 {
 		compatible = "microchip,lan8651";
 		reg = <1>;
-		spi-max-frequency = <10000000>;
+		spi-max-frequency = <25000000>;
 		interrupt-parent = <&gpio1>;
 		interrupts = <RK_PB3 IRQ_TYPE_EDGE_FALLING>;
 		microchip,plca-enable;
