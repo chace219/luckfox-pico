@@ -1,11 +1,14 @@
-# CAN HAT Integration — Waveshare RS485/CAN HAT on Luckfox Pico Plus
+# CAN Integration — MCP251863 Click on Luckfox Pico Ultra
 
-**Board:** Luckfox Pico Plus (RV1103G)  
-**HAT:** Waveshare RS485/CAN HAT (MCP2515 + TJA1050 CAN transceiver)  
-**CAN oscillator:** 12 MHz (on-board crystal)  
-**Bus:** SPI0_M0 — shared with LAN8651 SPE Ethernet adapter  
+**Board:** Luckfox Pico Ultra (RV1106)  
+**Module:** MikroE MCP251863 Click (`MIKROE-4955`)  
+**CAN interface name:** `can0`  
+**Bus:** SPI0_M0 — shared with the LAN8651 Single-Pair Ethernet adapter  
 
-> Only the CAN port of the HAT is used. The RS-485 interface is not connected or enabled.
+> This integration binds the Click board through the Linux `mcp251xfd` driver family so the
+> controller still appears as `can0`. The DTS below assumes the module is populated with a
+> `40 MHz` oscillator. If your board revision uses a different crystal, update the DTS
+> `clock-frequency` and keep `spi-max-frequency` at or below half of that clock.
 
 ---
 
@@ -16,9 +19,9 @@
 3. [Files Changed](#3-files-changed)
 4. [Building and Flashing](#4-building-and-flashing)
 5. [First-Boot Verification](#5-first-boot-verification)
-6. [Configuring the CAN Interface](#6-configuring-the-can-interface)
+6. [Configuring `can0`](#6-configuring-can0)
 7. [Sending and Receiving Frames](#7-sending-and-receiving-frames)
-8. [Loopback Self-Test (no external node needed)](#8-loopback-self-test-no-external-node-needed)
+8. [Loopback Self-Test](#8-loopback-self-test)
 9. [Diagnostic Script](#9-diagnostic-script)
 10. [Troubleshooting](#10-troubleshooting)
 
@@ -26,82 +29,85 @@
 
 ## 1. Hardware Wiring
 
-| HAT Signal | HAT Pin | Luckfox Pico Plus Pin | GPIO      | Notes |
-|------------|---------|-----------------------|-----------|-------|
-| SCK        | HAT SCK  | SPI0_CLK              | GPIO1_C1  | Shared with LAN8651 |
-| MOSI       | HAT MOSI | SPI0_MOSI             | GPIO1_C2  | Shared with LAN8651 |
-| MISO       | HAT MISO | SPI0_MISO             | GPIO1_C3  | Shared with LAN8651 |
-| CS         | HAT CS   | **SPI0_CS0 — GPIO1_C0** | GPIO1_C0 | **See note below** |
-| INT        | HAT INT  | GPIO1_C7              | GPIO1_C7  | Active-low IRQ |
-| VCC        | 3.3V     | Luckfox 3V3           | —         | 3.3 V supply |
-| GND        | GND      | Luckfox GND           | —         | Common ground |
+- `SCK`: Click `SCK` -> Luckfox `SPI0_CLK` (`GPIO1_C1`), shared with LAN8651.
+- `MOSI`: Click `SDI` / `MOSI` -> Luckfox `SPI0_MOSI` (`GPIO1_C2`), shared with LAN8651.
+- `MISO`: Click `SDO` / `MISO` -> Luckfox `SPI0_MISO` (`GPIO1_C3`), shared with LAN8651.
+- `CS`: Click `CS` -> Luckfox `SPI0_CS0` (`GPIO1_C0`), which is the hardware chip select for `spi0.0`.
+- `INT`: Click `INT` -> Luckfox `GPIO2_A7`, active-low interrupt used by `mcp251xfd`.
+- `3V3`: Click `3V3` -> Luckfox `3V3`.
+- `GND`: Click `GND` -> Luckfox `GND`.
+- `CANH`: Click `CAN H` -> CAN bus high.
+- `CANL`: Click `CAN L` -> CAN bus low.
 
-> **CS pin correction:** The HAT CS line must be connected to **GPIO1_C0** (physical SPI0_CS0,
-> kernel pin group `spi0m0_cs0`). GPIO1_D2 is `SPI0_CS1` and is already occupied by the LAN8651
-> adapter. Connecting CS to GPIO1_D2 will cause both devices to be selected simultaneously.
+Notes:
+
+- Leave the Click board on `SPI0_CS0` (`GPIO1_C0`). `SPI0_CS1` is already used by the LAN8651 path.
+- `RST`, `INT1` / RX interrupt, and any extra mikroBUS sideband pins are not required for the basic
+  `can0` binding in this kernel.
+- Keep the CAN bus terminated correctly at the two physical ends of the network.
 
 ---
 
 ## 2. How the SPI0 Bus is Shared
 
-Both the MCP2515 CAN controller and the LAN8651 Single-Pair Ethernet adapter are attached to the
+Both the MCP251863 Click controller and the LAN8651 Single-Pair Ethernet adapter are attached to the
 same SPI0_M0 bus. They are distinguished by separate hardware chip-selects:
 
-| Device   | SPI CS            | Kernel pin group  | `reg` in DTS |
-|----------|-------------------|-------------------|--------------|
-| MCP2515  | SPI0_CS0 GPIO1_C0 | `spi0m0_cs0`      | `<0>`        |
-| LAN8651  | SPI0_CS1 GPIO1_D2 | `spi0m0_cs1`      | `<1>`        |
+| Device           | SPI CS             | Kernel pin group  | `reg` in DTS |
+| ---------------- | ------------------ | ----------------- | ------------ |
+| MCP251863 Click  | SPI0_CS0 GPIO1_C0  | `spi0m0_cs0`      | `<0>`        |
+| LAN8651          | GPIO1_B2 (GPIO CS) | `lan8651_cs_pin`  | `<1>`        |
 
-The Rockchip SPI controller handles CS assertion in hardware; no GPIO bit-banging is required.
+The Rockchip SPI controller still drives CS0 in hardware for the CAN controller. LAN8651 remains on
+the second chip-select slot through the existing GPIO-backed CS path.
 
 ---
 
 ## 3. Files Changed
 
-### 3.1 Device Tree — `sysdrv/source/kernel/arch/arm/boot/dts/rv1103g-luckfox-pico-plus.dts`
+### 3.1 Device Tree — `sysdrv/source/kernel/arch/arm/boot/dts/rv1106g-luckfox-pico-ultra.dts`
 
 (symlinked as `config/dts_config`)
 
-- Added a `fixed-clock` node (`mcp2515_osc`) at 12 MHz in the root node.
-- Added `mcp2515_int_pin` pinctrl entry for the IRQ line on GPIO1_C7.
-- Added `mcp2515: can@0` SPI device node under `&spi0`.
-- Extended `&spi0 pinctrl-0` to include `spi0m0_cs0` and the new interrupt pin.
+- Replaced the old `mcp2515` binding with an `mcp251xfd` family node at `spi0.0`.
+- Added a `fixed-clock` node (`mcp251xfd_osc`) at `40 MHz` for the Click controller.
+- Switched the CAN IRQ pinctrl entry to `GPIO2_A7` (`mcp251xfd_int_pin`).
+- Kept the node at `reg = <0>` so Linux still binds the interface as `can0`.
 
 ### 3.2 Kernel defconfig — `sysdrv/source/kernel/arch/arm/configs/luckfox_rv1106_linux_defconfig`
 
 (symlinked as `config/kernel_defconfig`)
 
-Added:
+Changed:
 
-```
+```kconfig
 CONFIG_CAN=y
 CONFIG_CAN_RAW=y
 CONFIG_CAN_BCM=y
 CONFIG_CAN_GW=y
 CONFIG_CAN_DEV=y
-CONFIG_CAN_MCP251X=y
+CONFIG_CAN_MCP251XFD=y
 ```
 
 ### 3.3 Buildroot defconfig — `sysdrv/source/buildroot/buildroot-2023.02.6/configs/luckfox_pico_defconfig`
 
 (symlinked as `config/buildroot_defconfig`)
 
-Added:
+No additional userspace package change is required for this controller swap. The active Ultra
+Buildroot defconfig already contains:
 
-```
+```kconfig
 BR2_PACKAGE_CAN_UTILS=y
 BR2_PACKAGE_IPROUTE2=y
 ```
 
-> **Note:** There is also a template copy at `sysdrv/tools/board/buildroot/luckfox_pico_defconfig`.
-> Both files were updated. The build system uses the extracted copy via the symlink in `config/`.
+That means `ip link`, `candump`, `cansend`, and CAN FD-aware userspace remain available after the
+kernel and DT rebuild.
 
 ### 3.4 Overlay scripts — `project/cfg/BoardConfig_IPC/overlay/overlay-luckfox-buildroot-init/usr/bin/`
 
-| Script | Purpose |
-|--------|---------|
-| `can-diag.sh`  | Full diagnostic: checks kernel CAN subsystem, SPI enumeration, driver probe, sysfs attributes, IRQ registration, and userspace tools |
-| `can-tool.py`  | Pure-Python CAN utility (no iproute2/can-utils dependency). Configures bitrate via netlink, sends/receives frames via AF_CAN sockets, runs hardware loopback self-test |
+- `can-diag.sh`: full diagnostic for kernel CAN support, SPI enumeration, driver probe, sysfs attributes, IRQ visibility, and userspace tools.
+- `can-tool.py`: pure-Python CAN utility for bitrate setup, send/receive, and loopback self-test when `iproute2` or `can-utils` are unavailable.
 
 ---
 
@@ -124,38 +130,48 @@ Then flash the resulting images with `rkflash.sh` or the Rockchip flashing tool.
 After flashing, verify the driver probed correctly:
 
 ```sh
-# MCP2515 SPI device must appear
+# SPI devices must appear
 ls /sys/bus/spi/devices/
-# Expected: spi0.0  spi0.1  (mcp2515 and lan8651)
+# Expected: spi0.0  spi0.1
 
 cat /sys/bus/spi/devices/spi0.0/modalias
-# Expected: spi:mcp2515
+# Expected to contain: mcp251xfd  or another mcp251xFD-family string
 
 # can0 interface must exist
 ip link show can0
 # Expected output contains: can0: <NOARP,ECHO> mtu 16 ...
 
 # Driver probe messages (no errors expected)
-dmesg | grep -i mcp251
-# Expected: mcp251x spi0.0 can0: MCP2515 successfully initialized.
-#           mcp251x spi0.0 can0: bit-timing not yet defined  ← normal, configure below
+dmesg | grep -i 'mcp251xfd\|can0'
+# Expected: mcp251xfd spi0.0 can0: ...
+# Avoid exact string matching here; the driver may report the detected family variant.
 ```
 
 ---
 
-## 6. Configuring the CAN Interface
+## 6. Configuring `can0`
 
 The bitrate **must** be set while the interface is DOWN, then the interface is brought UP.
 
 ```sh
+ip link set can0 down
 ip link set can0 type can bitrate 500000
 ip link set can0 up
 ip link show can0
 ```
 
+To use CAN FD on the MCP251863 path, configure both nominal and data phase bitrates:
+
+```sh
+ip link set can0 down
+ip link set can0 type can bitrate 500000 dbitrate 2000000 fd on
+ip link set can0 up
+ip -details link show can0
+```
+
 To set it automatically on boot, add to `/etc/network/interfaces` (or a startup script):
 
-```
+```sh
 auto can0
 iface can0 inet manual
     pre-up ip link set $IFACE type can bitrate 500000
@@ -163,21 +179,19 @@ iface can0 inet manual
     down ip link set $IFACE down
 ```
 
-Common bitrates supported by MCP2515 at 12 MHz oscillator:
+Common classical-CAN bitrates for this setup:
 
-| Bitrate   | Notes |
-|-----------|-------|
-| 100 kbit/s | Long-distance / industrial |
-| 125 kbit/s | CANopen default |
-| 250 kbit/s | Common automotive |
-| 500 kbit/s | Common automotive |
-| 1 Mbit/s  | Maximum for MCP2515 |
+- `100 kbit/s`: long-distance or industrial links.
+- `125 kbit/s`: common CANopen default.
+- `250 kbit/s`: common automotive or mixed-node setup.
+- `500 kbit/s`: common automotive default.
+- `1 Mbit/s`: common upper-end nominal bitrate.
 
 ---
 
 ## 7. Sending and Receiving Frames
 
-### Using can-utils (after rebuild)
+### Using can-utils
 
 ```sh
 # Receive — prints every frame on can0
@@ -186,8 +200,11 @@ candump can0
 # Send a standard frame: ID=0x123, 4 bytes of data
 cansend can0 123#DEADBEEF
 
-# Send an extended-frame (29-bit ID)
+# Send an extended frame (29-bit ID)
 cansend can0 1FFFFFFF#0102030405060708
+
+# Send a CAN FD frame (example: 16 bytes, bitrate switch)
+cansend can0 123##1DEADBEEF00112233445566778899AABB
 
 # Generate test traffic
 cangen can0 -g 10 -I 123 -L 4
@@ -214,16 +231,16 @@ can-tool.py --help
 
 ---
 
-## 8. Loopback Self-Test (no external node needed)
+## 8. Loopback Self-Test
 
-The MCP2515 supports an internal loopback mode that echoes every transmitted frame back to the
+The MCP251863 controller path supports an internal loopback mode that echoes every transmitted frame back to the
 receive buffer without putting anything on the CAN bus wires. This is the safest first test.
 
 ```sh
 # Using can-tool.py (works on any image)
 can-tool.py diag
 # Sends a known frame, checks echo, then restores normal mode.
-# PASS means MCP2515 SPI communication and interrupt are working.
+# PASS means the SPI, interrupt, and `can0` path are working.
 
 # Equivalent using ip + cansend (requires iproute2 + can-utils)
 ip link set can0 type can bitrate 500000 loopback on
@@ -248,23 +265,23 @@ can-diag.sh can1     # check a different interface
 
 Example healthy output:
 
-```
+```text
 === Kernel: CAN subsystem ===
   [PASS] CAN subsystem active (interface or protocol registered)
 
-=== Kernel: MCP2515 driver probe ===
-  [INFO] [  11.687] mcp251x spi0.0 can0: MCP2515 successfully initialized.
+=== Kernel: MCP251xFD driver probe ===
+  [INFO] [  11.687] mcp251xfd spi0.0 can0: ...
   [PASS] Driver probed without errors
 
 === SPI device enumeration ===
   [PASS] SPI device spi0.0 exists
-  [INFO] modalias = spi:mcp2515
-  [PASS] modalias matches MCP2515
+  [INFO] modalias = spi:mcp251xfd
+  [PASS] modalias matches MCP251xFD family
 
 === CAN network interface: can0 ===
   [PASS] Interface can0 exists
-  [INFO] can clock   = 12000000 Hz
-  [PASS] CAN clock frequency matches expected 12 MHz oscillator
+  [INFO] can clock   = 40000000 Hz
+  [PASS] CAN clock frequency matches expected oscillator (40000000 Hz)
 
 === Userspace tools ===
   [PASS] ip found (/sbin/ip)
@@ -279,7 +296,7 @@ Example healthy output:
 
 ## 10. Troubleshooting
 
-### `ip link set can0 type can bitrate ... ` returns `"type" is garbage`
+### `ip link set can0 type can bitrate ...` returns `"type" is garbage`
 
 The image has BusyBox `ip` instead of iproute2. Rebuild with `BR2_PACKAGE_IPROUTE2=y` (already
 added) or use `can-tool.py setup --bitrate 500000` as a workaround.
@@ -291,30 +308,32 @@ interface up.
 
 ### `can0` does not appear in `ip link`
 
-Check dmesg for MCP2515 probe errors:
+Check dmesg for `mcp251xfd` probe errors:
 
 ```sh
-dmesg | grep -i "mcp251\|spi0.0"
+dmesg | grep -i "mcp251xfd\|spi0.0"
 ```
 
 Common causes:
 
 | dmesg message | Likely cause |
-|---------------|--------------|
+| ------------- | ------------ |
 | `unable to set initial baudrate` | Normal — bitrate not yet configured by userspace |
 | `SPI transfer failed` | Wiring problem on SCK/MOSI/MISO or CS0 connected to wrong pin |
-| `MCP251x didn't enter in loopback mode` | Oscillator absent or wrong frequency; check 12 MHz crystal on HAT |
-| No MCP2515 messages at all | Kernel built without `CONFIG_CAN_MCP251X=y`, or DTS node missing |
+| `Oscillator frequency ... is too low or high` | `clock-frequency` in DTS does not match the module crystal |
+| No MCP251xFD messages at all | Kernel built without `CONFIG_CAN_MCP251XFD=y`, or DTS node missing |
 
 ### `candump` / `cansend` not found
 
-`BR2_PACKAGE_CAN_UTILS=y` was added to both buildroot defconfigs. Make sure a full rebuild was
-done **after** these changes (`./build.sh kernel && ./build.sh`) and the new image was flashed.
-Use `can-tool.py` as a fallback on the current image.
+The active `luckfox_pico_w_defconfig` already enables `BR2_PACKAGE_CAN_UTILS=y` and
+`BR2_PACKAGE_IPROUTE2=y`. If those tools are missing on target, make sure the image was rebuilt
+and flashed **after** the kernel and DTS changes. Use `can-tool.py` as a fallback on older images.
 
 ### CAN frames sent but nothing received on the remote node
 
 - Verify the remote node is configured to the **same bitrate**.
 - Check the CAN bus has exactly **two 120 Ω termination resistors** (one at each physical end).
-  The Waveshare HAT has an on-board 120 Ω resistor that can be enabled by a solder jumper.
+- Verify the Click board transceiver side is wired to the correct `CANH` / `CANL` pair.
 - Check `ip -details -statistics link show can0` for error counters (`bus-off`, `error-passive`).
+- If your board revision is not using a `40 MHz` crystal, update the DTS `clock-frequency` and, if
+  needed, run `EXPECTED_CAN_CLOCK_HZ=<your_clock_hz> can-diag.sh` while validating the new image.
