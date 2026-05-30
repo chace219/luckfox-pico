@@ -13,10 +13,10 @@
 	model = "Luckfox Pico Ultra";
 	compatible = "rockchip,rv1103g-38x38-ipc-v10", "rockchip,rv1106g3";
 
-	mcp2515_osc: mcp2515-osc {
+	mcp251xfd_osc: mcp251xfd-osc {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
-		clock-frequency = <12000000>;
+		clock-frequency = <40000000>;
 	};
 
 	restart-poweroff {
@@ -51,8 +51,8 @@
 		};
 	};
 
-	mcp2515 {
-		mcp2515_int_pin: mcp2515-int-pin {
+	mcp251xfd {
+		mcp251xfd_int_pin: mcp251xfd-int-pin {
 			rockchip,pins = <2 RK_PA7 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 	};
@@ -185,16 +185,16 @@
 	cs-gpios = <0>, <&gpio1 RK_PB2 GPIO_ACTIVE_LOW>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0m0_clk &spi0m0_miso &spi0m0_mosi &spi0m0_cs0
-				     &lan8651_cs_pin &lan8651_int_pin &mcp2515_int_pin>;
+				     &lan8651_cs_pin &lan8651_int_pin &mcp251xfd_int_pin>;
 	/delete-node/ spidev@0;
 
-	mcp2515: can@0 {
-		compatible = "microchip,mcp2515";
+	mcp251xfd: can@0 {
+		compatible = "microchip,mcp251xfd";
 		reg = <0>;
-		spi-max-frequency = <10000000>;
-		clocks = <&mcp2515_osc>;
+		spi-max-frequency = <20000000>;
+		clocks = <&mcp251xfd_osc>;
 		interrupt-parent = <&gpio2>;
-		interrupts = <RK_PA7 IRQ_TYPE_EDGE_FALLING>;
+		interrupts = <RK_PA7 IRQ_TYPE_LEVEL_LOW>;
 		status = "okay";
 	};
 
