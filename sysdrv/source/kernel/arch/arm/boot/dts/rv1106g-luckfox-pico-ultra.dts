@@ -52,6 +52,18 @@
 	};
 
 	mcp251xfd {
+		/*
+		 * SPI0 CS0 pin (GPIO1_C0) driven as a plain GPIO chip-select.
+		 * The Rockchip SPI controller (SPI_MASTER_GPIO_SS) also asserts
+		 * native SER[0] on every GPIO-CS transfer, so the MCP must NOT
+		 * sit on native CS0 while the LAN8651 uses a GPIO CS - otherwise
+		 * LAN8651 traffic re-selects the CAN controller and corrupts it.
+		 * Making both devices GPIO-CS keeps them isolated.
+		 */
+		mcp251xfd_cs_pin: mcp251xfd-cs-pin {
+			rockchip,pins = <1 RK_PC0 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
 		mcp251xfd_int_pin: mcp251xfd-int-pin {
 			rockchip,pins = <2 RK_PA7 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
@@ -182,16 +194,17 @@
 &spi0 {
 	status = "okay";
 	num-cs = <2>;
-	cs-gpios = <0>, <&gpio1 RK_PB2 GPIO_ACTIVE_LOW>;
+	/* CS0 = MCP251863 (GPIO1_C0), CS1 = LAN8651 (GPIO1_B2); both GPIO, no native CS */
+	cs-gpios = <&gpio1 RK_PC0 GPIO_ACTIVE_LOW>, <&gpio1 RK_PB2 GPIO_ACTIVE_LOW>;
 	pinctrl-names = "default";
-	pinctrl-0 = <&spi0m0_clk &spi0m0_miso &spi0m0_mosi &spi0m0_cs0
+	pinctrl-0 = <&spi0m0_clk &spi0m0_miso &spi0m0_mosi &mcp251xfd_cs_pin
 				     &lan8651_cs_pin &lan8651_int_pin &mcp251xfd_int_pin>;
 	/delete-node/ spidev@0;
 
 	mcp251xfd: can@0 {
 		compatible = "microchip,mcp251xfd";
 		reg = <0>;
-		spi-max-frequency = <20000000>;
+		spi-max-frequency = <10000000>;
 		clocks = <&mcp251xfd_osc>;
 		interrupt-parent = <&gpio2>;
 		interrupts = <RK_PA7 IRQ_TYPE_LEVEL_LOW>;
