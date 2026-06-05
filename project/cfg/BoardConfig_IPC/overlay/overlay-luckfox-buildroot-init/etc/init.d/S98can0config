@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# Auto-configure and bring up can0 at boot.
+# Set CAN_AUTOCONFIG=0 (env or here) to skip automatic bring-up.
+CAN_AUTOCONFIG="${CAN_AUTOCONFIG:-1}"
 CAN_IFACE="${CAN_IFACE:-can0}"
 CAN_BITRATE="${CAN_BITRATE:-500000}"
 CAN_LOOPBACK="${CAN_LOOPBACK:-0}"
@@ -18,6 +21,11 @@ wait_for_iface() {
 }
 
 start() {
+	if [ "$CAN_AUTOCONFIG" != "1" ]; then
+		echo "CAN boot config skipped: auto bring-up of ${CAN_IFACE} disabled (set CAN_AUTOCONFIG=1 to enable)"
+		return 0
+	fi
+
 	if [ ! -f "$CAN_TOOL" ]; then
 		echo "CAN boot config skipped: ${CAN_TOOL} not found"
 		return 0
