@@ -9,7 +9,7 @@ Usage:
   can-tool.py setup [--iface can0] [--bitrate 500000] [--loopback]
   can-tool.py up    [--iface can0]
   can-tool.py down  [--iface can0]
-  can-tool.py send  <id> <hex-data> [--iface can0] [--count N] [--interval MS]
+  can-tool.py send  <id> <hex-data> [--iface can0] [--ext] [--count N] [--interval MS]
   can-tool.py recv  [--iface can0] [--timeout 5]
   can-tool.py diag  [--iface can0]   (quick hardware loopback self-test)
 """
@@ -323,6 +323,10 @@ def cmd_send(args):
         raw_data = bytes.fromhex(args.data)
     except ValueError as exc:
         sys.exit(f"Error: {exc}")
+    # CAN 2.0b: use extended (29-bit) frame format when requested,
+    # or automatically if the ID does not fit in 11 bits.
+    if args.ext or (can_id & ~CAN_SFF_MASK):
+        can_id = (can_id & CAN_EFF_MASK) | CAN_EFF_FLAG
     send_frame(args.iface, can_id, raw_data,
                count=args.count, interval_ms=args.interval)
 
@@ -358,8 +362,10 @@ def main():
 
     # send
     s_send = sub.add_parser('send', help='Send a CAN frame')
-    s_send.add_argument('id',   help='CAN ID in hex, e.g. 123')
+    s_send.add_argument('id',   help='CAN ID in hex, e.g. 123 (11-bit) or 18DAF110 (29-bit)')
     s_send.add_argument('data', help='Payload in hex, e.g. DEADBEEF (max 8 bytes)')
+    s_send.add_argument('--ext', action='store_true',
+                        help='Force extended 29-bit frame (CAN 2.0b); auto-enabled for IDs > 0x7FF')
     s_send.add_argument('--count',    type=int, default=1,   help='Number of frames')
     s_send.add_argument('--interval', type=int, default=100, help='Interval ms between frames')
     s_send.set_defaults(func=cmd_send)
