@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-can-tool.py  –  Configure MCP2515 and test CAN frames WITHOUT iproute2 or can-utils.
+can-tool.py  –  Configure a SocketCAN interface and test CAN frames WITHOUT iproute2 or can-utils.
 
 Works with BusyBox images that lack 'ip link type can' or candump/cansend.
 Uses Python's built-in netlink and AF_CAN socket support.
@@ -9,7 +9,7 @@ Usage:
   can-tool.py setup [--iface can0] [--bitrate 500000] [--loopback]
   can-tool.py up    [--iface can0]
   can-tool.py down  [--iface can0]
-  can-tool.py send  <id> <hex-data> [--iface can0] [--count N] [--interval MS]
+  can-tool.py send  <id> <hex-data> [--iface can0] [--ext] [--count N] [--interval MS]
   can-tool.py recv  [--iface can0] [--timeout 5]
   can-tool.py diag  [--iface can0]   (quick hardware loopback self-test)
 """
@@ -247,7 +247,7 @@ def recv_frames(ifname, timeout=5.0):
 def run_diag(ifname, bitrate=500000):
     """
     Enable CAN hardware loopback, send a known frame, verify reception.
-    The MCP2515 internal loopback echoes TX back to RX without touching the bus.
+    The controller internal loopback echoes TX back to RX without touching the bus.
     """
     print(f"[diag] Bringing {ifname} down for configuration ...")
     try:
@@ -269,7 +269,7 @@ def run_diag(ifname, bitrate=500000):
         r, _, _ = select.select([s], [], [], 2.0)
         if not r:
             print("[diag] FAIL – no frame received within 2 s")
-            print("       Possible causes: MCP2515 not powered, SPI wiring error,")
+            print("       Possible causes: controller not powered, SPI wiring error,")
             print("       oscillator absent, or driver probe failed.")
             return False
         raw = s.recv(16)
@@ -323,6 +323,10 @@ def cmd_send(args):
         raw_data = bytes.fromhex(args.data)
     except ValueError as exc:
         sys.exit(f"Error: {exc}")
+    # CAN 2.0b: use extended (29-bit) frame format when requested,
+    # or automatically if the ID does not fit in 11 bits.
+    if args.ext or (can_id & ~CAN_SFF_MASK):
+        can_id = (can_id & CAN_EFF_MASK) | CAN_EFF_FLAG
     send_frame(args.iface, can_id, raw_data,
                count=args.count, interval_ms=args.interval)
 
@@ -346,7 +350,7 @@ def main():
     s_setup = sub.add_parser('setup', help='Configure bitrate and bring interface up')
     s_setup.add_argument('--bitrate', type=int, default=500000)
     s_setup.add_argument('--loopback', action='store_true',
-                         help='Enable MCP2515 internal loopback (test only)')
+                         help='Enable controller internal loopback (test only)')
     s_setup.set_defaults(func=cmd_setup)
 
     # up / down
@@ -358,8 +362,10 @@ def main():
 
     # send
     s_send = sub.add_parser('send', help='Send a CAN frame')
-    s_send.add_argument('id',   help='CAN ID in hex, e.g. 123')
+    s_send.add_argument('id',   help='CAN ID in hex, e.g. 123 (11-bit) or 18DAF110 (29-bit)')
     s_send.add_argument('data', help='Payload in hex, e.g. DEADBEEF (max 8 bytes)')
+    s_send.add_argument('--ext', action='store_true',
+                        help='Force extended 29-bit frame (CAN 2.0b); auto-enabled for IDs > 0x7FF')
     s_send.add_argument('--count',    type=int, default=1,   help='Number of frames')
     s_send.add_argument('--interval', type=int, default=100, help='Interval ms between frames')
     s_send.set_defaults(func=cmd_send)
@@ -370,7 +376,7 @@ def main():
     s_recv.set_defaults(func=cmd_recv)
 
     # diag
-    s_diag = sub.add_parser('diag', help='Hardware loopback self-test (checks MCP2515 is alive)')
+    s_diag = sub.add_parser('diag', help='Hardware loopback self-test (checks the controller path)')
     s_diag.add_argument('--bitrate', type=int, default=500000)
     s_diag.set_defaults(func=cmd_diag)
 

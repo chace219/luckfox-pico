@@ -1,8 +1,9 @@
 #!/bin/sh
-# can-diag.sh - Diagnose MCP2515 CAN interface health
+# can-diag.sh - Diagnose MCP251xFD-family CAN interface health
 # Usage: can-diag.sh [can-interface]
 
 IFACE="${1:-can0}"
+EXPECTED_CAN_CLOCK_HZ="${EXPECTED_CAN_CLOCK_HZ:-40000000}"
 PASS=0
 FAIL=0
 
@@ -22,8 +23,8 @@ else
     fail "CAN subsystem not found - kernel may lack CONFIG_CAN"
 fi
 
-section "Kernel: MCP2515 driver probe"
-DMESG_MCP=$(dmesg 2>/dev/null | grep -i "mcp251\|mcp2515\|spi0\.0.*can\|can.*spi0\.0")
+section "Kernel: MCP251xFD driver probe"
+DMESG_MCP=$(dmesg 2>/dev/null | grep -i "mcp251xfd\|mcp2518fd\|mcp2517fd\|spi0\.0.*can\|can.*spi0\.0")
 if [ -n "$DMESG_MCP" ]; then
     echo "$DMESG_MCP" | while IFS= read -r line; do info "$line"; done
     if echo "$DMESG_MCP" | grep -qi "error\|fail\|probe.*fail\|err="; then
@@ -32,9 +33,9 @@ if [ -n "$DMESG_MCP" ]; then
         pass "Driver probed without errors"
     fi
 else
-    fail "No MCP2515 dmesg output found"
-    info "Check: was kernel built with CONFIG_CAN_MCP251X=y ?"
-    info "Check: was DTS mcp2515 node added and image rebuilt?"
+    fail "No MCP251xFD dmesg output found"
+    info "Check: was kernel built with CONFIG_CAN_MCP251XFD=y ?"
+    info "Check: was DTS mcp251xfd node added and image rebuilt?"
 fi
 
 section "SPI device enumeration"
@@ -43,10 +44,10 @@ if [ -d "$SPI_DEV" ]; then
     pass "SPI device spi0.0 exists"
     MODALIAS=$(cat "$SPI_DEV/modalias" 2>/dev/null)
     info "modalias = ${MODALIAS:-<not available>}"
-    if echo "$MODALIAS" | grep -q "mcp2515\|mcp251"; then
-        pass "modalias matches MCP2515"
+    if echo "$MODALIAS" | grep -qi "mcp251xfd\|mcp2518fd\|mcp2517fd"; then
+        pass "modalias matches MCP251xFD family"
     else
-        fail "modalias does not match MCP2515 (got: $MODALIAS)"
+        fail "modalias does not match MCP251xFD family (got: $MODALIAS)"
     fi
 else
     fail "SPI device spi0.0 not found under /sys/bus/spi/devices/"
@@ -74,10 +75,10 @@ if [ -d "/sys/class/net/$IFACE" ]; then
         info "can state   = ${CAN_STATE:-not configured}"
         info "can bitrate = ${CAN_BITRATE:-not set}"
         info "can clock   = ${CAN_CLOCK} Hz"
-        if [ "${CAN_CLOCK:-0}" -eq 12000000 ] 2>/dev/null; then
-            pass "CAN clock frequency matches expected 12 MHz oscillator"
+        if [ "${CAN_CLOCK:-0}" -eq "$EXPECTED_CAN_CLOCK_HZ" ] 2>/dev/null; then
+            pass "CAN clock frequency matches expected oscillator (${EXPECTED_CAN_CLOCK_HZ} Hz)"
         else
-            fail "CAN clock frequency is ${CAN_CLOCK:-unknown}, expected 12000000 (12 MHz)"
+            fail "CAN clock frequency is ${CAN_CLOCK:-unknown}, expected ${EXPECTED_CAN_CLOCK_HZ} Hz"
         fi
     else
         info "(CAN sysfs attributes not yet populated - interface not configured)"
@@ -93,22 +94,18 @@ else
     ls /sys/class/net/ | while IFS= read -r n; do info "  $n"; done
 fi
 
-section "Interrupt pin (GPIO1_C7)"
-GPIO_CHIP="gpiochip0"
-GPIO_NUM=15  # GPIO1_C7 = bank1 * 32 + C7 = 32 + 23 = 55, but sysfs numbering varies
-# Check /proc/interrupts for mcp251x
-if grep -qi "mcp251\|spi0.0" /proc/interrupts 2>/dev/null; then
-    IRQ_LINE=$(grep -i "mcp251\|spi0.0" /proc/interrupts)
-    pass "MCP2515 IRQ registered: $IRQ_LINE"
+section "Interrupt pin (GPIO2_A7)"
+if grep -qi "mcp251xfd\|mcp2518fd\|mcp2517fd\|spi0.0" /proc/interrupts 2>/dev/null; then
+    IRQ_LINE=$(grep -i "mcp251xfd\|mcp2518fd\|mcp2517fd\|spi0.0" /proc/interrupts)
+    pass "MCP251xFD IRQ registered: $IRQ_LINE"
 else
-    info "MCP2515 IRQ not visible in /proc/interrupts yet (normal if interface not up)"
+    info "MCP251xFD IRQ not visible in /proc/interrupts yet (normal if interface not up)"
     grep -i "gpio1\|gpio-1" /proc/interrupts 2>/dev/null | while IFS= read -r l; do info "  $l"; done
 fi
 
 section "Userspace tools"
 for tool in ip candump cansend cangen canstat; do
     if command -v "$tool" >/dev/null 2>&1; then
-        VER=$(ip -V 2>&1 | head -1 || true)
         pass "$tool found ($(command -v $tool))"
     else
         fail "$tool not found - image needs rebuild with iproute2/can-utils"
@@ -132,7 +129,7 @@ if [ "$FAIL" -eq 0 ]; then
 else
     echo
     echo "  $FAIL issue(s) found. See [FAIL] lines above."
-    echo "  If MCP2515 did not probe: verify wiring, oscillator, and that"
+    echo "  If the MCP251xFD controller did not probe: verify wiring, oscillator, and that"
     echo "  the kernel + DTS were rebuilt (./build.sh kernel && ./build.sh)"
 fi
 echo
