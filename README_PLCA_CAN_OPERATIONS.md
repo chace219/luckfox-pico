@@ -3,7 +3,7 @@
 This guide is for the current Luckfox Pico Ultra Buildroot image using:
 
 - LAN8651 10BASE-T1S on SPI0.1
-- MCP2515 CAN controller on SPI0.0
+- MCP2518FD CAN controller on SPI0.0
 - Buildroot defconfig `luckfox_pico_w_defconfig`
 
 It focuses on day-to-day bring-up, checking PLCA role and node settings, and testing CAN traffic against a USB-CAN adapter on a PC.
@@ -20,7 +20,7 @@ The Ultra device tree configures LAN8651 with:
 
 This is the intended follower/subordinate setup when an EVB-LAN8670-USB on the PC acts as PLCA coordinator with node ID `0`.
 
-### MCP2515 CAN defaults at boot
+### MCP2518FD CAN defaults at boot
 
 The init script configures `can0` at `500000` bit/s.
 
@@ -132,7 +132,7 @@ That tool works even on minimal images where SocketCAN support exists but `iprou
 
 ## 4. CAN bring-up and health checks
 
-### Check that MCP2515 is present
+### Check that MCP2518FD is present
 
 ```sh
 can-diag.sh
@@ -144,7 +144,7 @@ dmesg | grep -i mcp251
 Expected signs:
 
 - `spi0.0` exists
-- modalias contains `mcp2515`
+- modalias contains `mcp2518fd`
 - `can0` exists
 
 ### Configure `can0` with standard tools
@@ -195,7 +195,7 @@ ip link set dev can0 type can bitrate 500000 loopback on
 
 This assumes:
 
-- the MCP2515 transceiver is wired correctly
+- the MCP2518FD transceiver is wired correctly
 - CAN_H and CAN_L from the Luckfox side are connected to the PC USB-CAN adapter
 - both ends use the same bitrate
 - the bus is properly terminated
@@ -312,7 +312,7 @@ Send from the board:
 python3 /usr/bin/can-tool.py --iface can0 send 123 11223344
 ```
 
-## 8. Loopback self-test for MCP2515
+## 8. Loopback self-test for MCP2518FD
 
 Use this when you want to verify the controller and driver even if no external CAN adapter is connected.
 
@@ -322,7 +322,7 @@ python3 /usr/bin/can-tool.py --iface can0 diag
 
 What this proves:
 
-- MCP2515 is present
+- MCP2518FD is present
 - SPI communication is working
 - CAN IRQ path is working well enough for loopback
 

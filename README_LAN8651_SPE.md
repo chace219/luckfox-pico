@@ -20,7 +20,7 @@ vendor kernel).
 
 The shield is exposed as **`spi0.1`**. On the Ultra, the second SPI chip-select
 slot is backed by **`cs-gpios = <0>, <&gpio1 RK_PB2 GPIO_ACTIVE_LOW>`** rather
-than the native `spi0m0_cs1` pin. The Waveshare MCP2515 remains physically
+than the native `spi0m0_cs1` pin. The MCP2518FD CAN FD controller remains physically
 wired to `SPI0_CS0`, but it is **not instantiated in the device tree** for this
 temporary SPE-only build.
 
