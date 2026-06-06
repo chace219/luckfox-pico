@@ -194,7 +194,7 @@
 &spi0 {
 	status = "okay";
 	num-cs = <2>;
-	/* CS0 = MCP251863 (GPIO1_C0), CS1 = LAN8651 (GPIO1_B2); both GPIO, no native CS */
+	/* CS0 = MCP251xFD (GPIO1_C0), CS1 = LAN8651 (GPIO1_B2); both GPIO, no native CS */
 	cs-gpios = <&gpio1 RK_PC0 GPIO_ACTIVE_LOW>, <&gpio1 RK_PB2 GPIO_ACTIVE_LOW>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0m0_clk &spi0m0_miso &spi0m0_mosi &mcp251xfd_cs_pin
