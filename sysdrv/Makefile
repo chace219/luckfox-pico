@@ -283,6 +283,9 @@ SYSDRV_BUSYBOX_OBJS_OUTPUT_DIR ?= $(BUSYBOX_DIR)/objs_$(BUSYBOX_CFG)
 BUILDROOT_CFG ?= config_normal
 BUILDROOT_VER ?= buildroot-2023.02.6
 BUILDROOT_DIR := $(SYSDRV_DIR)/source/buildroot
+# Out-of-tree (BR2_EXTERNAL) packages for the intelligence-edge gateway. Kept
+# under tools/ so they survive a clean re-extract of the buildroot tree.
+BR2_EXTERNAL_DIR := $(SYSDRV_DIR)/tools/board/buildroot/br2-external
 
 CUSTOM_VER ?= custom
 
@@ -585,8 +588,8 @@ busybox_clean:
 
 buildroot_menuconfig:
 	@echo -e "$(C_GREEN) ==sysdrv== buildroot memnuconfig   $(C_NORMAL)"
-	$(MAKE) $(BUILDROOT_DEFCONFIG) -C $(BUILDROOT_DIR)/$(BUILDROOT_VER)
-	$(MAKE) menuconfig -C $(BUILDROOT_DIR)/$(BUILDROOT_VER)
+	$(MAKE) BR2_EXTERNAL=$(BR2_EXTERNAL_DIR) $(BUILDROOT_DEFCONFIG) -C $(BUILDROOT_DIR)/$(BUILDROOT_VER)
+	$(MAKE) BR2_EXTERNAL=$(BR2_EXTERNAL_DIR) menuconfig -C $(BUILDROOT_DIR)/$(BUILDROOT_VER)
 #	$(MAKE) source -C $(BUILDROOT_DIR)/$(BUILDROOT_VER)
 
 buildroot_savedefconfig:
@@ -618,7 +621,7 @@ buildroot: prepare
 		cp ${BUSYBOX_PATCH_PATH}/*.patch  $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/busybox/ ;\
 	);
 
-	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) $(BUILDROOT_DEFCONFIG) -C $(BUILDROOT_DIR)/$(BUILDROOT_VER) 
+	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) BR2_EXTERNAL=$(BR2_EXTERNAL_DIR) $(BUILDROOT_DEFCONFIG) -C $(BUILDROOT_DIR)/$(BUILDROOT_VER)
 	$(SYSDRV_DIR)/tools/board/mirror_select/buildroot_mirror_select.sh $(BUILDROOT_DIR)/$(BUILDROOT_VER)/.config
 	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) source -C $(BUILDROOT_DIR)/$(BUILDROOT_VER) 
 	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -j$(SYSDRV_JOBS) -C $(BUILDROOT_DIR)/$(BUILDROOT_VER) 

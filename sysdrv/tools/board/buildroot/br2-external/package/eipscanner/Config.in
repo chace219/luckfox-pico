@@ -1,0 +1,16 @@
+config BR2_PACKAGE_EIPSCANNER
+	bool "eipscanner"
+	depends on BR2_INSTALL_LIBSTDCPP
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	help
+	  EIPScanner - a free C++ implementation of an EtherNet/IP scanner
+	  (originator): explicit messaging, implicit (Class 1) real-time I/O
+	  messaging (point-to-point), and device discovery.
+
+	  Built for the intelligence-edge gateway as a southbound driver
+	  alongside libmodbus, feeding data into the OPC UA server.
+
+	  https://github.com/nimbuscontrols/EIPScanner
+
+comment "eipscanner needs a toolchain w/ C++, threads"
+	depends on !BR2_INSTALL_LIBSTDCPP || !BR2_TOOLCHAIN_HAS_THREADS
