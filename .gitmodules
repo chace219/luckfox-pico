@@ -4,3 +4,6 @@
 [submodule "media/joral/media-gateway"]
 	path = media/joral/media-gateway
 	url = git@github.com:Joral-LLC/t1s-media-gateway.git
+[submodule "media/joral/eipscanner"]
+	path = media/joral/eipscanner
+	url = git@github.com:chace219/EIPScanner.git

@@ -1,9 +1,0 @@
-# Locally computed. The tarball hash is over buildroot's git-generated tarball
-# for the pinned commit (EIPSCANNER_VERSION in eipscanner.mk) — reproducible for
-# a fixed SHA. If you re-pin EIPSCANNER_VERSION, regenerate the tarball line:
-#   make eipscanner-dirclean && make eipscanner-source
-#   sha256sum dl/eipscanner/eipscanner-<sha>-br1.tar.gz
-sha256  85bcbfd893b0b6df03e763c03b1aa717814ad5a7c5225fa5592788d8d6cabf11  eipscanner-e72fa214940b4e80aa7e65d01dc65e1936f727bf-br1.tar.gz
-
-# License file (verified against the LICENSE inside the pinned tarball).
-sha256  f0597e7fdc9454df887d3d06ab03b291fa3e170356d0fa64e92834cbe7d95c9c  LICENSE
