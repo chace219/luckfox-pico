@@ -9,3 +9,4 @@ config/
 sysdrv/tools/board/memtester/memtester-4.6.0/
 sysdrv/tools/board/dosfstools/dosfstools-4.2/
 build/
+*.cpp.o
