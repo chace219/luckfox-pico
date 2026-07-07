@@ -76,6 +76,12 @@ BR2_PACKAGE_CJSON_UTILS=y
 BR2_PACKAGE_LIBMODBUS=y
 BR2_PACKAGE_OPEN62541=y
 BR2_PACKAGE_OPEN62541_UA_NAMESPACE_ZERO_REDUCED=y
+# OPC UA Sign/SignAndEncrypt security (ADR-128) — OpenSSL backend (reuses the
+# libopenssl already in the image; no mbedtls). Enables UA_ENABLE_ENCRYPTION so
+# core/opcua_security.c activates the encrypting security policies.
+BR2_PACKAGE_OPEN62541_ENCRYPTION_OPENSSL=y
+# Web-console TLS (ADR-129): stunnel terminates HTTPS in front of busybox httpd.
+BR2_PACKAGE_STUNNEL=y
 BR2_PACKAGE_LIBCURL=y
 BR2_PACKAGE_LIBCURL_CURL=y
 BR2_PACKAGE_LIBCURL_VERBOSE=y
