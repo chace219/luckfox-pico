@@ -7,7 +7,7 @@ export LC_ALL=C
 SHELL:=/bin/bash
 
 CURRENT_DIR := $(shell pwd)
-SUBDIRS := intelligence-edge media-gateway
+SUBDIRS := satisense-edge media-gateway
 
 .PHONY: all clean distclean
 
