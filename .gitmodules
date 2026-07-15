@@ -1,6 +1,9 @@
-[submodule "media/joral/intelligence-edge"]
-	path = media/joral/intelligence-edge
-	url = git@github.com:Joral-LLC/intelligence-edge.git
+[submodule "media/joral/satisense-edge"]
+	path = media/joral/satisense-edge
+	url = git@github.com:Joral-LLC/satisense-edge.git
 [submodule "media/joral/media-gateway"]
 	path = media/joral/media-gateway
 	url = git@github.com:Joral-LLC/t1s-media-gateway.git
+[submodule "media/joral/eipscanner"]
+	path = media/joral/eipscanner
+	url = git@github.com:chace219/EIPScanner.git

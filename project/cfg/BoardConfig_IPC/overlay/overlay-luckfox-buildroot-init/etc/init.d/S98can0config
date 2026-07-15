@@ -1,13 +1,14 @@
 #!/bin/sh
 
-# Auto-configure and bring up can0 at boot.
+# Auto-configure and bring up can0 at boot, from the [can_bus] settings in
+# /etc/media-gateway/gateway.conf, via the shared /usr/bin/can0-apply.sh.
+# The same script is invoked by the web UI on "Save & Apply", so boot-time and
+# runtime CAN 2.0B <-> CAN FD switching use one code path.
+#
 # Set CAN_AUTOCONFIG=0 (env or here) to skip automatic bring-up.
 CAN_AUTOCONFIG="${CAN_AUTOCONFIG:-1}"
 CAN_IFACE="${CAN_IFACE:-can0}"
-CAN_BITRATE="${CAN_BITRATE:-500000}"
-CAN_LOOPBACK="${CAN_LOOPBACK:-0}"
-CAN_TOOL="/usr/bin/can-tool.py"
-PYTHON_BIN="${PYTHON_BIN:-/usr/bin/python3}"
+CAN_APPLY="/usr/bin/can0-apply.sh"
 MAX_WAIT_SECS=10
 
 wait_for_iface() {
@@ -26,13 +27,8 @@ start() {
 		return 0
 	fi
 
-	if [ ! -f "$CAN_TOOL" ]; then
-		echo "CAN boot config skipped: ${CAN_TOOL} not found"
-		return 0
-	fi
-
-	if [ ! -x "$PYTHON_BIN" ]; then
-		echo "CAN boot config skipped: ${PYTHON_BIN} not found"
+	if [ ! -x "$CAN_APPLY" ]; then
+		echo "CAN boot config skipped: ${CAN_APPLY} not found"
 		return 0
 	fi
 
@@ -41,21 +37,12 @@ start() {
 		return 0
 	fi
 
-	echo "Configuring ${CAN_IFACE} at ${CAN_BITRATE} bit/s"
-	if [ "$CAN_LOOPBACK" = "1" ]; then
-		"$PYTHON_BIN" "$CAN_TOOL" --iface "$CAN_IFACE" setup --bitrate "$CAN_BITRATE" --loopback
-	else
-		"$PYTHON_BIN" "$CAN_TOOL" --iface "$CAN_IFACE" setup --bitrate "$CAN_BITRATE"
-	fi
+	CAN_IFACE="$CAN_IFACE" "$CAN_APPLY"
 	return $?
 }
 
 stop() {
-	if [ ! -f "$CAN_TOOL" ] || [ ! -x "$PYTHON_BIN" ] || [ ! -d "/sys/class/net/${CAN_IFACE}" ]; then
-		return 0
-	fi
-
-	"$PYTHON_BIN" "$CAN_TOOL" --iface "$CAN_IFACE" down >/dev/null 2>&1 || true
+	[ -d "/sys/class/net/${CAN_IFACE}" ] && ip link set "${CAN_IFACE}" down >/dev/null 2>&1
 	return 0
 }
 

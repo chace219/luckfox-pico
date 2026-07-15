@@ -1,0 +1,6 @@
+# No external buildroot packages.
+#
+# EIPScanner (EtherNet/IP scanner) used to be a buildroot package here; it is now
+# a git submodule (media/joral/eipscanner) cross-built standalone by the
+# intelligence-edge Makefile (`make eipscanner`). See that module's
+# docs/eipscanner-integration.md.

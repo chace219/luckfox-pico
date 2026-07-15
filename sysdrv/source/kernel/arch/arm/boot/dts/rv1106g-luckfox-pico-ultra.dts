@@ -214,11 +214,14 @@
 	lan8651: ethernet@1 {
 		compatible = "microchip,lan8651";
 		reg = <1>;
-		spi-max-frequency = <25000000>;
+		/* 15 MHz: 25 MHz caused OA-TC6 'ctrl write echo mismatch' on the
+		 * shared SPI0 bus (cf. MCP251863 dropped to 10 MHz, ADR-013).
+		 * Drop to 10000000 if echo mismatches persist in dmesg. */
+		spi-max-frequency = <15000000>;
 		interrupt-parent = <&gpio1>;
 		interrupts = <RK_PB3 IRQ_TYPE_EDGE_FALLING>;
 		microchip,plca-enable;
-		microchip,plca-node-id = <1>;
+		microchip,plca-node-id = <0>;	/* 0 = PLCA coordinator (generates the BEACON) */
 		microchip,plca-node-count = <8>;
 		status = "okay";
 	};
