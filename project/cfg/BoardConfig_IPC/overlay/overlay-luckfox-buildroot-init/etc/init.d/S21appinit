@@ -1,0 +1,52 @@
+#!/bin/sh
+# /etc/init.d/S21appinit — gateway build (board overlay)
+#
+# Replaces the stock Rockchip IPC S21appinit, which launches the rkipc camera
+# app via /oem/usr/bin/RkLunch.sh. On the gateway image rkipc must NOT run:
+#
+#   - rkipc's embedded web server binds port 80 first (S21 runs before S50),
+#     serving the empty /oem/usr/www — every browser request then 404s, and
+#     the media-gateway web console (S50media-gateway) can no longer bind the
+#     port (its busybox httpd dies on EADDRINUSE);
+#   - rkipc's RkLunch.sh runs `udhcpc -i eth0`, which fights the bridge
+#     design: only br0 may hold the management IPv4 (see
+#     S39media-gateway-network / S50media-gateway).
+#
+# Nothing else from RkLunch.sh is needed here: the LAN8651 (T1S), MCP251863
+# (CAN FD) and T1S PHY drivers are built into the kernel, and /ko is empty on
+# this image — no camera-module insmod is required.
+#
+# Kept from the stock script: pinning a persistent eth0 MAC (the LAN8651 has
+# no MAC EEPROM, so it boots with a random address). A stable slave MAC keeps
+# the br0 bridge MAC — and therefore the DHCP lease — stable across reboots.
+
+pin_eth0_mac() {
+	[ -d /data ] || return 0
+
+	cur=$(ifconfig -a 2>/dev/null | grep "^eth0.*HWaddr" | awk '{print $5}')
+	[ -n "$cur" ] || return 0
+
+	if [ -f /data/ethaddr.txt ]; then
+		saved=$(cat /data/ethaddr.txt)
+		if [ -n "$saved" ] && [ "$cur" != "$saved" ]; then
+			ifconfig eth0 down
+			ifconfig eth0 hw ether "$saved"
+		fi
+	else
+		echo "$cur" >/data/ethaddr.txt
+	fi
+}
+
+case "$1" in
+	start)
+		pin_eth0_mac
+		;;
+	stop)
+		;;
+	*)
+		echo "Usage: $0 {start|stop}"
+		exit 1
+		;;
+esac
+
+exit 0
