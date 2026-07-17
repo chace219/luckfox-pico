@@ -15,20 +15,31 @@ It focuses on day-to-day bring-up, checking PLCA role and node settings, and tes
 The Ultra device tree configures LAN8651 with:
 
 - PLCA enabled
-- node ID `1`
+- node ID `0` (**coordinator** — generates the BEACON)
 - node count `8`
 
-This is the intended follower/subordinate setup when an EVB-LAN8670-USB on the PC acts as PLCA coordinator with node ID `0`.
+The board is the segment's PLCA coordinator by default. On media-gateway
+images the daemon re-applies the PLCA settings from
+`/etc/media-gateway/t1s.conf` at startup and on every web-console save, so the
+runtime role is governed by that file / the web UI — its factory default is
+identical (coordinator, node ID 0, node count 8).
+
+When testing against an EVB-LAN8670-USB on a PC, configure the **EVB as a
+subordinate** with a non-zero node ID (e.g. node 1) — or demote the board
+instead (see below); a segment must have exactly one coordinator.
 
 ### MCP2518FD CAN defaults at boot
 
-The init script configures `can0` at `500000` bit/s.
+At boot, `S98can0config` runs `/usr/bin/can0-apply.sh`, which configures
+`can0` from the `[can_bus]` section of `/etc/media-gateway/gateway.conf`
+(factory default: classic CAN, `500000` bit/s, sample point 80 %,
+`restart-ms 100`). The same script runs on every web-console save, so boot and
+runtime use one code path. Set `CAN_AUTOCONFIG=0` in the environment to skip
+automatic bring-up.
 
-Default loopback setting:
-
-- `CAN_LOOPBACK=0`
-
-So normal boots are not supposed to leave CAN in loopback mode. Loopback is only enabled temporarily when you explicitly request it, for example with `can-tool.py diag` or with `ip link ... loopback on`.
+The boot path never enables loopback. Loopback is only enabled temporarily
+when you explicitly request it, for example with `can-tool.py diag` or with
+`ip link ... loopback on`.
 
 ## 2. PLCA quick checks
 
@@ -63,44 +74,53 @@ The important fields are:
 
 ### Recommended two-node setup with EVB-LAN8670-USB on the PC
 
-PC EVB-LAN8670-USB:
+Luckfox board (factory default — no command needed):
 
 - coordinator
 - node ID `0`
 - node count `8`
 
-Luckfox board:
+PC EVB-LAN8670-USB:
 
 - subordinate
 - node ID `1`
 - node count `8`
 
-Board command:
-
-```sh
-lan8651_plca_ctrl eth0 set subordinate 1 8 32
-lan8651_plca_ctrl eth0 get
-```
-
-### Make the board the PLCA coordinator
-
-Only do this if the PC-side EVB is changed to a non-zero node ID.
+To re-assert the board's default role after experiments:
 
 ```sh
 lan8651_plca_ctrl eth0 set coordinator 8 32
 lan8651_plca_ctrl eth0 get
 ```
 
+### Make the board a subordinate
+
+Only do this if another node on the segment (e.g. the PC EVB) is the
+coordinator — a segment with two coordinators (or none) does not work.
+
+```sh
+lan8651_plca_ctrl eth0 set subordinate 1 8 32
+lan8651_plca_ctrl eth0 get
+```
+
+On media-gateway images, make the role change persistent via the web console
+(Configuration → PLCA Settings) or `/etc/media-gateway/t1s.conf` — otherwise
+the daemon restores the configured role on its next reload.
+
 ### If DHCP over SPE is not working
 
-First force the expected PLCA state, then retry DHCP:
+First force the expected PLCA state (factory default: coordinator), then retry
+DHCP:
 
 ```sh
 ip addr flush dev eth0
-lan8651_plca_ctrl eth0 set subordinate 1 8 32
+lan8651_plca_ctrl eth0 set coordinator 8 32
 ip link set eth0 up
 udhcpc -i eth0 -n -q
 ```
+
+(If this board has deliberately been made a subordinate, use
+`set subordinate <id> 8 32` with its assigned node ID instead.)
 
 If you need a static ICS-style address for testing:
 
@@ -166,7 +186,8 @@ python3 /usr/bin/can-tool.py --iface can0 setup --bitrate 500000
 
 Normally, no.
 
-The boot script default is `CAN_LOOPBACK=0`, so the normal boot path should configure `can0` in normal mode.
+The boot path (`S98can0config` → `can0-apply.sh`) configures `can0` in normal
+mode; nothing at boot enables loopback.
 
 ### Check loopback with `iproute2`
 
@@ -373,6 +394,7 @@ Relevant files in this repo:
 - `README_LAN8651_SPE.md`
 - `README_CAN_HAT.md`
 - `project/cfg/BoardConfig_IPC/overlay/overlay-luckfox-buildroot-init/etc/init.d/S98can0config`
+- `project/cfg/BoardConfig_IPC/overlay/overlay-luckfox-buildroot-init/usr/bin/can0-apply.sh`
 - `project/cfg/BoardConfig_IPC/overlay/overlay-luckfox-buildroot-init/usr/bin/can-tool.py`
 - `project/cfg/BoardConfig_IPC/overlay/overlay-luckfox-buildroot-init/usr/bin/can-diag.sh`
 - `media/luckfox/examples/lan8651_plca_ctrl.c`

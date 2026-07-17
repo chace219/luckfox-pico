@@ -4,6 +4,15 @@ This document describes the integration of the **Microchip LAN8651** 10BASE-T1S
 Single-Pair Ethernet MAC-PHY on the **Luckfox Pico Ultra** (RV1106, Linux 5.10
 vendor kernel).
 
+> **Historical bring-up record.** This guide documents the initial SPE-only
+> shield integration (1 MHz SPI over jumper wires, CAN controller not
+> instantiated, PLCA subordinate node 1, LAN8651 as `eth1`). The **current**
+> tree differs: both LAN8651 and MCP251863 are instantiated on SPI0 with GPIO
+> chip-selects, the LAN8651 probes first as `eth0`, and the factory PLCA
+> default is **coordinator (node ID 0), node count 8** — see
+> `sysdrv/source/kernel/arch/arm/boot/dts/rv1106g-luckfox-pico-ultra.dts`,
+> `README_PLCA_CAN_OPERATIONS.md`, and `media/joral/media-gateway/README.md`.
+
 ---
 
 ## Hardware Setup
