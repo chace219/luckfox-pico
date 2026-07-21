@@ -214,10 +214,11 @@
 	lan8651: ethernet@1 {
 		compatible = "microchip,lan8651";
 		reg = <1>;
-		/* 15 MHz: 25 MHz caused OA-TC6 'ctrl write echo mismatch' on the
-		 * shared SPI0 bus (cf. MCP251863 dropped to 10 MHz, ADR-013).
-		 * Drop to 10000000 if echo mismatches persist in dmesg. */
-		spi-max-frequency = <15000000>;
+		/* 10 MHz: 25 MHz caused OA-TC6 'ctrl write echo mismatch' on the
+		 * shared SPI0 bus (cf. MCP251863 dropped to 10 MHz, ADR-013), and
+		 * 15 MHz still produced a runtime 'Config unsync error' wedge after
+		 * ~23 h of operation (chip stopped responding until power cycle). */
+		spi-max-frequency = <10000000>;
 		interrupt-parent = <&gpio1>;
 		interrupts = <RK_PB3 IRQ_TYPE_EDGE_FALLING>;
 		microchip,plca-enable;

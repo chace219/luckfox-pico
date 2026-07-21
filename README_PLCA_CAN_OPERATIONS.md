@@ -130,6 +130,31 @@ ip addr add 192.168.137.220/24 dev eth0
 ip link set eth0 up
 ```
 
+### Runtime SPI failure of the LAN8651 (and the watchdog that recovers it)
+
+The 5.10 `oa_tc6` driver treats a runtime `Config unsync error` / `Rxd header
+bad` as **non-recoverable** (`Device error: -19` in dmesg): the interface goes
+dead and stays dead — DHCP, PLCA writes and MDIO reads all fail. The telltale
+signature is `lan8651_plca_ctrl eth0 get` returning the **same garbage word
+for all three registers** (e.g. `0xFFB9`), plus `ctrl read/write echo
+mismatch ... RX[00 00 ...]` spam in dmesg. This was observed in the field
+after ~23 h of operation with `spi-max-frequency = <15000000>`; the DTS now
+uses 10 MHz for the LAN8651 (same mitigation as the MCP251863, ADR-013).
+
+On media-gateway images, `S55t1s-watchdog` supervises the interface and
+recovers this state automatically:
+
+1. **soft** — re-applies the PLCA config from `/etc/media-gateway/t1s.conf`
+   (`plca-config set`)
+2. **hard** — unbinds/rebinds the `lan8650` SPI driver (full probe = MAC-PHY
+   software reset) and restarts `S50media-gateway` so bridge, DHCP and PLCA
+   are rebuilt through the normal startup path
+
+Recovery triggers after 3 consecutive failed health checks (~30 s); failed
+attempts retry with backoff. Watch it with `logread | grep t1s-watchdog` (or
+`dmesg`). If the hard recovery keeps failing, the chip's SPI engine is wedged
+beyond software reach — a full **power cycle** (not `reboot`) is required.
+
 ## 3. CAN userspace available in the current Buildroot config
 
 The current `luckfox_pico_w_defconfig` now enables:
