@@ -316,6 +316,11 @@ CONFIG_CAN=y
 CONFIG_CAN_RAW=y
 CONFIG_CAN_BCM=y
 CONFIG_CAN_GW=y
+# In-kernel J1939 stack (transport reassembly + address claiming) for the
+# satisense-edge acquisition driver (Epic 10 / satisense ADR-140 / gateway ADR-019)
+CONFIG_CAN_J1939=y
+# Virtual CAN for software-only J1939 bring-up tests (no bus ACK needed)
+CONFIG_CAN_VCAN=y
 CONFIG_CAN_DEV=y
 CONFIG_CAN_MCP251XFD=y
 CONFIG_POWER_RESET=y
