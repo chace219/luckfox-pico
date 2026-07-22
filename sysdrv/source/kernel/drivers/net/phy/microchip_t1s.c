@@ -225,7 +225,10 @@ static struct phy_driver microchip_t1s_driver[] = {
 	{
 		PHY_ID_MATCH_MODEL(PHY_ID_LAN865X_REVB),
 		.name		= "LAN865X Rev.B Internal PHY",
-		.features	= PHY_BASIC_FEATURES,
+		/* .features must stay unset: phylib rejects drivers that set both
+		 * .features and .get_features, and a rejected driver means the
+		 * Generic PHY attaches instead - silently skipping the mandatory
+		 * AN1760 Rev.B trim fixups in lan865x_revb_config_init(). */
 		.get_features	= lan865x_get_features,
 		.config_init	= lan865x_revb_config_init,
 		.read_status	= lan86xx_read_status,
