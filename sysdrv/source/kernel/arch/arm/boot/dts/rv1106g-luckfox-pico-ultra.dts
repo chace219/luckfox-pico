@@ -204,7 +204,12 @@
 	mcp251xfd: can@0 {
 		compatible = "microchip,mcp251xfd";
 		reg = <0>;
-		spi-max-frequency = <10000000>;
+		/* 8 MHz: derated from 10 MHz (ADR-013; chip max is 17 MHz = 85% of
+		 * SYSCLK/2 at 40 MHz) after CRC read errors on the shared SPI0 bus.
+		 * Keeps ~1.6x headroom over worst-case CAN FD 500k/2M SPI traffic;
+		 * do not lower further - transfers would occupy the shared bus even
+		 * longer, delaying LAN8651 OA-TC6 data-path servicing. */
+		spi-max-frequency = <8000000>;
 		clocks = <&mcp251xfd_osc>;
 		interrupt-parent = <&gpio2>;
 		interrupts = <RK_PA7 IRQ_TYPE_LEVEL_LOW>;
@@ -214,11 +219,14 @@
 	lan8651: ethernet@1 {
 		compatible = "microchip,lan8651";
 		reg = <1>;
-		/* 10 MHz: 25 MHz caused OA-TC6 'ctrl write echo mismatch' on the
-		 * shared SPI0 bus (cf. MCP251863 dropped to 10 MHz, ADR-013), and
-		 * 15 MHz still produced a runtime 'Config unsync error' wedge after
-		 * ~23 h of operation (chip stopped responding until power cycle). */
-		spi-max-frequency = <10000000>;
+		/* 15 MHz: 25 MHz caused OA-TC6 'ctrl write echo mismatch' on the
+		 * shared SPI0 bus (cf. MCP251863 at 10 MHz, ADR-013). Lowering to
+		 * 10 MHz did NOT cure the runtime 'Config unsync error' wedge (it
+		 * hit within a minute of boot vs ~23 h at 15 MHz), so the wedge is
+		 * not clock-rate-bound; 15 MHz keeps SPI headroom above the 10 Mbps
+		 * T1S line rate (~6% OA-TC6 chunk overhead) while the root cause
+		 * (bus contention vs signal integrity) is isolated. */
+		spi-max-frequency = <15000000>;
 		interrupt-parent = <&gpio1>;
 		interrupts = <RK_PB3 IRQ_TYPE_EDGE_FALLING>;
 		microchip,plca-enable;
