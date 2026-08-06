@@ -282,6 +282,43 @@ hardware bench in the loop, not a release-time checkbox.
   trusted-network assumption this log is the **only** accountability that write path
   has. **Row #6 is now met for both products.**
 
+- **2026-08-07 — both products, Annex I #6 hardened and made usable: console viewer,
+  bigger history, no silent loss.** Three things came out of working out what the
+  storage layout actually *is* rather than reading the code:
+  - **`logger` alone was never going to be enough, confirmed.** `/var/log` is a symlink
+    to `/tmp` (tmpfs), so the system log is RAM-only. The durable copy lives on
+    `/userdata` = **eMMC `/dev/mmcblk0p6`, 256 MB ext4**, mounted by
+    `/etc/init.d/S20linkmount` (generated at pack time from `RK_PARTITION_FS_TYPE_CFG`)
+    at S20 — before the product services at S39/S50/S60, so it is always available by
+    the time anything logs.
+  - **The 256 KB cap was a forensics weakness, not a storage choice.** Rotation
+    *evicts* history, so a single 256 KB generation (~2900 records) let an attacker
+    push their own earlier activity out of the log by generating failed logins — a
+    size limit doubling as an evidence-destruction primitive. Now 1 MB × 4 generations
+    (~45k records, **1.6% of a 256 MB partition** — the old cap used 0.1%), aged out so
+    only the oldest is discarded. With the existing 1-second penalty per failed login,
+    flooding is no longer practical.
+  - **A failed write was silent.** Persistence must stay best-effort (a password change
+    must not fail because the log cannot be written), but swallowing the error lets the
+    trail develop gaps nobody knows about. A failed append now emits
+    `audit_persist_failed` to syslog. This is not hypothetical: `/userdata` is shared
+    (`S50usbdevice` keeps `ums_shared.img` there), and **if the partition fails to
+    mount at boot the vendor's `S20linkmount` runs `mke2fs -F` and reformats it** —
+    which is the strongest argument yet for off-device collection rather than treating
+    the on-device log as the only copy.
+  **Console viewer** (the other half of the row): the log was readable only over
+  serial/SSH, which in practice meant it was never read. Now on SatiSense under
+  *Other → Utilities → Security event log* and on media-gateway on the Configuration
+  page. Built to cost the data plane nothing, which was the explicit requirement:
+  on-demand only (never on the 1 Hz diagnostics/status poll), `tail -n` so response
+  cost is bounded by lines requested rather than log size, `lines` clamped server-side
+  (default 200, max 2000) because it is attacker-controlled and streaming 4 MB through
+  a CGI on an RV1106 would be a DoS against the console, and it runs in a short-lived
+  CGI so the daemon is never involved. Verified: **zero** audit calls exist in the
+  SatiSense C daemon, and media-gateway's three daemon-side records are per
+  *connection*, never per frame.
+  Remaining on this row for both: no off-device forwarding by default.
+
 **Status 2026-07-31 (end of day):** all of the above is now **in a flashed firmware image
 and confirmed on hardware**. The console runs over HTTPS with a per-device certificate,
 plain HTTP is refused on the same port, and the OPC UA server runs Sign & Encrypt with
