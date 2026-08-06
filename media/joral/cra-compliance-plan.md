@@ -129,6 +129,49 @@ hardware bench in the loop, not a release-time checkbox.
   contract, including the degraded no-factory-dir case. Media Gateway (row #8
   ⚠️) still has only the documented manual procedure.
 
+- **2026-08-06 — both products, Annex I Part II §1 (SBOM): generated from the build.**
+  `./build.sh sbom` (→ `scripts/compliance/gen-sbom.sh`) merges two sources, because
+  neither covers the image alone: Buildroot's own `make legal-info` for the platform
+  layer (**134 components** with version, license, license files and upstream source
+  site, straight from the `.config` that built the image) and a hand-declared
+  application layer per product (`docs/compliance/app-manifest.csv`, **8 components**)
+  for everything Buildroot cannot see — our own daemons and console, the statically
+  linked EIPScanner submodule, and the Rockchip NPU vendor blob. Output is stamped
+  with the SDK `git describe` build ID, so an inventory can be matched to a deployed
+  unit, and it deliberately excludes legal-info's ~400 MB `sources/` tree (that is a
+  source-redistribution artifact, not an SBOM). The document also rolls up licenses
+  and flags end-of-life components automatically — it already reports **OpenSSL
+  1.1.1v, EOL since 2023-09-11**, by matching the real built version rather than
+  asserting it, so the line disappears on its own once we migrate. Verified
+  end-to-end on this tree. Cheapest item in the plan, now closed; the remaining work
+  on Annex I #2 is feeding this inventory into a CVE check as a release gate.
+- **2026-08-06 — both products, plan items 1 and 3: compliance matrix + Annex II
+  fact sheet, per product.** `docs/compliance/cra-annex1-matrix.md` and
+  `docs/compliance/cra-annex2-facts.md` in each tree: one row per Annex I
+  requirement → status → evidence path, plus the Annex II facts (identification,
+  build ID scheme, true default open ports, security defaults, update procedure,
+  support/reporting status, deployment assumptions, components). Written to be
+  *honest rather than flattering* — a row reads "met" only where a path in the tree
+  demonstrates it, and the gaps carry the same evidence discipline as the wins.
+  Three factual corrections came out of writing them:
+  - **media-gateway :8000 is not bound** — only `comm_port + 1` (8001) is. The audit
+    table above and `docs/manual/quick-start.md:83` both overstated the exposure.
+  - **the documented media-gateway factory reset leaves the password in place** —
+    it deletes `gateway.conf`/`t1s.conf` but not `webauth.conf`, which is a separate
+    procedure in a different paragraph. A reset that retains the previous operator's
+    credentials does not satisfy Annex I #8, so row #8 for media-gateway is worse
+    than "⚠️ manual procedure documented" implied.
+  - **media-gateway has no version identifier at all** (no `VERSION`, no macro, no
+    `--version`, stripped binaries), so after 11 Sep 2026 we could not state which
+    builds an advisory covers. Annex II requires an identifying element; the SDK
+    build ID only counts if it is readable on the device. Recommended fix: stamp it
+    into both binaries and surface it in the console.
+  Also recorded: media-gateway has **no LICENSE file and no SPDX headers**, so the
+  SBOM lists our own components as UNDECLARED — needs an outbound-license decision.
+  Its test coverage is two pure-function host tests with no `make test` target and
+  **no coverage of the auth layer, CGIs, config writer or listeners**, which is the
+  weakest Annex I Part II §3 position of the two products.
+
 **Status 2026-07-31 (end of day):** all of the above is now **in a flashed firmware image
 and confirmed on hardware**. The console runs over HTTPS with a per-device certificate,
 plain HTTP is refused on the same port, and the OPC UA server runs Sign & Encrypt with
@@ -140,15 +183,20 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
 
 ## Default network exposure (Annex II facts, current truth)
 
+*Superseded by the per-product fact sheets (`docs/compliance/cra-annex2-facts.md`
+in each tree, 2026-08-06), which are verified against the listening code. Kept
+here as the cross-product summary.*
+
 - Platform (both, from shared rootfs): :22 sshd, :23 telnetd, :139/:445 Samba, adbd over USB, serial getty, root/`luckfox`.
-- Media Gateway: :80 web console, :8000/:8001 CAN↔Ethernet UDP/TCP (unauthenticated), br0 L2 bridge (T1S↔100BASE-TX).
+- Media Gateway: :80 web console (**HTTP-only, no TLS option exists**), **:8001** CAN↔Ethernet UDP-or-TCP (unauthenticated), br0 L2 bridge (T1S↔100BASE-TX) so both are reachable from either medium.
+  **Correction (2026-08-06): :8000 is NOT bound.** `can_gw_comm_port` defaults to 8000 but the socket binds `comm_port + 1` only (`src/can_gateway/can_gw.c:519`, `include/media_gateway.h:126-127`). The audit row above and `docs/manual/quick-start.md:83` both overstated the exposure.
 - SatiSense Edge: :8080 web console (https via stunnel opt-in), :4840 OPC UA (anonymous default); outbound only: Modbus TCP :502, EtherNet/IP scanner, MQTT :1883/:8883, LLM HTTPS.
 
 ## Action plan (agreed priority order)
 
-1. **Compliance matrix per product** — `docs/compliance/cra-annex1-matrix.md` in each tree, one row per requirement → status → evidence paths. Engineering input to Carl's technical file; update per release.
-2. **SBOM from the build** — wire Buildroot `make legal-info` into the image build + small hand manifest for app-layer deps (open62541, libmodbus, EIPScanner, stunnel, OpenSSL). Cheapest item; close first.
-3. **Annex II fact sheet per product** — version/build-ID scheme, ports table above, update procedure, deployment-assumption statement (matches ADR-107).
+1. ~~**Compliance matrix per product**~~ — **done 2026-08-06**, `docs/compliance/cra-annex1-matrix.md` in each tree. Keep updating per release, in the same commit as any change that moves a row.
+2. ~~**SBOM from the build**~~ — **done 2026-08-06**, `./build.sh sbom`. Regenerate per release and keep the output with the technical file.
+3. ~~**Annex II fact sheet per product**~~ — **done 2026-08-06**, `docs/compliance/cra-annex2-facts.md` in each tree. Re-verify per release; a stale fact sheet is worse than none because it gets copied verbatim.
 4. **Gap backlog with CRA dates as milestones**:
    a. strip telnetd/adbd/Samba + change root password in production images;
    b. signed firmware update path — flag to Carl per the doc;

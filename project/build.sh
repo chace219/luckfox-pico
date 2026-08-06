@@ -470,6 +470,7 @@ function usage() {
 	echo "save               -save images, patches, commands used to debug"
 	echo "check              -check the environment of building"
 	echo "info               -see the current board building information"
+	echo "sbom               -generate the CRA software bill of materials (add --reuse to skip legal-info)"
 	echo ""
 	echo "buildrootconfig    -config b	# EMMCuildroot and save defconfig"
 	echo "kernelconfig       -config kernel and save defconfig"
@@ -776,6 +777,19 @@ function build_media() {
 	echo "============Start building media============"
 
 	make -C ${SDK_MEDIA_DIR}
+
+	finish_build
+}
+
+function build_sbom() {
+	echo "============Start building SBOM (CRA Annex I Part II)============"
+
+	# Software Bill of Materials for the image just built: Buildroot's
+	# legal-info for the platform layer, merged with the hand-declared
+	# application layer from each product tree. Reporting only — it never
+	# touches the image, so it is safe to run before or after firmware pack.
+	# Needs a built sysdrv (it reads the Buildroot .config that made the image).
+	"$SDK_ROOT_DIR/scripts/compliance/gen-sbom.sh" "$@"
 
 	finish_build
 }
@@ -2846,6 +2860,10 @@ while [ $# -ne 0 ]; do
 	rootfs) option=build_rootfs ;;
 	media) option=build_media ;;
 	app) option=build_app ;;
+	sbom)
+		option="build_sbom ${@:2}"
+		break
+		;;
 	info) option=build_info ;;
 	tool) option=build_tool ;;
 	buildrootconfig) option=buildroot_config ;;
