@@ -172,6 +172,43 @@ hardware bench in the loop, not a release-time checkbox.
   **no coverage of the auth layer, CGIs, config writer or listeners**, which is the
   weakest Annex I Part II §3 position of the two products.
 
+- **2026-08-07 — Media Gateway, Annex I #8 (factory reset): implemented, and a
+  security-relevant documentation defect closed with it.** This was the worst row in
+  either product's matrix: there was no reset function at all, and the *documented*
+  manual procedure (`rm gateway.conf t1s.conf`) left `webauth.conf` in place — so the
+  previous operator's console password **survived a "factory reset"**, which is not a
+  return to a known-secure state. `media-gateway-factory-reset` now wipes config, the
+  credential, sessions **and our managed block in `/etc/dhcpcd.conf`** (a stale DHCP
+  policy must not outlive the config it was derived from, while lines the operator owns
+  are preserved), restores pristine copies staged read-only at
+  `/usr/share/media-gateway/factory`, and reboots. Reachable from the console
+  (**Configuration → Factory reset**, typed `RESET` + confirm, POST-only CGI that
+  re-checks the confirm phrase server-side) and over serial/SSH for a locked-out
+  operator — that second path is why the credential wipe belongs in the reset rather
+  than in a separate procedure. Ported from the SatiSense implementation as predicted,
+  including the path-prefix design that lets the *shipped* script be the *tested*
+  script: `tests/test_factory_reset.sh`, 19 checks, now running under a **new `make
+  test` target** (this tree previously had none — its two unit tests had to be compiled
+  by hand from command lines in their own headers, so they were easy to skip). The
+  credential-wipe check was verified to fail against a script reverted to the old
+  behaviour, so it guards the defect rather than merely passing.
+- **2026-08-07 — Media Gateway, Annex II documentation accuracy: the false
+  "no authentication" claim is gone.** `docs/manual/user-manual.md`'s specification
+  table claimed "No authentication (v1)" — untrue since the auth layer landed, and it
+  was baked into the on-device Help HTML *and* the customer PDF. The row now states the
+  sign-in requirement, salted-hash credential and 8-hour session while keeping the
+  honest limits (plain HTTP, unauthenticated CAN port, trusted-network deployment).
+  Also corrected: `docs/project-context.md`'s security section (now documents the
+  credential store, hash scheme, session model, HTTP limitation and the reset), and the
+  quick-start default-ports table that read as though :8000 were open. Markdown,
+  on-device HTML and all four PDFs regenerated together via
+  `node scripts/render-manual.mjs --pdf`; verified zero occurrences of
+  "No authentication" remain in any generated artifact.
+  **Row #8 in the gap table is now met for both products, and row #5's documentation
+  half is closed.** Still open for this product: HTTP-only console (no TLS option
+  exists at all), no version identifier, no LICENSE file, no security-event logging,
+  and no test coverage of the auth layer, config writer or listeners.
+
 **Status 2026-07-31 (end of day):** all of the above is now **in a flashed firmware image
 and confirmed on hardware**. The console runs over HTTPS with a per-device certificate,
 plain HTTP is refused on the same port, and the OPC UA server runs Sign & Encrypt with
@@ -200,7 +237,7 @@ here as the cross-product summary.*
 4. **Gap backlog with CRA dates as milestones**:
    a. strip telnetd/adbd/Samba + change root password in production images;
    b. signed firmware update path — flag to Carl per the doc;
-   c. factory-reset function (both products) — **SatiSense done 2026-08-06**, media-gateway open;
+   c. ~~factory-reset function (both products)~~ — **done: SatiSense 2026-08-06, media-gateway 2026-08-07**;
    d. security-event logging (`logger` calls in `webauth.sh` + config CGIs);
    e. encrypt-or-restrict secrets in `gateway.json` — **done (restrict) 2026-08-06**, see above;
    f. OpenSSL 1.1.1 migration plan.
