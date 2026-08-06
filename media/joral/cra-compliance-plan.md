@@ -254,6 +254,34 @@ hardware bench in the loop, not a release-time checkbox.
   and dangerous advice because hand-deleting config leaves credentials and certificates
   in place.
 
+- **2026-08-07 — both products, Annex II §2 (product identification): build ID in the
+  binaries.** media-gateway carried **no version identifier of any kind** (no `VERSION`,
+  no macro, no `--version`, stripped binaries) and SatiSense had none readable off a
+  running unit. That is a **reporting blocker**, not cosmetics: after 11 Sep 2026 an
+  advisory has to name the affected builds, and we could not have. Both trees now
+  compile `git describe --always --dirty --tags` into their binaries
+  (`MG_VERSION` / `IE_VERSION`), exposed three ways: `--version` (and `-V`), a startup
+  log line so a support bundle names the build, and the console — media-gateway's status
+  header via `status.sh`, SatiSense's topbar via `diagnostics.json`. In both cases the
+  console reads the value **from the running binary** rather than a hard-coded string,
+  so it can never report a version the binary is not. Derived from git rather than
+  hand-maintained because a hand-edited version is wrong the moment someone forgets to
+  bump it; `-dirty` is kept deliberately, and `make MG_VERSION=1.2.3` overrides for a
+  tagged release. Documented in both user manuals with an explicit "quote this when
+  checking whether an advisory applies".
+- **2026-08-07 — Media Gateway, Annex I #6 completed: CAN-path peer identity.**
+  `accept()` on the CAN-over-Ethernet port discarded the peer sockaddr, so the one
+  security-relevant event still unlogged after the console audit trail landed was *who
+  injected frames onto the bus*. It now logs `can_client_connect` /
+  `can_client_refused` / `can_client_disconnect` with `peer=ip:port`, storing the
+  address per client slot so the disconnect record can still name who left after the fd
+  is closed. Refusals are logged at warning priority — "client slots full" is also what
+  a trivial connection-exhaustion attempt against the CAN path looks like. This matters
+  more here than anywhere else on either product: reaching :8001 is equivalent to CAN
+  bus access and the port is unauthenticated by protocol design, so under the
+  trusted-network assumption this log is the **only** accountability that write path
+  has. **Row #6 is now met for both products.**
+
 **Status 2026-07-31 (end of day):** all of the above is now **in a flashed firmware image
 and confirmed on hardware**. The console runs over HTTPS with a per-device certificate,
 plain HTTP is refused on the same port, and the OPC UA server runs Sign & Encrypt with
