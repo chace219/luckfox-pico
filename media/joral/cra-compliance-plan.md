@@ -209,6 +209,51 @@ hardware bench in the loop, not a release-time checkbox.
   exists at all), no version identifier, no LICENSE file, no security-event logging,
   and no test coverage of the auth layer, config writer or listeners.
 
+- **2026-08-07 — both products, Annex I #6 (security-event logging): implemented.**
+  The last "zero logging" row. `audit_log <event> <result> <user> [k=v…]` lives in each
+  product's shared console auth library, so every CGI gets it by sourcing what it
+  already sourced, and the two implementations are **deliberately identical** (same
+  function names, same record format) so one log parser and one operator procedure
+  covers both. Recorded: login success/failure with the *attempted* username, logout,
+  password change success/failure, config save, service restart, certificate
+  generate/upload (SatiSense), factory reset including a refused one, and access to a
+  guarded endpoint with an invalid session. Each record carries event, result, user,
+  client address and event-specific fields.
+  Three findings shaped the design, none of them visible from the plan line
+  ("add `logger` calls"):
+  - **`logger` alone would not have satisfied the requirement.** `/var/log` is a
+    symlink to `/tmp`, which is **tmpfs** — the system log is RAM-only, so every
+    record dies on reboot and anyone can erase the trail by power-cycling the unit.
+    Records therefore go to syslog *and* to a durable 0600 file on the `/userdata`
+    ext4 partition, which also survives a factory reset of `/etc` (the reset
+    deliberately does not touch `/userdata`, and logs itself before running).
+    256 KB cap with one rotation generation — unbounded logging on embedded flash is
+    its own availability bug.
+  - **Log injection was a real hole.** Audit values are attacker-controlled (the
+    username on a failed login). A first cut flattened newlines but still let a
+    crafted username emit the literal text `result=success` inside the user field,
+    which a parser or a human scanning the log would read as a real outcome. The
+    principal field now also folds whitespace and `=`; the test that caught this is
+    in the suite.
+  - **Logging must never break the caller.** A password change or a factory reset
+    must not fail because `/userdata` is full or absent, so persistence is
+    best-effort and `audit_log` always returns success.
+  No secret is ever passed to the logger: a config save records a 12-char fingerprint
+  of the *persisted, secret-free* file instead of any content. Pinned by
+  `tests/test_audit_log.sh` in both trees (22 and 23 checks, in `make test`) —
+  including the no-secret contract asserted both against the helper and by grepping
+  the call sites for credential variables. Documented for operators in both user
+  manuals (markdown + on-device Help + PDFs regenerated).
+  **Row #6 moves from ❌ (both) to met for SatiSense and partial for media-gateway** —
+  the one remaining unlogged security event there is the CAN-gateway peer address,
+  which `accept()` currently discards; it matters because reaching :8001 is equivalent
+  to bus access. Also still open for both: nothing forwards the log off-device by
+  default and there is no in-console viewer.
+  While documenting this, found and fixed a **stale SatiSense manual procedure** that
+  still said "there is no reset button; delete gateway.json" — untrue since 2026-08-06,
+  and dangerous advice because hand-deleting config leaves credentials and certificates
+  in place.
+
 **Status 2026-07-31 (end of day):** all of the above is now **in a flashed firmware image
 and confirmed on hardware**. The console runs over HTTPS with a per-device certificate,
 plain HTTP is refused on the same port, and the OPC UA server runs Sign & Encrypt with
@@ -238,7 +283,7 @@ here as the cross-product summary.*
    a. strip telnetd/adbd/Samba + change root password in production images;
    b. signed firmware update path — flag to Carl per the doc;
    c. ~~factory-reset function (both products)~~ — **done: SatiSense 2026-08-06, media-gateway 2026-08-07**;
-   d. security-event logging (`logger` calls in `webauth.sh` + config CGIs);
+   d. ~~security-event logging~~ — **done 2026-08-07** (SatiSense met, media-gateway partial: CAN-gateway peer address still unlogged);
    e. encrypt-or-restrict secrets in `gateway.json` — **done (restrict) 2026-08-06**, see above;
    f. OpenSSL 1.1.1 migration plan.
 5. **Disclosure channel** — once Carl creates the security email alias, reference it in on-device Help + manuals via the `/help-docs` pipeline.
