@@ -317,7 +317,11 @@ hardware bench in the loop, not a release-time checkbox.
   CGI so the daemon is never involved. Verified: **zero** audit calls exist in the
   SatiSense C daemon, and media-gateway's three daemon-side records are per
   *connection*, never per frame.
-  Remaining on this row for both: no off-device forwarding by default.
+  Remaining on this row for both: no off-device forwarding by default — designed and
+  written up in [`audit-log-forwarding-plan.md`](audit-log-forwarding-plan.md), deferred
+  pending a product decision. That plan also records the strongest reason to do it: if
+  `/userdata` fails to mount, the vendor's `S20linkmount` reformats it, so an
+  on-device-only trail has a single point of failure we cannot fix in our own code.
 
 **Status 2026-07-31 (end of day):** all of the above is now **in a flashed firmware image
 and confirmed on hardware**. The console runs over HTTPS with a per-device certificate,
@@ -348,10 +352,19 @@ here as the cross-product summary.*
    a. strip telnetd/adbd/Samba + change root password in production images;
    b. signed firmware update path — flag to Carl per the doc;
    c. ~~factory-reset function (both products)~~ — **done: SatiSense 2026-08-06, media-gateway 2026-08-07**;
-   d. ~~security-event logging~~ — **done 2026-08-07** (SatiSense met, media-gateway partial: CAN-gateway peer address still unlogged);
+   d. ~~security-event logging~~ — **done 2026-08-07, met on both** (incl. CAN-gateway peer
+      identity and a console viewer); off-device export deferred, see item 5;
    e. encrypt-or-restrict secrets in `gateway.json` — **done (restrict) 2026-08-06**, see above;
    f. OpenSSL 1.1.1 migration plan.
-5. **Disclosure channel** — once Carl creates the security email alias, reference it in on-device Help + manuals via the `/help-docs` pipeline.
+5. **Audit log export / forwarding** — the one item left on Annex I #6. Design options,
+   requirements and a recommendation are written up in
+   [`audit-log-forwarding-plan.md`](audit-log-forwarding-plan.md); **deferred pending a
+   product decision on the delivery model** (push to syslog vs. let a collector pull).
+   Headline: busybox already has `CONFIG_FEATURE_REMOTE_LOG=y`, so opt-in
+   `syslogd -R` forwarding is a half-day change with no build impact — but a pull model
+   fits the isolated-control-network assumption better and reuses the console endpoint
+   that already exists.
+6. **Disclosure channel** — once Carl creates the security email alias, reference it in on-device Help + manuals via the `/help-docs` pipeline.
 
 Out of scope for engineering: CE marking, business classification, EU Declaration of
 Conformity (product/legal level).
