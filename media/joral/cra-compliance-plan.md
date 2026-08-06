@@ -254,6 +254,75 @@ hardware bench in the loop, not a release-time checkbox.
   and dangerous advice because hand-deleting config leaves credentials and certificates
   in place.
 
+- **2026-08-07 — both products, Annex II §2 (product identification): build ID in the
+  binaries.** media-gateway carried **no version identifier of any kind** (no `VERSION`,
+  no macro, no `--version`, stripped binaries) and SatiSense had none readable off a
+  running unit. That is a **reporting blocker**, not cosmetics: after 11 Sep 2026 an
+  advisory has to name the affected builds, and we could not have. Both trees now
+  compile `git describe --always --dirty --tags` into their binaries
+  (`MG_VERSION` / `IE_VERSION`), exposed three ways: `--version` (and `-V`), a startup
+  log line so a support bundle names the build, and the console — media-gateway's status
+  header via `status.sh`, SatiSense's topbar via `diagnostics.json`. In both cases the
+  console reads the value **from the running binary** rather than a hard-coded string,
+  so it can never report a version the binary is not. Derived from git rather than
+  hand-maintained because a hand-edited version is wrong the moment someone forgets to
+  bump it; `-dirty` is kept deliberately, and `make MG_VERSION=1.2.3` overrides for a
+  tagged release. Documented in both user manuals with an explicit "quote this when
+  checking whether an advisory applies".
+- **2026-08-07 — Media Gateway, Annex I #6 completed: CAN-path peer identity.**
+  `accept()` on the CAN-over-Ethernet port discarded the peer sockaddr, so the one
+  security-relevant event still unlogged after the console audit trail landed was *who
+  injected frames onto the bus*. It now logs `can_client_connect` /
+  `can_client_refused` / `can_client_disconnect` with `peer=ip:port`, storing the
+  address per client slot so the disconnect record can still name who left after the fd
+  is closed. Refusals are logged at warning priority — "client slots full" is also what
+  a trivial connection-exhaustion attempt against the CAN path looks like. This matters
+  more here than anywhere else on either product: reaching :8001 is equivalent to CAN
+  bus access and the port is unauthenticated by protocol design, so under the
+  trusted-network assumption this log is the **only** accountability that write path
+  has. **Row #6 is now met for both products.**
+
+- **2026-08-07 — both products, Annex I #6 hardened and made usable: console viewer,
+  bigger history, no silent loss.** Three things came out of working out what the
+  storage layout actually *is* rather than reading the code:
+  - **`logger` alone was never going to be enough, confirmed.** `/var/log` is a symlink
+    to `/tmp` (tmpfs), so the system log is RAM-only. The durable copy lives on
+    `/userdata` = **eMMC `/dev/mmcblk0p6`, 256 MB ext4**, mounted by
+    `/etc/init.d/S20linkmount` (generated at pack time from `RK_PARTITION_FS_TYPE_CFG`)
+    at S20 — before the product services at S39/S50/S60, so it is always available by
+    the time anything logs.
+  - **The 256 KB cap was a forensics weakness, not a storage choice.** Rotation
+    *evicts* history, so a single 256 KB generation (~2900 records) let an attacker
+    push their own earlier activity out of the log by generating failed logins — a
+    size limit doubling as an evidence-destruction primitive. Now 1 MB × 4 generations
+    (~45k records, **1.6% of a 256 MB partition** — the old cap used 0.1%), aged out so
+    only the oldest is discarded. With the existing 1-second penalty per failed login,
+    flooding is no longer practical.
+  - **A failed write was silent.** Persistence must stay best-effort (a password change
+    must not fail because the log cannot be written), but swallowing the error lets the
+    trail develop gaps nobody knows about. A failed append now emits
+    `audit_persist_failed` to syslog. This is not hypothetical: `/userdata` is shared
+    (`S50usbdevice` keeps `ums_shared.img` there), and **if the partition fails to
+    mount at boot the vendor's `S20linkmount` runs `mke2fs -F` and reformats it** —
+    which is the strongest argument yet for off-device collection rather than treating
+    the on-device log as the only copy.
+  **Console viewer** (the other half of the row): the log was readable only over
+  serial/SSH, which in practice meant it was never read. Now on SatiSense under
+  *Other → Utilities → Security event log* and on media-gateway on the Configuration
+  page. Built to cost the data plane nothing, which was the explicit requirement:
+  on-demand only (never on the 1 Hz diagnostics/status poll), `tail -n` so response
+  cost is bounded by lines requested rather than log size, `lines` clamped server-side
+  (default 200, max 2000) because it is attacker-controlled and streaming 4 MB through
+  a CGI on an RV1106 would be a DoS against the console, and it runs in a short-lived
+  CGI so the daemon is never involved. Verified: **zero** audit calls exist in the
+  SatiSense C daemon, and media-gateway's three daemon-side records are per
+  *connection*, never per frame.
+  Remaining on this row for both: no off-device forwarding by default — designed and
+  written up in [`audit-log-forwarding-plan.md`](audit-log-forwarding-plan.md), deferred
+  pending a product decision. That plan also records the strongest reason to do it: if
+  `/userdata` fails to mount, the vendor's `S20linkmount` reformats it, so an
+  on-device-only trail has a single point of failure we cannot fix in our own code.
+
 **Status 2026-07-31 (end of day):** all of the above is now **in a flashed firmware image
 and confirmed on hardware**. The console runs over HTTPS with a per-device certificate,
 plain HTTP is refused on the same port, and the OPC UA server runs Sign & Encrypt with
@@ -283,10 +352,19 @@ here as the cross-product summary.*
    a. strip telnetd/adbd/Samba + change root password in production images;
    b. signed firmware update path — flag to Carl per the doc;
    c. ~~factory-reset function (both products)~~ — **done: SatiSense 2026-08-06, media-gateway 2026-08-07**;
-   d. ~~security-event logging~~ — **done 2026-08-07** (SatiSense met, media-gateway partial: CAN-gateway peer address still unlogged);
+   d. ~~security-event logging~~ — **done 2026-08-07, met on both** (incl. CAN-gateway peer
+      identity and a console viewer); off-device export deferred, see item 5;
    e. encrypt-or-restrict secrets in `gateway.json` — **done (restrict) 2026-08-06**, see above;
    f. OpenSSL 1.1.1 migration plan.
-5. **Disclosure channel** — once Carl creates the security email alias, reference it in on-device Help + manuals via the `/help-docs` pipeline.
+5. **Audit log export / forwarding** — the one item left on Annex I #6. Design options,
+   requirements and a recommendation are written up in
+   [`audit-log-forwarding-plan.md`](audit-log-forwarding-plan.md); **deferred pending a
+   product decision on the delivery model** (push to syslog vs. let a collector pull).
+   Headline: busybox already has `CONFIG_FEATURE_REMOTE_LOG=y`, so opt-in
+   `syslogd -R` forwarding is a half-day change with no build impact — but a pull model
+   fits the isolated-control-network assumption better and reuses the console endpoint
+   that already exists.
+6. **Disclosure channel** — once Carl creates the security email alias, reference it in on-device Help + manuals via the `/help-docs` pipeline.
 
 Out of scope for engineering: CE marking, business classification, EU Declaration of
 Conformity (product/legal level).
