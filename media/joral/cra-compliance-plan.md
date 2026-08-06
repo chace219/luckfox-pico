@@ -227,8 +227,9 @@ hardware bench in the loop, not a release-time checkbox.
     Records therefore go to syslog *and* to a durable 0600 file on the `/userdata`
     ext4 partition, which also survives a factory reset of `/etc` (the reset
     deliberately does not touch `/userdata`, and logs itself before running).
-    256 KB cap with one rotation generation — unbounded logging on embedded flash is
-    its own availability bug.
+    1 MB per generation with 3 rotated generations kept (~45k records, ≤4 MB) —
+    unbounded logging on embedded flash is its own availability bug, but see the
+    cap-sizing note below for why the first attempt at this was too small.
   - **Log injection was a real hole.** Audit values are attacker-controlled (the
     username on a failed login). A first cut flattened newlines but still let a
     crafted username emit the literal text `result=success` inside the user field,
