@@ -35,7 +35,19 @@ ifeq ($(PKG_USE_THUMB2),YES)
 PKG_CONF_OPTS += -mthumb -Wa,-mimplicit-it=thumb -mthumb-interwork
 endif
 
-all: dep-openssl
+all: adbd-build
+	@mkdir -p $(PKG_BIN)/etc/init.d;
+	@cp -fa $(CURRENT_DIR)/S50usbdevice $(PKG_BIN)/etc/init.d;
+	$(call MAROC_COPY_PKG_TO_SYSDRV_OUTPUT, $(SYSDRV_DIR_OUT_ROOTFS), $(CURRENT_DIR)/$(PKG_BIN))
+
+# adbd is deliberately kept out of the image: it runs as root, ships with both
+# of its authentication paths inert, and listens on 0.0.0.0:5555 as well as USB.
+# S50usbdevice is still installed so the RNDIS gadget (usb0) keeps working.
+# Set PKG_ENABLE_ADBD=y to build it back for local debugging only.
+PKG_ENABLE_ADBD ?= n
+
+ifeq ($(PKG_ENABLE_ADBD),y)
+adbd-build: dep-openssl
 	@test -f $(PKG_INSTALL_BIN_DIR)/adbd || (\
 	rm -rf $(CURRENT_DIR)/$(PKG_NAME_ANDROID_TOOLS); \
 	tar -xf $(PKG_TARBALL_ANDROID_TOOLS); \
@@ -57,9 +69,11 @@ all: dep-openssl
 			cp -f $(CURRENT_DIR)/$(PKG_NAME_ANDROID_TOOLS)/$(PKG_BIN)/adbd $(PKG_INSTALL_BIN_DIR)/ ; \
 	popd; )
 	$(SYSDRV_CROSS)-strip -s $(PKG_INSTALL_BIN_DIR)/adbd ;
-	@mkdir -p $(PKG_BIN)/etc/init.d;
-	@cp -fa $(CURRENT_DIR)/S50usbdevice $(PKG_BIN)/etc/init.d;
-	$(call MAROC_COPY_PKG_TO_SYSDRV_OUTPUT, $(SYSDRV_DIR_OUT_ROOTFS), $(CURRENT_DIR)/$(PKG_BIN))
+else
+adbd-build:
+	@echo "android-tools: adbd disabled (PKG_ENABLE_ADBD=n), installing S50usbdevice only"
+	@rm -f $(PKG_INSTALL_BIN_DIR)/adbd
+endif
 
 dep-openssl:
 	$(MAKE) -C $(PKG_DEP_OPENSSL)

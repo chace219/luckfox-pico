@@ -118,7 +118,9 @@ BR2_PACKAGE_PPPD=y
 BR2_PACKAGE_PPPD_FILTER=y
 BR2_PACKAGE_PPPD_RADIUS=y
 BR2_PACKAGE_RSYNC=y
-BR2_PACKAGE_SAMBA4=y
+# samba removed: the shipped smb.conf exported [public] path=/ read-only=no
+# as root. Nothing in the product depends on smbd/nmbd.
+# BR2_PACKAGE_SAMBA4 is not set
 BR2_PACKAGE_SOCAT=y
 BR2_PACKAGE_WGET=y
 BR2_PACKAGE_BASH=y
