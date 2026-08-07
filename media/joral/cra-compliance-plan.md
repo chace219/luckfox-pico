@@ -87,6 +87,30 @@ hardware bench in the loop, not a release-time checkbox.
   listening. Verified against a stubbed-device harness across all five branches; the
   same harness reproduces the lockout on the pre-fix script.
 
+**Status 2026-07-31 (end of day):** all of the above is now **in a flashed firmware image
+and confirmed on hardware**. The console runs over HTTPS with a per-device certificate,
+plain HTTP is refused on the same port, and the OPC UA server runs Sign & Encrypt with
+username auth and an enforcing client trust list. Gap-table row #1 (secure by default)
+and row #3 (data confidentiality) improve materially for SatiSense Edge — though row #1
+is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the default
+`admin`/`joral` console credential is untouched. Remaining from this thread: MQTT TLS
+(TC-S3 leg c) has still never run, and the media-gateway console remains HTTP-only.
+
+- **2026-08-04 — SatiSense Edge, Annex I #3/#5 hardening (OPC UA PKI):** the OPC UA
+  client trust list only accepted pinned (self-signed) client certificates;
+  `core/opcua_security.c` now also validates CA-signed client certificates against a
+  CA in the trust folder (`8572479`). `core/certgen.c` binds the server certificate
+  to the device hostname instead of its IP address, so a DHCP lease change no longer
+  invalidates the certificate (`084c291`).
+- **2026-08-04 — SatiSense Edge, factory-reset enabler:** the image now ships a
+  factory-default `gateway.json` (`25b3d6c`) — the staging basis the 2026-08-06
+  factory-reset implementation below restores from.
+- **2026-08-05 — SatiSense Edge, TC-S3 leg c unblocked:** MQTT TLS PEMs can be
+  uploaded from the web console to fixed device paths (`9179e17`), and a CA
+  directory is now loaded as CApath rather than CAfile (`6da394d`). The MQTT TLS
+  bench leg — never yet executed on hardware — no longer requires shell access to
+  stage certificates.
+
 - **2026-08-06 — SatiSense Edge, Annex I #3 (data confidentiality): stored secrets
   no longer in gateway.json, and never served to the browser.** The three secrets
   (`mqtt.password`, `opcua.password`, `llm.api_key`) now live in a root-only 0600
@@ -324,14 +348,87 @@ hardware bench in the loop, not a release-time checkbox.
   `/userdata` fails to mount, the vendor's `S20linkmount` reformats it, so an
   on-device-only trail has a single point of failure we cannot fix in our own code.
 
-**Status 2026-07-31 (end of day):** all of the above is now **in a flashed firmware image
-and confirmed on hardware**. The console runs over HTTPS with a per-device certificate,
-plain HTTP is refused on the same port, and the OPC UA server runs Sign & Encrypt with
-username auth and an enforcing client trust list. Gap-table row #1 (secure by default)
-and row #3 (data confidentiality) improve materially for SatiSense Edge — though row #1
-is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the default
-`admin`/`joral` console credential is untouched. Remaining from this thread: MQTT TLS
-(TC-S3 leg c) has still never run, and the media-gateway console remains HTTP-only.
+- **2026-08-08 — Platform + SatiSense Edge, Annex I #1/#2/#3 (gap 4a and row #1):
+  BSP attack surface removed and secure defaults turned on. Confirmed on hardware
+  after a reflash.**
+
+  *Attack surface (luckfox-pico #12).* Four unauthenticated or near-unauthenticated
+  remote-access paths inherited from the Rockchip BSP are gone from the image:
+  **adbd** (ran as root with both auth paths inert — RSA auth gated on an unset
+  `ADBD_RSA_AUTH_ENABLE`, and `/usr/bin/adb_auth.sh` never installed — and listened
+  on `0.0.0.0:5555` as well as USB), **telnetd** (plaintext root shell on :23),
+  **Samba** (`smb.conf` exported `[public]` with `path = /`, `read only = no`, as
+  root), and the buildroot **stunnel** init script running the upstream Windows
+  *sample* config. The RNDIS gadget (`usb0`) is deliberately retained — it ships in
+  the same package as adbd — as is the stunnel binary, which the console needs.
+  MaskROM recovery and SocToolKit flashing are unaffected; only `adb reboot loader`
+  is lost.
+
+  *SSH.* `PermitRootLogin` moves from `yes` to `prohibit-password` and the image
+  ships a Joral **public** key. This decouples SSH from the root password rather
+  than changing it — the vendor default simply stops being reachable. No private
+  key material is distributed; see
+  [`image-ownership-and-ssh-key-plan.md`](image-ownership-and-ssh-key-plan.md) for
+  the customer-access policy still to be decided.
+
+  *Secure defaults (satisense-edge #39).* `opcua.security` now ships as
+  `signencrypt` and `web.tls` as `true`. Flipping the config alone would have been
+  worse than useless: `apply_secure()` falls back to plain `None` when no
+  certificate exists, so the config would have described a server that was not
+  encrypted. `S60intelligence-edge` therefore mints each unit's own server
+  certificate on first boot, mirroring what it already did for the console. Both
+  fall back rather than fail if a keygen breaks.
+
+  *Verified on hardware:* SSH accepts the key and refuses passwords; the console
+  requires HTTPS; OPC UA refuses `None` and connects under Sign&Encrypt.
+
+  *Known caveat, recorded deliberately:* `sshd` runs with `StrictModes no`, because
+  `build.sh` packs the rootfs with `mkfs.ext4 -d` and no `fakeroot`, so **every
+  inode in the image is owned by the build user (uid 1000)** — including `/`,
+  `/etc` and `/etc/shadow`. StrictModes can never pass. The larger risk is latent:
+  a service account added with an automatic UID lands at 1000 or above and would
+  own the entire root filesystem, which matters precisely because CRA hardening
+  pushes toward running daemons unprivileged. Planned in
+  [`image-ownership-and-ssh-key-plan.md`](image-ownership-and-ssh-key-plan.md).
+
+## Remaining work (verified against both trees 2026-08-07, refreshed 2026-08-08)
+
+The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) and
+gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
+
+1. **Disclosure channel** — *deadline-bound: reporting obligations start 11 Sep 2026,
+   ~5 weeks out, and apply to already-shipped units.* Blocked on Carl creating the
+   security email alias; once it exists, wiring it into manuals + on-device Help via
+   `/help-docs` is quick. The signed-firmware-update decision (4b) also sits with
+   Carl — raise both together.
+2. ~~**Attack surface (4a)**~~ — **largely done 2026-08-08**, see the status entry
+   below. telnetd, adbd and Samba are out of the image and root SSH login is
+   key-only. The root password itself is *unchanged* — still `luckfox` from
+   `BR2_TARGET_GENERIC_ROOT_PASSWD` — but it is no longer reachable over the
+   network. What is left on this row: the empty `/etc/iptables.conf` (the
+   firewall restores a 0-byte ruleset, and IPv6 is uncovered entirely).
+3. **Secure defaults (row #1)** — **closed for SatiSense Edge 2026-08-08**:
+   `opcua.security` ships as `signencrypt` and `web.tls` as `true`, both with
+   per-unit certificates minted on first boot. Still open: the default
+   `admin`/`joral` console credential on both products, and the media-gateway
+   console, which has no TLS option at all and is deliberately unchanged pending
+   a comparison against MACH production.
+4. **OpenSSL 1.1.1 migration plan (4f)** — none yet. The SBOM now auto-flags the
+   EOL component, so closure will be self-verifying.
+5. **CVE check as a release gate (row #2)** — feed the generated SBOM into a CVE
+   scan per release; the inventory exists as of 2026-08-06, the process does not.
+6. **Audit-log off-device forwarding** — the one item left on Annex I #6; designed
+   in `audit-log-forwarding-plan.md`, deferred pending a product decision (action
+   plan item 5).
+7. **Media-gateway loose ends from the matrix work** — no LICENSE file / SPDX
+   headers (needs an outbound-license decision; our own components show as
+   UNDECLARED in the SBOM), and no test coverage of the auth layer, CGIs, config
+   writer or listeners.
+8. **Hardware bench session** — TC-S3 leg c (MQTT TLS) has still never run
+   (unblocked 2026-08-05); the secrets-CGI path, factory reset and audit-log
+   viewer are so far validated off-device only and need a flashed-image pass.
+9. **Secrets at rest** — restricted (0600 sidecar) but not encrypted; accepted for
+   now, revisit with the OpenSSL 3 migration.
 
 ## Default network exposure (Annex II facts, current truth)
 
@@ -339,10 +436,22 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
 in each tree, 2026-08-06), which are verified against the listening code. Kept
 here as the cross-product summary.*
 
-- Platform (both, from shared rootfs): :22 sshd, :23 telnetd, :139/:445 Samba, adbd over USB, serial getty, root/`luckfox`.
+- Platform (both, from shared rootfs), **updated 2026-08-08**: :22 sshd (**key-only**,
+  `PermitRootLogin prohibit-password`), serial getty. **Removed from the image:** :23
+  telnetd, :139/:445 Samba, adbd (which also listened on **:5555 on all interfaces**,
+  not only over USB as stated previously), and the stray buildroot stunnel running the
+  upstream sample config. The root password remains `luckfox`
+  (`BR2_TARGET_GENERIC_ROOT_PASSWD`) but is no longer reachable over the network.
+  **Caveat:** `/etc/iptables.conf` is a 0-byte ruleset, so nothing is filtered on any
+  interface, and IPv6 is not covered at all — `ip6tables` exists but `S35iptables`
+  only calls `iptables-restore`.
 - Media Gateway: :80 web console (**HTTP-only, no TLS option exists**), **:8001** CAN↔Ethernet UDP-or-TCP (unauthenticated), br0 L2 bridge (T1S↔100BASE-TX) so both are reachable from either medium.
   **Correction (2026-08-06): :8000 is NOT bound.** `can_gw_comm_port` defaults to 8000 but the socket binds `comm_port + 1` only (`src/can_gateway/can_gw.c:519`, `include/media_gateway.h:126-127`). The audit row above and `docs/manual/quick-start.md:83` both overstated the exposure.
-- SatiSense Edge: :8080 web console (https via stunnel opt-in), :4840 OPC UA (anonymous default); outbound only: Modbus TCP :502, EtherNet/IP scanner, MQTT :1883/:8883, LLM HTTPS.
+- SatiSense Edge, **updated 2026-08-08**: :8080 web console (**https by default** via
+  stunnel, per-unit self-signed cert minted on first boot), :4840 OPC UA
+  (**`signencrypt` by default**, per-unit server cert minted on first boot; anonymous
+  sessions are still permitted — disabling that needs a credential to exist first);
+  outbound only: Modbus TCP :502, EtherNet/IP scanner, MQTT :1883/:8883, LLM HTTPS.
 
 ## Action plan (agreed priority order)
 
@@ -350,7 +459,8 @@ here as the cross-product summary.*
 2. ~~**SBOM from the build**~~ — **done 2026-08-06**, `./build.sh sbom`. Regenerate per release and keep the output with the technical file.
 3. ~~**Annex II fact sheet per product**~~ — **done 2026-08-06**, `docs/compliance/cra-annex2-facts.md` in each tree. Re-verify per release; a stale fact sheet is worse than none because it gets copied verbatim.
 4. **Gap backlog with CRA dates as milestones**:
-   a. strip telnetd/adbd/Samba + change root password in production images;
+   a. ~~strip telnetd/adbd/Samba~~ — **done 2026-08-08**; root password left unchanged
+      but made unreachable over SSH (key-only login). Firewall ruleset still empty;
    b. signed firmware update path — flag to Carl per the doc;
    c. ~~factory-reset function (both products)~~ — **done: SatiSense 2026-08-06, media-gateway 2026-08-07**;
    d. ~~security-event logging~~ — **done 2026-08-07, met on both** (incl. CAN-gateway peer
