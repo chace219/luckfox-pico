@@ -1,0 +1,14 @@
+# System-wide authorized keys for root (see sshd_config: AuthorizedKeysFile).
+#
+# Kept here rather than in /root/.ssh because the overlay is applied with
+# `rsync --chmod=u=rwX,go=rX`, which would rewrite /root from 0700 to 0755 as a
+# side effect. sshd's StrictModes only rejects keys that are group/world
+# WRITABLE, so the 0644 this file lands with is fine.
+#
+# sshd_config lists .ssh/authorized_keys first, so an operator can still add a
+# key to /root/.ssh on a live unit without rebuilding.
+#
+# Root login is key-only (PermitRootLogin prohibit-password). Emptying this
+# file without providing another key locks SSH out entirely - serial console
+# becomes the only way in.
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOIBo2UBvoBRauTbb2MLm3vbS0xUCAztMEvtNIxEXXwz chace0219@gmail.com
