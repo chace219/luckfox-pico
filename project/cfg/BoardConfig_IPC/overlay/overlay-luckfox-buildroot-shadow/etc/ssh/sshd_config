@@ -35,7 +35,22 @@
 # auth for it. That is what makes the BR2_TARGET_GENERIC_ROOT_PASSWD default
 # unreachable over the network. Recovery if the key is lost: serial console.
 PermitRootLogin prohibit-password
-#StrictModes yes
+# StrictModes must be off on this image, or the key above is silently ignored
+# and every login fails with "Server refused our key".
+#
+# The SDK builds rootfs.img with `mkfs.ext4 -d <staging-dir>` (see
+# output/out/sysdrv_out/pc/mkfs_ext4.sh) - no fakeroot, no device table - so
+# every inode keeps the build user's ownership. On a normal build host that is
+# uid 1000, and NOTHING in the image is root-owned, including /, /etc and
+# /etc/ssh. StrictModes checks the owner of the key file AND every directory on
+# its path, so it can never pass here.
+#
+# Turning it off is low-risk on this specific image: root is the only
+# login-capable account, and no process runs as uid 1000 because no such user
+# exists in /etc/passwd - so there is no principal that could tamper with the
+# key file that is not already root. The real fix is to make the image build
+# emit root-owned inodes; until then this is the honest setting.
+StrictModes no
 #MaxAuthTries 6
 #MaxSessions 10
 
