@@ -115,11 +115,23 @@ MD="$OUT_DIR/sbom-$STAMP.md"
 			gsub(/^"/,"",$1); gsub(/"$/,"",$6);
 			printf "\"platform\",\"%s\",\"%s\",\"%s\",\"%s\",\"buildroot package\"\n", $1, $2, $3, $6
 		}'
-	# Application layer, per product.
+	# Application layer, per product. First-party rows declare their VERSION as
+	# the token @PRODUCT_BUILD_ID@ and we substitute that product's own build
+	# identifier here — the same string the binary reports via --version and the
+	# console shows. Written this way round on purpose: the manifests stay
+	# declarative (no git in a checked-in CSV, nothing to forget to bump) and the
+	# git call lives in exactly one place.
+	#
+	# Before this, those rows read "unversioned — see SDK build ID", which was
+	# true when neither product had a version and is now simply wrong. An SBOM
+	# whose first-party components carry no version cannot answer the one
+	# question it exists to answer: is THIS unit affected by that advisory?
 	for p in "${PRODUCTS[@]}"; do
 		m="$SDK_DIR/$p/docs/compliance/app-manifest.csv"
 		if [ -f "$m" ]; then
-			tail -n +2 "$m" | grep -v '^[[:space:]]*$' || true
+			pid="$(git -C "$SDK_DIR/$p" describe --always --dirty --tags 2>/dev/null || echo unknown)"
+			tail -n +2 "$m" | grep -v '^[[:space:]]*$' | \
+				sed "s/@PRODUCT_BUILD_ID@/$pid/g" || true
 		else
 			echo "gen-sbom: WARNING no app-manifest.csv in $p — application-layer components for that product are MISSING from this SBOM" >&2
 		fi
