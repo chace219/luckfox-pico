@@ -452,6 +452,16 @@ here as the cross-product summary.*
   (**`signencrypt` by default**, per-unit server cert minted on first boot; anonymous
   sessions are still permitted — disabling that needs a credential to exist first);
   outbound only: Modbus TCP :502, EtherNet/IP scanner, MQTT :1883/:8883, LLM HTTPS.
+  **Both defaults degrade rather than fail** (a failed keygen leaves OPC UA on
+  SecurityPolicy None; a failed stunnel start leaves the console on plain HTTP), so
+  the console reports the mode the server **negotiated** rather than the one
+  configured, in red with the reason, and publishes both certificate fingerprints —
+  an operator can no longer be shown "encrypted" by a unit that is not
+  (satisense-edge #44/#46). First-use trust is the residual gap the self-signed
+  defaults create: the certificates prove nothing about *which* unit answered until
+  someone compares a fingerprint, so User Manual §2.1 documents that check
+  out-of-band (serial console `--cert-fingerprint`, or commissioning over a direct
+  link) for both the browser warning and an OPC UA client's trust prompt.
 
 ## Action plan (agreed priority order)
 
