@@ -483,8 +483,14 @@ here as the cross-product summary.*
       in `require_auth`, so it covers every guarded endpoint and a new endpoint
       inherits it — not in the console JavaScript, which would stop nobody able
       to call the CGI directly. A factory reset returns the unit to the gated
-      state. Verified on both products 2026-08-09: forced change on first login,
-      and again after a reset.
+      state. Verified on both products 2026-08-09, at both layers — the console
+      forces the change on first login and again after a reset, **and** a signed-in
+      factory session driven directly against the CGI (`curl` with the session
+      cookie, bypassing the browser entirely) is refused with
+      `403 {"code":"password_change_required"}` instead of being served the
+      configuration. The second half is the one that matters for this row: it is
+      the difference between a control and a screen, and it is the evidence to
+      cite if an assessor asks how the requirement is enforced.
       **Unlocks** disabling anonymous OPC UA sessions, which the Annex II sheet
       records as waiting on "a credential to exist first" — that is no longer
       true, so it is now a product decision rather than a blocker.
