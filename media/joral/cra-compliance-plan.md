@@ -19,7 +19,7 @@ product trees. Status column reflects the codebase as of commit `8cff5d0e9`.*
 
 | # | Annex I requirement | Media Gateway | SatiSense Edge |
 |---|---|---|---|
-| 1 | Secure by default | ⚠️ default `admin`/`joral` (`src/web/cgi-lib/webauth.sh`), HTTP-only console (`tls_on()` returns 1) | ⚠️ same default creds; OPC UA `security: none` default (`gateway.json`), web TLS off by default, stunnel init fails open (`scripts/init.d/S60intelligence-edge`) |
+| 1 | Secure by default | ⚠️ default credential **closed 2026-08-09** (forced change, enforced in `require_auth`); still **HTTP-only console** — no TLS option exists on this product | ✅ default credential closed 2026-08-09; OPC UA `signencrypt` + console HTTPS by default with per-unit certs (2026-08-08). Residual: both still degrade to an open endpoint if a keygen or stunnel fails (by design, availability trade — the console now reports it), and first-use trust rests on comparing a self-signed fingerprint |
 | 2 | No known CVEs at shipment | ⚠️ no CVE-check process; shared rootfs ships OpenSSL 1.1.1 (EOL, ADR-127) | same |
 | 3 | Data confidentiality/integrity | ✅ console pw salted-SHA-256; config plaintext but secret-free | ❌ MQTT pw + OPC UA pw + LLM API key plaintext in `gateway.json` (`core/config.c:1302,1333,1422`), served to browser by `web/cgi/api-config.sh:24` over plain HTTP |
 | 4 | Minimize attack surface | ❌ shared Luckfox rootfs boots telnetd, sshd, adbd, Samba; root pw `luckfox` (`luckfox_pico_defconfig:16`) | same (shared rootfs) |
@@ -476,7 +476,18 @@ here as the cross-product summary.*
    d. ~~security-event logging~~ — **done 2026-08-07, met on both** (incl. CAN-gateway peer
       identity and a console viewer); off-device export deferred, see item 5;
    e. encrypt-or-restrict secrets in `gateway.json` — **done (restrict) 2026-08-06**, see above;
-   f. OpenSSL 1.1.1 migration plan.
+   f. OpenSSL 1.1.1 migration plan;
+   g. ~~kill the shipped default console password (both products)~~ — **done
+      2026-08-09**, satisense-edge #48 / t1s-media-gateway #24. `admin`/`joral`
+      now buys a session that can do exactly one thing: change itself. Enforced
+      in `require_auth`, so it covers every guarded endpoint and a new endpoint
+      inherits it — not in the console JavaScript, which would stop nobody able
+      to call the CGI directly. A factory reset returns the unit to the gated
+      state. Verified on both products 2026-08-09: forced change on first login,
+      and again after a reset.
+      **Unlocks** disabling anonymous OPC UA sessions, which the Annex II sheet
+      records as waiting on "a credential to exist first" — that is no longer
+      true, so it is now a product decision rather than a blocker.
 5. **Audit log export / forwarding** — the one item left on Annex I #6. Design options,
    requirements and a recommendation are written up in
    [`audit-log-forwarding-plan.md`](audit-log-forwarding-plan.md); **deferred pending a
