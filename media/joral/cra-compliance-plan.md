@@ -391,16 +391,41 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   pushes toward running daemons unprivileged. Planned in
   [`image-ownership-and-ssh-key-plan.md`](image-ownership-and-ssh-key-plan.md).
 
-## Remaining work (verified against both trees 2026-08-07, refreshed 2026-08-08)
+- **2026-08-09 — both products, Annex I Part II §4–6 (disclosure channel): the
+  engineering half is done.** The address is decided — **`security@joralllc.com`**,
+  chosen over `psirt@` because RFC 2142 makes `security@` the address researchers
+  try unprompted, and a small vendor is found by convention, not by PSIRT branding
+  (recommendation: also create `psirt@` as a free alias to the same group). Wired
+  into both products: a *Reporting a security vulnerability* entry in each user
+  manual's maintenance section (media-gateway §8, SatiSense §12.3) telling the
+  operator what to include (build identifier, description, repro) and what never
+  to include (secrets), regenerated into the on-device Help HTML and all customer
+  PDFs; and a coordinated-disclosure policy as `SECURITY.md` in each tree —
+  report contents, response commitments (receipt confirmation, coordinated
+  disclosure date, plain-language fix notes naming affected builds, free
+  updates, credit), scope, and the documented deployment context as the severity
+  baseline. Matrix rows Part II §5/§6 move to **partial**: what is left is not
+  engineering — **the mailbox itself must be created** (Workspace group:
+  product management + at least one engineer, `psirt@` aliased in) and the
+  policy published on joralllc.com (`/.well-known/security.txt`). Until mail to
+  the address is actually received, the row is not "met", and the documents
+  must not ship to customers before the mailbox is live.
+
+## Remaining work (verified against both trees 2026-08-07, refreshed 2026-08-09)
 
 The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) and
 gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
 
 1. **Disclosure channel** — *deadline-bound: reporting obligations start 11 Sep 2026,
-   ~5 weeks out, and apply to already-shipped units.* Blocked on Carl creating the
-   security email alias; once it exists, wiring it into manuals + on-device Help via
-   `/help-docs` is quick. The signed-firmware-update decision (4b) also sits with
-   Carl — raise both together.
+   ~4.5 weeks out, and apply to already-shipped units.* **Engineering half done
+   2026-08-09** (see the dated entry above): `security@joralllc.com` is documented
+   in both manuals, the on-device Help, the customer PDFs and each tree's
+   `SECURITY.md`. What is left sits with Carl: **create the
+   `security@joralllc.com` Workspace group** (product management + at least one
+   engineer; alias `psirt@` to it), and publish the policy on joralllc.com
+   (`/.well-known/security.txt`). The signed-firmware-update decision (4b) also
+   sits with Carl — raise both together. The docs must not ship to customers
+   before the mailbox is live.
 2. ~~**Attack surface (4a)**~~ — **largely done 2026-08-08**, see the status entry
    below. telnetd, adbd and Samba are out of the image and root SSH login is
    key-only. The root password itself is *unchanged* — still `luckfox` from
@@ -502,7 +527,7 @@ here as the cross-product summary.*
    `syslogd -R` forwarding is a half-day change with no build impact — but a pull model
    fits the isolated-control-network assumption better and reuses the console endpoint
    that already exists.
-6. **Disclosure channel** — once Carl creates the security email alias, reference it in on-device Help + manuals via the `/help-docs` pipeline.
+6. **Disclosure channel** — **engineering half done 2026-08-09**: `security@joralllc.com` is referenced in both manuals, on-device Help, customer PDFs and each tree's `SECURITY.md`. Remaining (Carl): create the Workspace group and publish `/.well-known/security.txt` on joralllc.com.
 
 Out of scope for engineering: CE marking, business classification, EU Declaration of
 Conformity (product/legal level).
