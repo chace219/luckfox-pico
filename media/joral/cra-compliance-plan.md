@@ -19,7 +19,7 @@ product trees. Status column reflects the codebase as of commit `8cff5d0e9`.*
 
 | # | Annex I requirement | Media Gateway | SatiSense Edge |
 |---|---|---|---|
-| 1 | Secure by default | ⚠️ default `admin`/`joral` (`src/web/cgi-lib/webauth.sh`), HTTP-only console (`tls_on()` returns 1) | ⚠️ same default creds; OPC UA `security: none` default (`gateway.json`), web TLS off by default, stunnel init fails open (`scripts/init.d/S60intelligence-edge`) |
+| 1 | Secure by default | ✅ **closed 2026-08-09**: default credential replaced on first sign-in (enforced in `require_auth`), console over HTTPS on 443 with a per-unit certificate minted on first boot. Residual: falls back to plain HTTP if the certificate or stunnel fails (availability trade — the daemon publishes which it is serving, so session cookies stay correct), and first-use trust rests on a self-signed certificate | ✅ default credential closed 2026-08-09; OPC UA `signencrypt` + console HTTPS by default with per-unit certs (2026-08-08). Residual: both still degrade to an open endpoint if a keygen or stunnel fails (by design, availability trade — the console now reports it), and first-use trust rests on comparing a self-signed fingerprint |
 | 2 | No known CVEs at shipment | ⚠️ no CVE-check process; shared rootfs ships OpenSSL 1.1.1 (EOL, ADR-127) | same |
 | 3 | Data confidentiality/integrity | ✅ console pw salted-SHA-256; config plaintext but secret-free | ❌ MQTT pw + OPC UA pw + LLM API key plaintext in `gateway.json` (`core/config.c:1302,1333,1422`), served to browser by `web/cgi/api-config.sh:24` over plain HTTP |
 | 4 | Minimize attack surface | ❌ shared Luckfox rootfs boots telnetd, sshd, adbd, Samba; root pw `luckfox` (`luckfox_pico_defconfig:16`) | same (shared rootfs) |
@@ -501,7 +501,42 @@ here as the cross-product summary.*
    d. ~~security-event logging~~ — **done 2026-08-07, met on both** (incl. CAN-gateway peer
       identity and a console viewer); off-device export deferred, see item 5;
    e. encrypt-or-restrict secrets in `gateway.json` — **done (restrict) 2026-08-06**, see above;
-   f. OpenSSL 1.1.1 migration plan.
+   f. OpenSSL 1.1.1 migration plan;
+   g. ~~kill the shipped default console password (both products)~~ — **done
+      2026-08-09**, satisense-edge #48 / t1s-media-gateway #24. `admin`/`joral`
+      now buys a session that can do exactly one thing: change itself. Enforced
+      in `require_auth`, so it covers every guarded endpoint and a new endpoint
+      inherits it — not in the console JavaScript, which would stop nobody able
+      to call the CGI directly. A factory reset returns the unit to the gated
+      state. Verified on both products 2026-08-09, at both layers — the console
+      forces the change on first login and again after a reset, **and** a signed-in
+      factory session driven directly against the CGI (`curl` with the session
+      cookie, bypassing the browser entirely) is refused with
+      `403 {"code":"password_change_required"}` instead of being served the
+      configuration. The second half is the one that matters for this row: it is
+      the difference between a control and a screen, and it is the evidence to
+      cite if an assessor asks how the requirement is enforced.
+      **Unlocks** disabling anonymous OPC UA sessions, which the Annex II sheet
+      records as waiting on "a credential to exist first" — that is no longer
+      true, so it is now a product decision rather than a blocker.
+   h. ~~console TLS on media-gateway~~ — **done 2026-08-09**, t1s-media-gateway #25.
+      Ports the stunnel pattern satisense already runs: HTTPS on 443 with a
+      per-unit certificate minted on first boot, falling back to plain HTTP on the
+      same port rather than becoming unreachable. This closes row #1 on that
+      product — the credential half (4g) was meaningless while the sign-in and the
+      password change it forces still crossed the wire in the clear.
+      Review caught three defects worth recording, because each is a pattern
+      rather than a typo: (1) the fallback served plaintext while `tls_on()` still
+      read the CONFIGURED intent, so cookies stayed marked Secure, browsers
+      withheld them, and the fallback console became a sign-in loop — the same
+      "report negotiated, not configured" failure as satisense #44; (2) the
+      readiness probe accepted any listener on the port, so a squatter would have
+      been mistaken for our own TLS terminator; (3) certificates were checked for
+      existence rather than validity, so a truncated or mismatched pair pinned the
+      console to plaintext on every boot. All three verified fixed on hardware.
+      **Carry to satisense:** its init script has the same existence-only
+      certificate check, and `certgen_pair_valid()` is now a divergence between the
+      two vendored copies of `certgen.c`.
 5. **Audit log export / forwarding** — the one item left on Annex I #6. Design options,
    requirements and a recommendation are written up in
    [`audit-log-forwarding-plan.md`](audit-log-forwarding-plan.md); **deferred pending a
