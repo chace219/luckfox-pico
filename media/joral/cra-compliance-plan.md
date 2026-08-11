@@ -133,11 +133,16 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   and clears only via an explicit button. Contract pinned by 24 new checks in
   `tests/test_config_json.c` (`make test-config`), including sidecar mode 0600,
   no-secret-key-in-config, sentinel keep/replace/clear resolution, and
-  legacy-plaintext redaction. **Needs a reflash (or daemon update) to take
-  effect; validation of the CGI path on hardware is pending the next bench
-  session.** Remaining for row #3: secrets are restricted, not encrypted at rest
-  (no key store on this platform — accepted for now, revisit with the OpenSSL 3
-  migration).
+  legacy-plaintext redaction. **Bench-confirmed on the 2026-08-12 image**
+  (operator verification): a secret stored from the console lands in the 0600
+  sidecar, `gateway.json` stays secret-free, and the console API serves only
+  the `__SECRET_UNCHANGED__` sentinel. That closes the "validated off-device
+  only" caveat this entry originally carried — the automated suite pins the
+  contract, but only a flashed unit proves the CGI, the daemon and the
+  filesystem agree at runtime. Remaining for row #3: secrets are restricted,
+  not encrypted at rest (no key store on this platform — accepted for now; the
+  named revisit trigger, the OpenSSL 3 migration, fired 2026-08-12, so an
+  encrypted sidecar is now implementable and awaits a product decision).
 - **2026-08-06 — SatiSense Edge, Annex I #8 (factory reset): implemented.**
   `satisense-factory-reset` (installed to `/usr/sbin`) wipes every category of
   operator data — configuration, the secrets sidecar, the console login, all TLS
@@ -689,10 +694,22 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
     just-forked child is trivially alive, so the old check would have passed.
 
   Verified: clean cross-compile, and 10 new source-level regression assertions
-  across both suites, each confirmed to FAIL against the pre-fix code. **Still
-  bench-unverified — this is a boot-path change on hardware, and the reachability
-  claim it closes should be confirmed on a device** (`netstat -ltn` for a
-  loopback-only 18080/18081, and `http://<ip>:18081` refused).
+  across both suites, each confirmed to FAIL against the pre-fix code.
+  **Bench-confirmed 2026-08-12, both halves.** `http://<ip>:18081` is refused
+  from the network — though that flash also carried the new firewall, which
+  refuses the port regardless of where the backend bound, so the probe alone
+  could not isolate the bind. The isolating check was run on the device and
+  passes:
+
+      # netstat -ltn | grep 1808
+      tcp  0  0  127.0.0.1:18080  0.0.0.0:*  LISTEN
+      tcp  0  0  127.0.0.1:18081  0.0.0.0:*  LISTEN
+
+  Both backends are bound to loopback **only** — no `0.0.0.0` or `:::` line —
+  so the per-product port split (18080 satisense / 18081 media-gateway) and
+  the explicit bind spec are both live in the shipped image. The Annex I #6
+  and Annex II port rows on both products are now true of a flashed unit, with
+  the firewall as a second, independent control rather than the only one.
   **Bench 2026-08-12 (same day, see entry below): both consoles confirmed serving
   their own UI over HTTPS — the functional half of this fix.** The explicit
   loopback-reachability check (`netstat -ltn`, direct `http://<ip>:18081`
@@ -740,9 +757,21 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   a closure: concurrent sessions cannot be told apart by timestamp alone.
 
   Verified: 20 new assertions across both audit suites, the 4 behavioural ones
-  confirmed to FAIL against pre-fix code. **Bench-unverified.** **Annex I #6
-  should now read "attribution incomplete, correlatable via syslog" — it must
-  NOT be marked closed.**
+  confirmed to FAIL against pre-fix code. **Bench-confirmed on SatiSense
+  2026-08-12**: the durable trail on `/userdata/satisense/audit.log` carries a
+  full operator session — `login … default_password=true`, `password_change`,
+  `config_save` with `cfg_sha` fingerprints, `service_restart` — every record
+  attributed `src=unknown-via-tls`, none to the pre-fix false loopback
+  address. (The same pass first found the file *absent*: reflashing rewrites
+  the userdata partition, so a flash destroys the trail exactly as the
+  `S20linkmount` reformat would — recorded as a further argument for
+  off-device forwarding, item 6 of the remaining-work list.) Still to spot-check:
+  the same durable-file write on the media-gateway path
+  (`/userdata/media-gateway/audit.log`), and a failed-login record correlated
+  against stunnel's `accepted connection from <ip>` syslog line. **Annex I #6
+  still reads "attribution incomplete, correlatable via syslog" — the
+  sentinel is confirmed working, but it is by design not the operator's
+  address, so the row stays open.**
 
 - **2026-08-12 — both products, Annex I #2 (item 4f): the OpenSSL 1.1.1 → 3.5 LTS
   migration is implemented; the rebuild and verification are pending.** Full
@@ -813,6 +842,118 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   TLS), the secrets-CGI path, factory reset and the audit-log viewer on
   hardware.
 
+- **2026-08-12 — Platform (both products), Annex I #2 and #4: the CVE gate
+  PASSES (0 blocking, was 6), the firewall exists (IPv4 **and** IPv6,
+  default-deny), and the unscannable `wifi_app` binaries are dropped from the
+  build. All of it flashed and bench-confirmed the same day — see the
+  verification note at the end of this entry.**
+
+  *CVE gate to zero (item 5b/5c).* The 6 blocking findings that survived the
+  OpenSSL 3.5.7 migration are triaged with checkable evidence in
+  `cve-triage.csv`, none of them by waving: **busybox CVE-2022-48174** is fixed
+  upstream before 1.35 (we build 1.36.1) and matches only because the NVD
+  configuration carries no version bound; **libzlib CVE-2023-45853** is in
+  contrib/minizip, which `libzlib.mk` never compiles; **wget CVE-2026-58469**
+  is in metalink code that is only built `--with-metalink` against a
+  libmetalink Buildroot does not have; **libcurl CVE-2025-0725** requires zlib
+  ≤ 1.2.0.3 at runtime (image ships 1.2.13); **wget CVE-2024-38428** is real at
+  our version and is an *expiring* accepted-risk — GNU wget is invoked by
+  nothing in either tree (verified; busybox has its own applet), and the
+  resolution recorded is dropping the package at the next respin; **dhcpcd
+  CVE-2026-56116** is `fixed-pending-release`: `/etc/dhcpcd.conf` now sets
+  `ipv4only`, so the vulnerable RA parser can never receive input. The CPE
+  coverage gap closed the same day: all 19 remaining unmapped components were
+  resolved against the NVD CPE dictionary — exactly one (GNU nano) has an NVD
+  identity and is now queried; the other 18 are documented `CPE=NONE` rows
+  (Buildroot-internal skeletons, data-only ca-certificates, and projects NVD
+  has never issued against under any name — htop, bmon, can-utils, libiconv,
+  libdrm, libv4l, dialog/cdialog, GNU time, evtest, argp-standalone,
+  libpthread-stubs). **Gate result: 0 blocking, 74 monitor, 41 of 68
+  components checked + 27 with documented no-NVD-presence, exit 0.** The
+  compliance suite grew to 45 checks, all passing.
+
+  *Firewall (the largest single Annex I #4 item).* The board overlay
+  (`overlay-luckfox-buildroot-init`) now ships `/etc/iptables.conf`,
+  `/etc/ip6tables.conf`, an `S35iptables` override that loads **both** families
+  and reports a failed restore to syslog (the boot-legibility lesson from the
+  nginx period, applied), and the `ipv4only` dhcpcd.conf. Design points worth
+  recording: IPv4 INPUT is default-deny admitting only the ports the Annex II
+  fact sheets document (22, 443, 8080, 4840, 8001 TCP+UDP, mDNS 5353, DHCP
+  client 68, rate-limited ping, IGMP — the last so IGMP-snooping switches do
+  not prune mDNS); **IPv6 admits no service at all** — this closes a real gap,
+  since several daemons bind dual-stack and every console was silently
+  reachable over IPv6 link-local, outside anything the fact sheets stated. RAs
+  are dropped (no SLAAC) and NS/NA kept. FORWARD is DROP on both families,
+  which is safe for the media-gateway T1S bridge because
+  `CONFIG_BRIDGE_NETFILTER` is not built — verified in the kernel `.config`,
+  as was every match/target the rulesets use (conntrack, limit, icmp/icmp6 all
+  present as `=y` + the userspace extensions in the packed image). EtherNet/IP
+  implicit I/O (UDP 2222) is deliberately not opened; the rule ships
+  commented with instructions. The stock `S35iptables` `stop` had a lockout
+  bug waiting: it flushed rules without resetting policies — harmless with
+  empty chains, a total network cutoff with default-deny ones — so the
+  override resets policies to ACCEPT before flushing.
+
+  *wifi_app (item 5e): dropped, not declared.* The trigger was
+  `RK_ENABLE_WIFI=y` in the Ultra board config — with SSID/PSK still at the
+  BSP's literal `"Your wifi ssid"` placeholders, so the stack could never have
+  associated with anything. Now `n`; the stale `install_out`/`app_out`
+  payloads (hostapd 2.6, wpa_supplicant 2.6, dnsmasq, iperf, rkwifi_server +
+  libs) are cleared so a repack cannot resurrect them — the same
+  "Buildroot never uninstalls" failure mode as the package trim, one layer up.
+
+  **Bench-confirmed 2026-08-12 on a flashed unit**, and the checks were the
+  affirmative kind, not just "services still work" (an unfiltered unit answers
+  on the allowed ports identically to a filtered one, so service reachability
+  alone proves nothing about the filter):
+  - **both rulesets loaded** — `iptables -L` / `ip6tables -L` show the
+    default-deny chains on the device;
+  - **a blocked port probed and refused** from the network (`:18081`, the
+    console backend);
+  - **services confirmed through the filter** — OPC UA Sign&Encrypt from
+    UaExpert, console HTTPS, CAN, SSH;
+  - **wifi binaries absent** from `/usr/bin` on the flashed image, and the
+    unit **acquires its DHCP lease under `ipv4only`** (the dhcpcd
+    CVE-2026-56116 fix is therefore deployed and non-breaking).
+  One scope note: with the firewall active, the `:18081` refusal no longer
+  *isolates* the loopback-bind fix — the filter would refuse that port even if
+  the backend had bound every interface. The externally observable claim
+  (backend unreachable in the clear) is confirmed, with two independent
+  controls now behind it; `netstat -ltn` on the device remains the check that
+  would isolate the bind itself.
+
+- **2026-08-12 — correction to the defect-2 entry above: the forwarded-header
+  rule was itself a forgery vector, and it is removed. Both products.** Caught
+  by automated review (Greptile) on the two PRs, which scored them down for it
+  — and the finding survives scrutiny. The entry above reasoned that a
+  forwarded address could be trusted "only from loopback while TLS is on"
+  because the backend binds `127.0.0.1` and "nothing on the network can reach
+  httpd to forge the header", and called the branch "inert with stunnel 5.65".
+  Both claims were wrong the day they were written: **stunnel is a byte-level
+  tunnel** — it relays the remote client's HTTP request verbatim and neither
+  adds nor strips headers — so on exactly the loopback+TLS path,
+  `X-Forwarded-For` is *remote-client-supplied*. The branch was not inert; it
+  let any HTTPS client name an arbitrary `src=` for every audited action,
+  which is strictly worse than the loopback bug it replaced (an attacker
+  could frame a specific address instead of everything reading as the
+  device). Fixed in both trees: the header is **never consulted**; loopback
+  under TLS always records `unknown-via-tls`, and correlation stays via
+  stunnel's syslog peer line as designed. Trusting a forwarded address again
+  requires a terminator that both strips inbound copies and injects its own
+  (or PROXY protocol end-to-end) — a future console-architecture decision,
+  not a config tweak. Tests flipped accordingly (the two trust-codifying
+  assertions now assert the header is ignored) and confirmed to FAIL against
+  the pre-fix code. The same review also caught that the **satisense
+  plaintext last-resort still trusted a just-forked httpd pid** — the same
+  async-bind-failure race the TLS path already guarded ("the wait is
+  load-bearing"), unapplied to the fallback of last resort; it now polls the
+  port with the same loop shape, with two new guarding assertions.
+  *Method note: this is the second time in two days that reasoning about
+  this exact boundary was wrong in review-visible ways (2026-08-11's
+  satisense "forwarded-header handling" mis-credit, and now this). The
+  boundary — who supplied which bytes on the tunnel path — evidently needs
+  adversarial review, not authorship-time reasoning.*
+
 ## Remaining work (verified against both trees 2026-08-07, refreshed 2026-08-10)
 
 The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) and
@@ -833,16 +974,23 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    `S40bluetoothd`, `S30dbus`, `S99hciinit`, the `S99python` root-execution boot
    hook and 118 unused packages are out (08-10). The root password itself is
    *unchanged* — still `luckfox` from `BR2_TARGET_GENERIC_ROOT_PASSWD` — but it is
-   no longer reachable over the network. **What is left on this row: the empty
-   `/etc/iptables.conf`** (the firewall restores a 0-byte ruleset, and IPv6 is
-   uncovered entirely) — now the largest single item — plus the uid-1000 image
-   ownership problem, root CGIs, and the `wifi_app` binaries in 5e.
-3. **Secure defaults (row #1)** — **closed for SatiSense Edge 2026-08-08**:
-   `opcua.security` ships as `signencrypt` and `web.tls` as `true`, both with
-   per-unit certificates minted on first boot. Still open: the default
-   `admin`/`joral` console credential on both products, and the media-gateway
-   console, which has no TLS option at all and is deliberately unchanged pending
-   a comparison against MACH production.
+   no longer reachable over the network. **The firewall gap closed 2026-08-12
+   and is bench-confirmed on a flashed unit** (default-deny IPv4 + IPv6
+   rulesets in the board overlay; rules loaded, blocked-port probe refused,
+   services verified through the filter — see the dated entry above), and the
+   `wifi_app` binaries are dropped from the build and confirmed absent from
+   the flashed image the same day (5e). What is left on this row: the uid-1000
+   image ownership problem, root CGIs, and the root password *value*
+   (unreachable but unchanged).
+3. **Secure defaults (row #1)** — **closed on both products** *(text reconciled
+   2026-08-12 — this item had gone stale against action-plan items 4g/4h)*:
+   SatiSense ships `signencrypt` + `web.tls: true` (2026-08-08), the
+   media-gateway console runs HTTPS on 443 with a per-unit certificate
+   (2026-08-09, 4h), and the `admin`/`joral` credential buys only a forced
+   password change on both products (2026-08-09, 4g). Residual, not blocking:
+   first-use trust rests on self-signed fingerprints (documented out-of-band
+   check), and disabling anonymous OPC UA sessions is an unlocked product
+   decision.
 4. ~~**OpenSSL 1.1.1 migration (4f)**~~ — **done 2026-08-12, build-verified and
    bench-confirmed** (see the dated entry above and
    [`openssl-3-migration-plan.md`](openssl-3-migration-plan.md)): 3.5.7 LTS +
@@ -859,29 +1007,24 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       **Bench pass done 2026-08-12** — boot, console HTTPS on both products,
       OPC UA Sign&Encrypt, mDNS, CAN and the bench scripts all confirmed on
       hardware.
-   b. **Triage what remains** — **down to 6 as of 2026-08-12** (was 19; the 13
-      libopenssl findings closed with the 3.5.7 migration, item 4): wget ×2,
-      busybox, libzlib, libcurl and dhcpcd. All are components the products
-      use, so none can be removed; each needs a reachability decision or a
-      package bump. Decisions go in `scripts/compliance/cve-triage.csv` with a
-      `REVIEW_BY` date. **14 rows recorded**: expat ×8 (`not-affected`),
-      python3 ×5 (`accepted-risk`, bench tooling only), and CVE-2019-0190 ×1
-      (`not-affected` — Apache-httpd-only defect that NVD's CPE config matches
-      against any openssl version, added 2026-08-12). Two likely-quick wins
-      noted while triaging: libcurl CVE-2025-0725 only applies when linked
-      against zlib ≤ 1.2.0.3 (image ships 1.2.13), and libzlib CVE-2023-45853
-      is in MiniZip, which Buildroot's zlib package does not build — both look
-      like `not-affected` rows waiting on a source check.
-   c. **Close the coverage gap** — 28 components (was 56) have no CPE from any
-      source and are reported as NOT CHECKED; resolve with
-      `cve-check.py --suggest-cpe`.
-   e. **Declare or drop the prebuilt `wifi_app` binaries** — `hostapd`, `dnsmasq`,
-      three `wpa_supplicant` variants, `wpa_cli` ×2, `iperf`, `rkwifi_server` and
-      3 libraries ship into `/usr/bin` from `project/app/wifi_app/` via
-      `build.sh:1424`, outside Buildroot — so the SBOM and the gate are both blind
-      to them, and no init script starts them. Either add them to
-      `app-manifest.csv` with CPEs so the gate covers them, or stop copying them
-      into the rootfs. Found 2026-08-10.
+   b. ~~**Triage what remains**~~ — **done 2026-08-12, the gate PASSES (0
+      blocking)**, see the dated entry above. Both quick wins predicted here
+      survived the source check (minizip not built; zlib 1.2.13 vs the
+      ≤ 1.2.0.3 the curl finding needs); busybox and the second wget finding
+      fell to version/build facts; wget CVE-2024-38428 is the one *expiring*
+      accepted-risk (drop GNU wget at the next respin); dhcpcd is
+      `fixed-pending-release` via `ipv4only`. 20 triage rows total, first
+      expiries 2026-11.
+   c. ~~**Close the coverage gap**~~ — **done 2026-08-12**: all 19 remaining
+      unmapped components resolved against the NVD CPE dictionary (one real
+      CPE — GNU nano — and 18 documented `CPE=NONE` rows). 0 components are
+      now unmapped; the report's NOT CHECKED section is empty.
+   e. ~~**Declare or drop the prebuilt `wifi_app` binaries**~~ — **dropped
+      2026-08-12** (`RK_ENABLE_WIFI=n`, see the dated entry above): they were
+      never product function — the build config still carried the BSP's
+      placeholder Wi-Fi credentials. Stale copies cleared from every build
+      output; absence from the packed rootfs must be re-verified after the
+      next rebuild.
    d. **Kernel/U-Boot currency** — report-only today (5098 and 41 findings). The
       remediation is a vendor-base move, so it needs scoping against Rockchip's
       releases rather than triage.
@@ -895,15 +1038,23 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
 8. **Hardware bench session** — **partially done 2026-08-12** (see the dated
    entry above): the trimmed image boots and console HTTPS, OPC UA Sign&Encrypt,
    mDNS, CAN and the bench scripts are confirmed on hardware, so nothing
-   depended on the 118 removed packages. Still open, deferred by decision for
-   now: TC-S3 leg c (MQTT TLS, still never run — unblocked 2026-08-05), the
-   secrets-CGI path, factory reset and audit-log viewer on hardware, plus the
-   two explicit checks from the 2026-08-12 fixes (loopback-only backend binds
-   via `netstat -ltn`, audit-attribution records). **The OpenSSL 3 image is now
-   built and ready to flash** (`output/image/update.img`, 2026-08-12, item 4 —
-   build-verified, all tests green): flashing it adds re-validating console
-   TLS / stunnel handshakes and OPC UA Sign&Encrypt under open62541 1.3.15 /
-   OpenSSL 3.5.7 to this list.
+   depended on the 118 removed packages. **A repacked image carrying the
+   firewall, `ipv4only` and wifi_app removal was flashed and bench-confirmed
+   2026-08-12** (see the dated entry above): both rulesets loaded,
+   blocked-port probe refused, OPC UA Sign&Encrypt from UaExpert / console
+   HTTPS / CAN / SSH all through the filter, DHCP lease under `ipv4only`,
+   wifi binaries absent. **Also confirmed on that flash:** loopback-only
+   backend binds via `netstat -ltn` (127.0.0.1:18080 and :18081, no wildcard
+   line — the isolating check the firewalled `:18081` probe could not give),
+   factory reset on both products, the audit-log viewer, and the SatiSense
+   durable audit trail with `src=unknown-via-tls` attribution (full session
+   captured incl. `default_password=true` on first login — see the
+   attribution entry above), and the **secrets-CGI path** (sidecar 0600,
+   secret-free `gateway.json`, sentinel-only over the API). **Still open:**
+   TC-S3 leg c (MQTT TLS, never run — deferred by decision for now), the
+   media-gateway durable-audit spot-check, and a failed-login record
+   correlated against stunnel's peer line in syslog. With those three, the
+   bench backlog that accumulated since 2026-08-05 is cleared.
 9. **Secrets at rest** — restricted (0600 sidecar) but not encrypted; accepted
    for now. The named revisit trigger — the OpenSSL 3 migration — fired
    2026-08-12, so an encrypted sidecar is now implementable; pending a product
@@ -921,15 +1072,20 @@ here as the cross-product summary.*
   not only over USB as stated previously), and the stray buildroot stunnel running the
   upstream sample config (all 2026-08-08); plus `S40bluetoothd`, `S30dbus`,
   `S99hciinit` and the `S99python` root-execution boot hook (2026-08-10).
-  **Present but not started:** the prebuilt `wifi_app` binaries — `hostapd`,
-  `dnsmasq`, `wpa_supplicant` ×3, `wpa_cli` ×2, `iperf`, `rkwifi_server` — sit in
-  `/usr/bin` with no init script launching them. No listener, but they are in the
-  image and outside the SBOM (item 5e). The root password remains `luckfox`
-  (`BR2_TARGET_GENERIC_ROOT_PASSWD`) but is no longer reachable over the network.
-  **Caveat:** `/etc/iptables.conf` is a 0-byte ruleset, so nothing is filtered on any
-  interface, and IPv6 is not covered at all — `ip6tables` exists but `S35iptables`
-  only calls `iptables-restore`.
-- Media Gateway: :80 web console (**HTTP-only, no TLS option exists**), **:8001** CAN↔Ethernet UDP-or-TCP (unauthenticated), br0 L2 bridge (T1S↔100BASE-TX) so both are reachable from either medium.
+  **Dropped from the build 2026-08-12, confirmed absent on the flashed image**:
+  the prebuilt `wifi_app` binaries — `hostapd`, `dnsmasq`, `wpa_supplicant` ×3,
+  `wpa_cli` ×2, `iperf`, `rkwifi_server` — no longer install (`RK_ENABLE_WIFI=n`);
+  they sat in `/usr/bin` unstarted and invisible to the SBOM and the gate. The
+  root password remains `luckfox` (`BR2_TARGET_GENERIC_ROOT_PASSWD`) but is no
+  longer reachable over the network.
+  **Firewall (2026-08-12, bench-confirmed on a flashed unit):**
+  `/etc/iptables.conf` and `/etc/ip6tables.conf` ship default-deny INPUT
+  rulesets (documented service ports only on IPv4; nothing served over IPv6,
+  RAs dropped, `dhcpcd` runs `ipv4only`), loaded by an overridden `S35iptables`
+  that restores both families and logs a failed restore to syslog. Verified on
+  hardware: rules listed, blocked port refused, services reachable, DHCP lease
+  acquired. **Units flashed before 2026-08-12 still run unfiltered.**
+- Media Gateway, **updated 2026-08-12** *(the ":80 HTTP-only, no TLS option" wording here had gone stale against 4h)*: **:443** web console (HTTPS by default via stunnel since 2026-08-09, per-unit cert, plain-HTTP fallback on the same port; backend on 127.0.0.1:18081 only), **:8001** CAN↔Ethernet UDP-or-TCP (unauthenticated), br0 L2 bridge (T1S↔100BASE-TX) so both are reachable from either medium.
   **Correction (2026-08-06): :8000 is NOT bound.** `can_gw_comm_port` defaults to 8000 but the socket binds `comm_port + 1` only (`src/can_gateway/can_gw.c:519`, `include/media_gateway.h:126-127`). The audit row above and `docs/manual/quick-start.md:83` both overstated the exposure.
 - SatiSense Edge, **updated 2026-08-08**: :8080 web console (**https by default** via
   stunnel, per-unit self-signed cert minted on first boot), :4840 OPC UA

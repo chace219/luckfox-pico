@@ -26,11 +26,19 @@ Configuration page) and over serial/SSH. **Nothing leaves the device.**
 
 Not a nice-to-have; four concrete reasons, strongest first:
 
-1. **The platform can destroy the log without asking.** If `/userdata` fails to
-   mount at boot, the vendor's generated `/etc/init.d/S20linkmount` runs
-   `mke2fs -F` and **reformats the partition**. That is Rockchip SDK behaviour we
-   do not control. An on-device-only trail has a single point of failure that we
-   cannot fix in our own code — only a second copy elsewhere fixes it.
+1. **The platform can destroy the log without asking, and routine maintenance
+   already does.** If `/userdata` fails to mount at boot, the vendor's generated
+   `/etc/init.d/S20linkmount` runs `mke2fs -F` and **reformats the partition** —
+   Rockchip SDK behaviour we do not control. That was the theoretical case; the
+   observed one is more mundane and more frequent: **reflashing the unit rewrites
+   the userdata partition, so every firmware update erases the audit trail.**
+   Seen directly on 2026-08-12 — after flashing the firewall/OpenSSL image, the
+   bench unit's `/userdata/satisense/audit.log` was gone, and the pre-flash
+   history with it. A device whose trail cannot survive its own update process
+   has a single point of failure we cannot fix in our own code; only a second
+   copy elsewhere fixes it. Note the practical consequence for reporting: the
+   period *most* likely to be investigated after an incident — before the fix
+   was applied — is exactly the period an update destroys.
 2. **History is bounded.** ~45k records is generous for one unit, but a busy site
    or a sustained failed-login campaign will roll generations over. Anything
    older than the window is gone; a collector keeps it.
