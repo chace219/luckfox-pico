@@ -310,7 +310,28 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   more here than anywhere else on either product: reaching :8001 is equivalent to CAN
   bus access and the port is unauthenticated by protocol design, so under the
   trusted-network assumption this log is the **only** accountability that write path
-  has. **Row #6 is now met for both products.**
+  has. ~~**Row #6 is now met for both products.**~~
+
+  **Correction, 2026-08-12 (found in review of t1s-media-gateway #27):** that
+  closing sentence was wrong, and wrong in the direction that matters. The work
+  above instruments `accept()`, which exists only on the **TCP** path — but
+  `can_gw_proto=udp` is the shipped default (`src/main.c:84`,
+  `scripts/default/gateway.conf:33`). UDP is connectionless: no accept, no client
+  lifecycle, no record. `handle_udp_rx()` *does* receive the source address from
+  `recvfrom()` and uses it solely to suppress our own broadcast echo, so the
+  address is available and deliberately discarded. The consequence is precisely
+  the one this entry claimed to close: **on a factory-configured unit, the write
+  path equivalent to CAN bus access has no accountability at all.** Row #6 is
+  **partial** for media-gateway, not met. Interim mitigation is `can_gw_proto=tcp`
+  where accountability is required; the fix under consideration is a
+  first-seen-peer record backed by a small recent-source table, because
+  per-datagram logging would evict the entire audit history in seconds — the same
+  rotation-as-evidence-destruction failure as the original 256 KB cap.
+
+  *Worth recording as a review lesson:* this survived the original implementation,
+  its tests, the matrix write-up and a hardware bench pass, because every one of
+  them exercised the TCP path. A control verified only on a non-default
+  configuration has not been verified.
 
 - **2026-08-07 — both products, Annex I #6 hardened and made usable: console viewer,
   bigger history, no silent loss.** Three things came out of working out what the
@@ -1123,8 +1144,11 @@ here as the cross-product summary.*
       blocking. Firewall ruleset and the `wifi_app` prebuilt binaries remain;
    b. signed firmware update path — flag to Carl per the doc;
    c. ~~factory-reset function (both products)~~ — **done: SatiSense 2026-08-06, media-gateway 2026-08-07**;
-   d. ~~security-event logging~~ — **done 2026-08-07, met on both** (incl. CAN-gateway peer
-      identity and a console viewer); off-device export deferred, see item 5;
+   d. **security-event logging** — console layer and viewer **done 2026-08-07,
+      met on both**; CAN-gateway peer identity covers the **TCP path only**, and
+      UDP is the shipped default, so media-gateway row #6 is **partial** (found
+      in review 2026-08-12, see the correction above); off-device export
+      deferred, see item 5;
    e. encrypt-or-restrict secrets in `gateway.json` — **done (restrict) 2026-08-06**, see above;
    f. OpenSSL 1.1.1 migration plan — now also the largest single block of CVE
       findings in a component we actually use (13 at CVSS ≥ 7.0 as of 2026-08-09),
