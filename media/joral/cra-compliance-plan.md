@@ -693,6 +693,11 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   bench-unverified — this is a boot-path change on hardware, and the reachability
   claim it closes should be confirmed on a device** (`netstat -ltn` for a
   loopback-only 18080/18081, and `http://<ip>:18081` refused).
+  **Bench 2026-08-12 (same day, see entry below): both consoles confirmed serving
+  their own UI over HTTPS — the functional half of this fix.** The explicit
+  loopback-reachability check (`netstat -ltn`, direct `http://<ip>:18081`
+  refused) has still not been run; until it is, the Annex II port rows rest on
+  the source-level assertions rather than a device observation.
 
 - **2026-08-12 — defect 2: the false attribution is removed; the true identity
   is NOT yet inline. Partial close, and the scope was wider than recorded.**
@@ -739,6 +744,74 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   should now read "attribution incomplete, correlatable via syslog" — it must
   NOT be marked closed.**
 
+- **2026-08-12 — both products, Annex I #2 (item 4f): the OpenSSL 1.1.1 → 3.5 LTS
+  migration is implemented; the rebuild and verification are pending.** Full
+  write-up in [`openssl-3-migration-plan.md`](openssl-3-migration-plan.md);
+  headlines:
+  - **Target is 3.5.7 (LTS to 2030-04), not 3.0** — 3.0 goes EOL 2026-09-07,
+    four days before our reporting obligations begin; migrating onto it would
+    recreate the finding being closed.
+  - Scoping came back clean: 1.1.1v is *stock* Buildroot 2023.02 (verified
+    against the pristine tarball — not a Luckfox pin), **no Rockchip vendor blob
+    links libssl/libcrypto**, the `wifi_app` prebuilts carry their own static
+    crypto, no `openssl` CLI exists in the image, and our `certgen.c` was
+    already written against the 3.x-safe EVP API. Every consumer is rebuildable.
+  - Package recipes backported from buildroot 2025.08.x as tracked masters
+    (`sysdrv/tools/board/buildroot/{libopenssl,open62541}/`) with a copy step in
+    `sysdrv/Makefile`, following the `busybox.config` precedent; the seven
+    1.1.1-only patches are removed by that step. **open62541 goes v1.3.4 →
+    v1.3.15 in the same pass** — 1.3.4 predates OpenSSL 3 support in its series;
+    1.3.15 is the version upstream pairs with OpenSSL 3.x (recipe diff is the
+    version string alone).
+  - The 3.x recipe's algorithm-gating options default on, so no dependent
+    package (pppd's DES, python's BLAKE2) silently loses a feature and the
+    defconfig is untouched.
+  - Buildroot `output/` was wiped 2026-08-12 (the soname change makes the
+    never-uninstalls hazard worse than usual: an incremental build would ship
+    both libssl generations with consumers split between them), and both new
+    source tarballs are already downloaded and hash-verified in `dl/`.
+  - Verification is scripted: `scripts/compliance/verify-openssl3-migration.sh`
+    (no stale 1.1 linkage, old libs gone, daemons on `.so.3`, open62541 at
+    1.3.15, ADR-151 nginx leftovers gone), then `make test` in both product
+    trees, `./build.sh sbom` (the EOL flag clears itself) and `./build.sh cve`
+    (13 of 19 blocking findings should resolve). Hardware bench items fold into
+    the pending bench session (item 8), which now also re-validates OPC UA
+    Sign&Encrypt under open62541 1.3.15.
+
+  **Build + verification completed 2026-08-12** (image `update.img` built from
+  `v1.0.0-66-g2d4b29958-dirty`). Two build-fallout items, both fixed and
+  recorded in the migration doc: pppd 2.4.9's EAP-TLS needs the OpenSSL ENGINE
+  API (3.x builds without it — disabled via a tracked `pppd.mk` overlay; no
+  product uses PPP EAP-TLS, MSCHAP keeps OpenSSL DES), and **the live buildroot
+  tree was still building the ADR-151 nginx** because defconfigs are only
+  copied at extract time — the revert never reached the built tree, and this
+  run had already installed 20 files including an `S50nginx` init script (all
+  purged; masters re-synced). Verification: all five image checks pass, both
+  product suites green, SBOM reports **libopenssl 3.5.7 supported branch**
+  (51 platform components), CVE gate **19 → 6 blocking** — every libopenssl
+  1.1.1 finding resolved; one new match against 3.5.7 (CVE-2019-0190) is an
+  Apache-httpd-only false positive, triaged `not-affected` with the CPE-config
+  evidence. The remaining 6 (busybox, libzlib, wget ×2, libcurl, dhcpcd) are
+  the pre-existing item-5b set. **Hardware-confirmed the same day**: the
+  flashed image serves the console over HTTPS by default and establishes an
+  OPC UA Sign&Encrypt session under open62541 1.3.15 / OpenSSL 3.5.7, so
+  row #2's OpenSSL resolution is bench-backed. MQTT TLS (TC-S3 leg c) has
+  still never run on any stack and stays with item 8.
+
+- **2026-08-12 — hardware bench (partial): the trimmed image is confirmed on
+  hardware.** The package-trimmed image was flashed and verified on a device:
+  boot, console **HTTPS on both products** (each serving its own console — the
+  functional confirmation the same-day port-collision fix was waiting on),
+  OPC UA **Sign&Encrypt**, mDNS (`satisense.local` still published with avahi
+  running without dbus), CAN, and the on-device bench scripts (the reason
+  python3 was kept). That closes the bench caveat on the 2026-08-10 trim:
+  **nothing either product depends on was among the 118 removed packages.**
+  Not run this session, so still open from the two 2026-08-12 fix entries
+  above: the explicit loopback-bind check (`netstat -ltn` showing 18080/18081
+  on 127.0.0.1 only, a direct `http://<ip>:18081` refused) and the
+  audit-attribution records. Deferred by decision for now: TC-S3 leg c (MQTT
+  TLS), the secrets-CGI path, factory reset and the audit-log viewer on
+  hardware.
 
 ## Remaining work (verified against both trees 2026-08-07, refreshed 2026-08-10)
 
@@ -770,23 +843,35 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    `admin`/`joral` console credential on both products, and the media-gateway
    console, which has no TLS option at all and is deliberately unchanged pending
    a comparison against MACH production.
-4. **OpenSSL 1.1.1 migration plan (4f)** — none yet. The SBOM now auto-flags the
-   EOL component, so closure will be self-verifying.
+4. ~~**OpenSSL 1.1.1 migration (4f)**~~ — **done 2026-08-12, build-verified and
+   bench-confirmed** (see the dated entry above and
+   [`openssl-3-migration-plan.md`](openssl-3-migration-plan.md)): 3.5.7 LTS +
+   open62541 1.3.15, image rebuilt clean, all verification checks pass, SBOM
+   shows "supported branch", CVE gate 19 → 6 blocking with libopenssl clean,
+   and the migrated TLS surfaces (default console HTTPS, OPC UA Sign&Encrypt)
+   confirmed on flashed hardware. MQTT TLS remains with item 8, as before.
 5. ~~**CVE check as a release gate (row #2)**~~ — **process done 2026-08-09**,
    `./build.sh cve` (see the dated entry above). What the first run leaves open, in
    priority order:
    a. ~~**Trim the BSP defconfig**~~ — **done 2026-08-10**, see the dated entry
       above. 118 packages removed, image rebuilt clean, **100 blocking → 19**,
       zero CISA-KEV. avahi kept as intended (expat only, not glib or python).
-      **Still needs the bench pass** (item 8) — the image is verified but not yet
-      run on hardware.
-   b. **Triage what remains** — the 19 are libopenssl (13, folded into the EOL
-      migration in item 4 below), wget (2), busybox, libzlib, libcurl and dhcpcd.
-      All are components the products use, so none can be removed; each needs a
-      reachability decision or a package bump. Decisions go in
-      `scripts/compliance/cve-triage.csv` with a `REVIEW_BY` date. **13 rows
-      already recorded 2026-08-10**: expat ×8 (`not-affected`, evidence in the
-      avahi source) and python3 ×5 (`accepted-risk`, bench tooling only).
+      **Bench pass done 2026-08-12** — boot, console HTTPS on both products,
+      OPC UA Sign&Encrypt, mDNS, CAN and the bench scripts all confirmed on
+      hardware.
+   b. **Triage what remains** — **down to 6 as of 2026-08-12** (was 19; the 13
+      libopenssl findings closed with the 3.5.7 migration, item 4): wget ×2,
+      busybox, libzlib, libcurl and dhcpcd. All are components the products
+      use, so none can be removed; each needs a reachability decision or a
+      package bump. Decisions go in `scripts/compliance/cve-triage.csv` with a
+      `REVIEW_BY` date. **14 rows recorded**: expat ×8 (`not-affected`),
+      python3 ×5 (`accepted-risk`, bench tooling only), and CVE-2019-0190 ×1
+      (`not-affected` — Apache-httpd-only defect that NVD's CPE config matches
+      against any openssl version, added 2026-08-12). Two likely-quick wins
+      noted while triaging: libcurl CVE-2025-0725 only applies when linked
+      against zlib ≤ 1.2.0.3 (image ships 1.2.13), and libzlib CVE-2023-45853
+      is in MiniZip, which Buildroot's zlib package does not build — both look
+      like `not-affected` rows waiting on a source check.
    c. **Close the coverage gap** — 28 components (was 56) have no CPE from any
       source and are reported as NOT CHECKED; resolve with
       `cve-check.py --suggest-cpe`.
@@ -807,16 +892,22 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    headers (needs an outbound-license decision; our own components show as
    UNDECLARED in the SBOM), and no test coverage of the auth layer, CGIs, config
    writer or listeners.
-8. **Hardware bench session** — *now the highest-value item.* TC-S3 leg c (MQTT
-   TLS) has still never run (unblocked 2026-08-05); the secrets-CGI path, factory
-   reset and audit-log viewer are validated off-device only. **And as of
-   2026-08-10 the image itself is 118 packages lighter**, so this pass must also
-   confirm nothing depended on what was removed — boot, console over HTTPS, OPC UA
-   Sign&Encrypt, mDNS (`satisense.local` — avahi lost dbus in the trim), CAN, and
-   the bench scripts themselves, which are why python3 was kept. A firmware image
-   is built and ready to flash (`output/image/update.img`, 2026-08-10).
-9. **Secrets at rest** — restricted (0600 sidecar) but not encrypted; accepted for
-   now, revisit with the OpenSSL 3 migration.
+8. **Hardware bench session** — **partially done 2026-08-12** (see the dated
+   entry above): the trimmed image boots and console HTTPS, OPC UA Sign&Encrypt,
+   mDNS, CAN and the bench scripts are confirmed on hardware, so nothing
+   depended on the 118 removed packages. Still open, deferred by decision for
+   now: TC-S3 leg c (MQTT TLS, still never run — unblocked 2026-08-05), the
+   secrets-CGI path, factory reset and audit-log viewer on hardware, plus the
+   two explicit checks from the 2026-08-12 fixes (loopback-only backend binds
+   via `netstat -ltn`, audit-attribution records). **The OpenSSL 3 image is now
+   built and ready to flash** (`output/image/update.img`, 2026-08-12, item 4 —
+   build-verified, all tests green): flashing it adds re-validating console
+   TLS / stunnel handshakes and OPC UA Sign&Encrypt under open62541 1.3.15 /
+   OpenSSL 3.5.7 to this list.
+9. **Secrets at rest** — restricted (0600 sidecar) but not encrypted; accepted
+   for now. The named revisit trigger — the OpenSSL 3 migration — fired
+   2026-08-12, so an encrypted sidecar is now implementable; pending a product
+   decision.
 
 ## Default network exposure (Annex II facts, current truth)
 
