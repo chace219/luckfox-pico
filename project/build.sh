@@ -471,6 +471,7 @@ function usage() {
 	echo "check              -check the environment of building"
 	echo "info               -see the current board building information"
 	echo "sbom               -generate the CRA software bill of materials (add --reuse to skip legal-info)"
+	echo "cve                -check image components against NVD; fails on unaccepted findings (add --offline for cache only)"
 	echo ""
 	echo "buildrootconfig    -config b	# EMMCuildroot and save defconfig"
 	echo "kernelconfig       -config kernel and save defconfig"
@@ -790,6 +791,33 @@ function build_sbom() {
 	# touches the image, so it is safe to run before or after firmware pack.
 	# Needs a built sysdrv (it reads the Buildroot .config that made the image).
 	"$SDK_ROOT_DIR/scripts/compliance/gen-sbom.sh" "$@"
+
+	finish_build
+}
+
+function build_cve() {
+	echo "============Start CVE check (CRA Annex I Part I #2)============"
+
+	# The gate half of the SBOM: check every component of the image against
+	# published advisories and fail the release if an unaccepted one is found.
+	# Reporting only — it never touches the image. Needs a built sysdrv (it
+	# reads the same Buildroot .config the SBOM does).
+	#
+	# Deliberately NOT hidden behind finish_build's success path: the exit
+	# status IS the gate, so it has to reach the caller. `|| rc=$?` keeps the
+	# real exit code while stopping `set -eE`/`trap ERR` from aborting before
+	# the pointer to the report is printed — a failing gate has to say where to
+	# look. (`if ! cmd; then rc=$?` would NOT work here: inside the branch, $?
+	# is the status of `! cmd`, i.e. 0 for a failing check.)
+	local rc=0
+	"$SDK_ROOT_DIR/scripts/compliance/cve-check.py" "$@" || rc=$?
+
+	if [ $rc -ne 0 ]; then
+		echo "============CVE check FAILED (exit $rc)============"
+		echo "See output/compliance/cve-report-*.md. Fix the component, or record"
+		echo "a dated decision in scripts/compliance/cve-triage.csv."
+		exit $rc
+	fi
 
 	finish_build
 }
@@ -2862,6 +2890,10 @@ while [ $# -ne 0 ]; do
 	app) option=build_app ;;
 	sbom)
 		option="build_sbom ${@:2}"
+		break
+		;;
+	cve)
+		option="build_cve ${@:2}"
 		break
 		;;
 	info) option=build_info ;;
