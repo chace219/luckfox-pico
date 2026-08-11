@@ -657,6 +657,88 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   to the stunnel path this revert restores, which discards its output the same
   way.
 
+- **2026-08-12 — defect 1 above is CLOSED, and it was hiding a third defect: the
+  two products were serving each other's consoles.**
+
+  Reported from a browser: `https://<ip>:8080` — satisense-edge's console port —
+  returned the **media-gateway** UI. Root cause is defect 1 plus a shared port.
+  Both products terminate TLS with their own stunnel in front of their own
+  busybox httpd, and both backends were on **18080**. media-gateway starts first
+  (S50 vs S60) and, because of defect 1's bare `-p`, bound it on *every*
+  interface; satisense's backend then died silently on `EADDRINUSE`
+  (`start-stop-daemon -b` reports the fork, not the outcome), and satisense's
+  stunnel bound :8080 and forwarded to whatever owned 18080 — the other product.
+  Both init paths then reported a clean start, because each verified only that
+  its **public** port was listening, which its own stunnel satisfied either way.
+
+  Fixed in both trees:
+  - **Explicit loopback bind** — `start_httpd()` now takes a bind *spec* and the
+    TLS path passes `127.0.0.1:<port>`. This is what closes defect 1: the
+    backend is no longer reachable in the clear from the network, so **both
+    products' Annex I #6 and Annex II port rows are now true of the shipped
+    image.** The plaintext path still passes a bare port, deliberately.
+  - **Per-product backend ports** — satisense keeps 18080, media-gateway moves to
+    **18081**. Both constants carry a comment naming the other product, since
+    neither tree can see the other and nothing else would catch a future clash.
+  - **Backend liveness** — readiness now requires *our* httpd **and** *our*
+    stunnel **and** the public port, and the backend is confirmed **before**
+    stunnel is started, so a misrouting proxy is never stood up rather than
+    unwound afterwards. Both fall back to plaintext and say which half failed;
+    the last-resort plaintext path reports a console that could not bind instead
+    of assuming it came up. Note the wait before the check is load-bearing — a
+    just-forked child is trivially alive, so the old check would have passed.
+
+  Verified: clean cross-compile, and 10 new source-level regression assertions
+  across both suites, each confirmed to FAIL against the pre-fix code. **Still
+  bench-unverified — this is a boot-path change on hardware, and the reachability
+  claim it closes should be confirmed on a device** (`netstat -ltn` for a
+  loopback-only 18080/18081, and `http://<ip>:18081` refused).
+
+- **2026-08-12 — defect 2: the false attribution is removed; the true identity
+  is NOT yet inline. Partial close, and the scope was wider than recorded.**
+
+  **Correction to the 2026-08-11 entry: this is not a media-gateway-only defect.**
+  That entry credited satisense with "forwarded-header handling at the time" —
+  that handling belonged to the withdrawn ADR-151 nginx and went away with the
+  revert. Both products' `_audit_principal` are byte-identical today, and
+  satisense ships `web.tls: true`, so **both** log every console action as
+  loopback. The Annex I §6 trail names the wrong principal on both products.
+
+  **Why it cannot simply be fixed with a forwarded header:** stunnel 5.65 — the
+  version in the image — *cannot* add `X-Forwarded-For`. It is an unimplemented
+  entry in the shipped `TODO.md`, not a config option. stunnel can emit PROXY
+  protocol (`protocol = proxy`), but busybox 1.36.1 httpd cannot consume it
+  (`FEATURE_HTTPD_PROXY` is an outbound reverse-proxy feature, unrelated). So
+  inline attribution needs one of: patching busybox httpd, a PROXY-aware shim,
+  TPROXY (`transparent = source`, needing kernel + iptables work), or a
+  different terminator — which is ADR-151, withdrawn. All are production-
+  affecting; none were taken.
+
+  **What was done instead, in both trees** (`_audit_src()` in `webauth.sh`):
+  - **Stop asserting a falsehood.** Loopback while TLS is on is recorded as
+    `src=unknown-via-tls` — deliberately not an address, so no reader mistakes
+    it for the operator. This is the part that was actually wrong: the old
+    record was not merely incomplete, it was *confidently incorrect*.
+  - **Trust a forwarded address only from our own terminator** — loopback AND
+    TLS on. The backend binds `127.0.0.1` exclusively on that path (closed the
+    same day, above), so nothing on the network can reach httpd to forge it.
+    On the plaintext path httpd owns the public port and the header is ignored,
+    because there it is attacker-supplied. This is inert with stunnel 5.65 and
+    becomes live the moment any terminator supplies the header.
+  - Forwarded values still pass `_audit_principal`, so they cannot forge fields.
+
+  **The true peer identity already exists on the device:** stunnel logs
+  `Service [web] accepted connection from <ip>:<port>` at LOG_NOTICE, and
+  `log_syslog` defaults to on, so it is in syslog today on both products. The
+  audit trail is therefore **correlatable by timestamp** rather than
+  self-contained. That is a real limitation to state in the Annex II sheet, not
+  a closure: concurrent sessions cannot be told apart by timestamp alone.
+
+  Verified: 20 new assertions across both audit suites, the 4 behavioural ones
+  confirmed to FAIL against pre-fix code. **Bench-unverified.** **Annex I #6
+  should now read "attribution incomplete, correlatable via syslog" — it must
+  NOT be marked closed.**
+
 
 ## Remaining work (verified against both trees 2026-08-07, refreshed 2026-08-10)
 
