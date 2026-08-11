@@ -1,0 +1,3 @@
+# Bytecode from running cve-check.py / test-cve-check.py in place.
+__pycache__/
+*.pyc

@@ -471,6 +471,7 @@ function usage() {
 	echo "check              -check the environment of building"
 	echo "info               -see the current board building information"
 	echo "sbom               -generate the CRA software bill of materials (add --reuse to skip legal-info)"
+	echo "cve                -check image components against NVD; fails on unaccepted findings (add --offline for cache only)"
 	echo ""
 	echo "buildrootconfig    -config b	# EMMCuildroot and save defconfig"
 	echo "kernelconfig       -config kernel and save defconfig"
@@ -776,6 +777,20 @@ function build_env() {
 function build_media() {
 	echo "============Start building media============"
 
+	# Purge the media staging tree first. media/Makefile clears its own
+	# RK_MEDIA_OUTPUT, but the copy into RK_PROJECT_PATH_MEDIA is ADDITIVE, so
+	# anything a previous build installed there survives and is packed into the
+	# image even when it is no longer built.
+	#
+	# That is not theoretical: a build that stopped installing a component left
+	# the previous build's copy — daemon, init scripts, web root — staged and
+	# packed into the image, so the unit still ran software the source tree no
+	# longer produced (observed 2026-08-11). Same class of trap as Buildroot
+	# never uninstalling a deselected package: the tree is not the image.
+	if [ -n "$RK_PROJECT_PATH_MEDIA" ]; then
+		rm -rf "$RK_PROJECT_PATH_MEDIA"
+	fi
+
 	make -C ${SDK_MEDIA_DIR}
 
 	finish_build
@@ -790,6 +805,33 @@ function build_sbom() {
 	# touches the image, so it is safe to run before or after firmware pack.
 	# Needs a built sysdrv (it reads the Buildroot .config that made the image).
 	"$SDK_ROOT_DIR/scripts/compliance/gen-sbom.sh" "$@"
+
+	finish_build
+}
+
+function build_cve() {
+	echo "============Start CVE check (CRA Annex I Part I #2)============"
+
+	# The gate half of the SBOM: check every component of the image against
+	# published advisories and fail the release if an unaccepted one is found.
+	# Reporting only — it never touches the image. Needs a built sysdrv (it
+	# reads the same Buildroot .config the SBOM does).
+	#
+	# Deliberately NOT hidden behind finish_build's success path: the exit
+	# status IS the gate, so it has to reach the caller. `|| rc=$?` keeps the
+	# real exit code while stopping `set -eE`/`trap ERR` from aborting before
+	# the pointer to the report is printed — a failing gate has to say where to
+	# look. (`if ! cmd; then rc=$?` would NOT work here: inside the branch, $?
+	# is the status of `! cmd`, i.e. 0 for a failing check.)
+	local rc=0
+	"$SDK_ROOT_DIR/scripts/compliance/cve-check.py" "$@" || rc=$?
+
+	if [ $rc -ne 0 ]; then
+		echo "============CVE check FAILED (exit $rc)============"
+		echo "See output/compliance/cve-report-*.md. Fix the component, or record"
+		echo "a dated decision in scripts/compliance/cve-triage.csv."
+		exit $rc
+	fi
 
 	finish_build
 }
@@ -2862,6 +2904,10 @@ while [ $# -ne 0 ]; do
 	app) option=build_app ;;
 	sbom)
 		option="build_sbom ${@:2}"
+		break
+		;;
+	cve)
+		option="build_cve ${@:2}"
 		break
 		;;
 	info) option=build_info ;;
