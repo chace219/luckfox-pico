@@ -777,6 +777,20 @@ function build_env() {
 function build_media() {
 	echo "============Start building media============"
 
+	# Purge the media staging tree first. media/Makefile clears its own
+	# RK_MEDIA_OUTPUT, but the copy into RK_PROJECT_PATH_MEDIA is ADDITIVE, so
+	# anything a previous build installed there survives and is packed into the
+	# image even when it is no longer built.
+	#
+	# That is not theoretical: a build that stopped installing a component left
+	# the previous build's copy — daemon, init scripts, web root — staged and
+	# packed into the image, so the unit still ran software the source tree no
+	# longer produced (observed 2026-08-11). Same class of trap as Buildroot
+	# never uninstalling a deselected package: the tree is not the image.
+	if [ -n "$RK_PROJECT_PATH_MEDIA" ]; then
+		rm -rf "$RK_PROJECT_PATH_MEDIA"
+	fi
+
 	make -C ${SDK_MEDIA_DIR}
 
 	finish_build

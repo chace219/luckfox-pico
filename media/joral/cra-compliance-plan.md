@@ -411,7 +411,254 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   the address is actually received, the row is not "met", and the documents
   must not ship to customers before the mailbox is live.
 
-## Remaining work (verified against both trees 2026-08-07, refreshed 2026-08-09)
+- **2026-08-09 — both products, Annex I Part I §2 / Part II §2 (CVE screening): the
+  release gate exists, and its first run says the image is not shippable as it
+  stands.** `./build.sh cve` → `scripts/compliance/cve-check.py`, the companion to
+  the SBOM: the SBOM says what is in the image, this says what is known to be wrong
+  with it, and both derive their component list from the same Buildroot `.config` so
+  they cannot describe different images. Exit status *is* the gate — 0 clean, 1
+  blocking findings, **2 the check could not be completed**, which is a deliberate
+  third state so a CI job can tell "we found problems" from "we learned nothing".
+  Documented in `scripts/compliance/README.md`; 39 contract tests in
+  `scripts/compliance/test-cve-check.py` (no network — `--offline` reads only the
+  cache, which makes the cache the test seam), each confirmed to fail against a
+  checker mutated back to the wrong behaviour.
+
+  Four things came out of building it that were not visible from the plan line
+  ("feed the SBOM into a CVE check"):
+  - **Buildroot's own CVE checker is dead in this tree.** `support/scripts/cve.py`
+    downloads NVD's JSON 1.1 data feeds, which NIST retired — the URLs answer
+    **403** now, so `make pkg-stats` cannot produce CVE data at all. The gate uses
+    the NVD 2.0 REST API and lets NVD resolve version ranges server-side
+    (`virtualMatchString`), which is the part a hand-rolled matcher gets subtly
+    wrong.
+  - **Component identity is Buildroot's, not ours.** `make show-info` emits the
+    resolved `cpe-id` for each package *at the version actually built*, plus any
+    `<PKG>_IGNORE_CVES` upstream recorded — so there is no name→CPE table to
+    maintain and rot. 73 of the 130 target packages carry one. The other 57 are
+    reported as **NOT CHECKED, by name**, never counted as clean; that honesty is
+    the difference between a gate and a rubber stamp.
+  - **The kernel, U-Boot and the Rockchip SDK are not Buildroot packages**, so a
+    package-list-driven check would have omitted the largest components in the
+    image entirely. `cpe-extra.csv` adds them. The kernel matches **5098** NVD
+    records (1683 at CVSS ≥ 7.0) and U-Boot 2017.09 matches 41 — which is why they
+    are `MODE=report-only`: a vendor kernel is remediated by moving its base, not
+    by dispositioning five thousand records against a version we do not control.
+    Counted and listed, never blocking, so the decision to treat them differently
+    is visible instead of implicit.
+  - **Triage carries an expiry date.** A finding stops blocking only via a row in
+    `cve-triage.csv` with a decision, a checkable justification, an owner and a
+    `REVIEW_BY` date; past that date it blocks again, and a malformed row is
+    rejected rather than ignored. An unexpiring allowlist turns "accepted for now"
+    into "forgotten", which is the exact failure "without delay" is aimed at.
+
+  **First run (2026-08-09, build `v1.0.0-61-g6ba7406eb`): 100 blocking, 120 below
+  threshold, 15 suppressed by Buildroot's own `ignore_cves`, 76 of 141 components
+  checked.** Two findings to act on by name: **CVE-2025-27363 in freetype 2.12.1**
+  is the one entry in **CISA KEV** — an out-of-bounds write in font subglyph
+  parsing, i.e. known-exploited, which is precisely the wording Annex I Part I §2
+  uses — and **CVE-2025-54349 in iperf3 3.14** scores **10.0**.
+
+  **The result that changes the remediation order: 73 of the 100 blocking findings
+  are in packages neither product needs.** They are inherited from the Luckfox BSP
+  defconfig, and `show-info`'s reverse-dependency data says exactly why each is
+  present: ffmpeg (**23 findings**) only because **mpv** is selected; python-pillow
+  (13); libglib2 (14) and python3 (5), which come from the unused
+  bluez/pulseaudio/dbus-python/dbus-glib stack — `avahi.mk` links both only *if
+  they happen to be enabled* (`ifeq ($(BR2_PACKAGE_LIBGLIB2),y)`, and it configures
+  `--disable-glib --disable-python` without them), so mDNS does not hold them in;
+  freetype (the KEV) via harfbuzz/libass/python-pillow/sdl2_ttf; and rsync (7),
+  p7zip, python-werkzeug, iperf3, lrzsz, zip and python-setuptools selected
+  **directly in the defconfig**. Verified against both product trees: no
+  dbus/bluetoothd/pulseaudio reference in either product's runtime code or init
+  scripts, no PIL import, and no invocation of ffmpeg/mpv/rsync/7z/madplay.
+
+  **8 more (expat) cannot be removed**: both avahi-daemon and dbus require it, and
+  avahi is *deliberate* — it was added 2026-08-04 (ADR-147, satisense-edge #30) to
+  publish `satisense.local` so the OPC UA server certificate's DNS SANs survive a
+  DHCP lease change. That is the one place where a security control we added last
+  week is itself the reason a CVE surface stays; it belongs in the triage file with
+  that reasoning, not in the removal list.
+
+  Only **19** findings sit in components the products actually use — libopenssl (13,
+  already tracked as the EOL migration), busybox, libcurl (the LLM client), libzlib,
+  dhcpcd and busybox-selected wget.
+
+  So the cheapest path to closing row #2 is **not** 100 triage rows: it is trimming
+  the defconfig, which removes ~80% of the blocking findings and narrows Annex I #4
+  at the same time (avahi is network-facing mDNS on :5353). This is the same
+  defconfig-inheritance problem as telnetd/adbd/Samba on 2026-08-08 — the BSP ships
+  a media/desktop package set for camera/IPC products, and ours use almost none of
+  it. Recorded as the next item rather than done, because removing packages from a
+  shared rootfs needs a build-and-bench pass on both products, not just a
+  `.config` edit.
+
+  **Row #2 therefore moves from ❌ (no process) to "process in place, findings
+  open"** for both products — the machinery is closed, the image is not clean, and
+  the gate now says so on every run. Also recorded as a coverage gap: 56 components
+  have no CPE from any source (mostly `python-*` and leaf libraries), listed by name
+  in every report; `cve-check.py --suggest-cpe` resolves candidates against the NVD
+  CPE dictionary and Buildroot's `make missing-cpe` can upstream the mapping.
+
+- **2026-08-10 — both products, Annex I #4: two more BSP leftovers found while
+  refreshing the compliance matrices against the *built* image** (rather than
+  against the tree, which is how both had been checked before):
+  - **`S99python` executes `/root/main.py` — or `/root/boot.py` — as root at every
+    boot** if the file exists. It is a Luckfox convenience feature for their
+    MicroPython-style demos and has no place in a product image: it is an
+    unauthenticated, persistent root code-execution hook that no product component
+    uses. It also compounds the uid-1000 image-ownership caveat already recorded in
+    [`image-ownership-and-ssh-key-plan.md`](image-ownership-and-ssh-key-plan.md) —
+    `/root` is owned by uid 1000 in the packed image, so write access as that uid
+    becomes root execution on the next boot.
+  - **`S40bluetoothd` starts a root Bluetooth daemon, with `S99hciinit`** attaching
+    an HCI UART when an `aic8800` module is present. Neither product has any
+    Bluetooth function. `bluetoothd` runs regardless of whether the radio attaches.
+  Both are in the current image (`output/out/rootfs_uclibc_rv1106/etc/init.d/`,
+  built 2026-08-09), i.e. *after* the 2026-08-08 hardening — that pass removed
+  network daemons (telnetd, adbd, Samba, the stray stunnel) and did not look at
+  locally-started ones. Folded into gap item 4a with the package trim, since it is
+  the same defconfig-inheritance root cause and the same build-and-bench pass.
+
+  Method note worth keeping: both were invisible to every previous review because
+  the matrices were checked against the source tree. Checking the **packed rootfs**
+  found them in minutes. Annex I #4 should be re-verified against the image, not
+  the tree, at each release.
+
+- **2026-08-10 — correction to the 2026-08-09 CVE entry.** That entry, and the row
+  it created in both product matrices, said "~81 of the 100 blocking findings are in
+  packages neither product uses" and listed **avahi** among the unused. That was
+  wrong: avahi is deliberate — added 2026-08-04 (ADR-147, satisense-edge #30) to
+  publish `satisense.local` so the OPC UA certificate's DNS SANs survive a DHCP
+  lease change. The corrected split is **73 removable / 8 held in by avahi / 19 in
+  components we use**: avahi-daemon and dbus both require **expat** (8 findings), but
+  `avahi.mk` links libglib2 and python3 only *if they are already enabled*
+  (`ifeq ($(BR2_PACKAGE_LIBGLIB2),y)`, configuring `--disable-glib --disable-python`
+  otherwise), so those 19 findings are held in by the unused
+  bluez/pulseaudio/dbus-python stack and not by mDNS. The plan text and both
+  matrices are corrected.
+
+- **2026-08-10 — Platform (both products), Annex I #2 and #4: the BSP package set
+  is trimmed and the image rebuilt. The CVE gate goes from 100 blocking findings
+  to 19, and the only known-exploited component is gone.**
+
+  `luckfox_pico_w_defconfig` now deselects the media/desktop package set the
+  Luckfox BSP ships for camera and MicroPython demo boards: **339 → 221 config
+  entries, 118 packages removed, none added.** mpv was the root of most of it —
+  it pulled ffmpeg (23 findings), sdl2, and libass → harfbuzz → **freetype**,
+  which carried the image's only CISA-KEV entry (CVE-2025-27363). Also out:
+  bluez5_utils, pulseaudio, jack2, sox, madplay, ALSA, iperf3 (the CVSS 10.0),
+  iperf, rsync, lrzsz, p7zip, zip, and every third-party python module
+  (pillow, werkzeug, setuptools, aiohttp, …) with their ~15 transitive deps.
+
+  Deselecting `bluez5_utils` also removed **dbus** and **libglib2**, which only it
+  and pulseaudio held in — confirming the 2026-08-10 correction above: avahi
+  needs expat, not glib or python.
+
+  *Three things this pass established that the plan line ("trim the defconfig")
+  did not anticipate:*
+  - **A config edit alone would have changed nothing.** Buildroot never
+    *uninstalls* a package: deselecting mpv stops it being built, but its files
+    stay in `output/target` from the previous build and ride into the image. The
+    trim only became real by clearing `output/` and rebuilding from empty. Any
+    future package removal needs the same, and the verification has to be against
+    the packed rootfs — checking the tree would have shown a clean result either
+    way.
+  - **python3 is not what the 2026-08-09 entry said it was.** It is not held in by
+    the dbus stack; it is selected directly, and the on-device bench tooling
+    (`satisense-edge/scripts/bench/*.py` — how TC-S3 and the commissioning gates
+    are actually executed against a flashed image) needs it. Removing it in the
+    same pass would have meant validating an image we do not ship. The
+    interpreter is kept and its 5 findings are recorded as a dated
+    `accepted-risk`, with dropping it and running bench tooling from a separate
+    test image as the stated end state. The `S99python` boot hook was removed the
+    same day, so nothing invokes it at runtime.
+  - **The expat decision is now evidence-backed rather than asserted.** Verified
+    in avahi-0.8: expat is included only by `avahi-daemon/static-services.c`,
+    which parses `AVAHI_SERVICE_DIR "/*.service"` (static-services.c:904) —
+    root-owned local files. mDNS wire packets are decoded by avahi's own record
+    parser, never by expat, so no network input reaches the vulnerable code.
+    Recorded as 8 `not-affected` rows rather than an accepted risk.
+
+  Removed in the same pass, from the board overlay: **`S99python`** (executed
+  `/root/main.py` as root at every boot) and **`S99hciinit`**. `S40bluetoothd`
+  and `S30dbus` left with their packages. All four verified absent from the
+  packed rootfs, along with mpv, ffmpeg, iperf3, rsync, 7z, zip, and the
+  libav*/SDL2/freetype/harfbuzz/glib/dbus/asound/pulse libraries.
+
+  **Gate result (build `v1.0.0-61-g6ba7406eb`, 2026-08-10): 19 blocking** (was
+  100), 80 monitor (was 120), 13 suppressed by triage, 15 by Buildroot's own
+  `ignore_cves`; 40 of 68 components checked (was 76 of 141), so the unchecked
+  count falls from 56 to 28. **Zero CISA-KEV entries.** The 19 that remain are
+  exactly the set the 2026-08-09 entry predicted — **libopenssl ×13, wget ×2,
+  busybox, libzlib, libcurl, dhcpcd** — all components the products genuinely
+  use, so none can be removed. 13 of 19 are the OpenSSL 1.1.1 migration, which
+  makes item 4 below *the* remaining item on row #2 rather than one of several.
+
+  *New finding, from checking the packed image rather than the tree:*
+  **10 prebuilt vendor binaries ship in `/usr/bin` that neither the SBOM nor the
+  CVE gate can see.** `project/app/wifi_app/` copies three `wpa_supplicant`
+  variants, `wpa_cli` ×2, **`hostapd`**, **`dnsmasq`**, `iperf` and
+  `rkwifi_server` (plus 3 libraries) into the rootfs via `build.sh:1424`, outside
+  Buildroot entirely — so they appear in neither the Buildroot-derived component
+  list nor the hand-declared `app-manifest.csv`. They are stripped, carry no
+  version, and no init script starts any of them. This is the same class of blind
+  spot `cpe-extra.csv` closed for the kernel and U-Boot, and it is why the
+  surviving `iperf` binary did not disappear when `BR2_PACKAGE_IPERF` was
+  deselected. Recorded as the next item; the decision is whether to declare them
+  or stop shipping them.
+
+- **2026-08-11 — the console-proxy work of 2026-08-10/11 was REVERTED, and the
+  two defects it found on hardware were NOT introduced by it.**
+
+  A day and a half of work replaced each product's stunnel with a single nginx
+  reverse proxy (ADR-151), moved ports twice, and added an `RK_JORAL_PRODUCT`
+  selector. It was reverted at the operator's request: the SDK layer and the
+  product layer had become entangled — an init script in the board overlay knew
+  both products' names, ports, backend sockets and URL paths — and the design was
+  churning faster than it could be verified on hardware. The console is back on
+  the ADR-129 stunnel arrangement. **ADR-151 is withdrawn, not superseded.**
+
+  Kept from that period, because it is independent of the console: the Buildroot
+  package trim (100 → 19 blocking findings), the CVE gate and its triage record,
+  the removal of `S99python`/`S99hciinit`, and the `wifi_app` finding below.
+
+  **Two defects were found by putting the design on a device, and both are
+  PRE-EXISTING — the revert restores them, it does not remove them:**
+
+  1. **The media-gateway console backend binds every interface, not loopback.**
+     `start_httpd()` passes a bare port number to busybox httpd, so the backend
+     is reachable directly on **:18080**, bypassing stunnel and therefore
+     bypassing TLS. Both this product's Annex I and Annex II sheets state it
+     binds `127.0.0.1` only. That claim is false today, at HEAD, and has been
+     since the loopback split was introduced.
+
+  2. **The audit log records the tunnel, not the operator.** `audit_log()` uses
+     `REMOTE_ADDR`, which behind stunnel is always loopback — and, because of
+     defect 1, arrives in the IPv4-mapped form `[::ffff:127.0.0.1]`. Every
+     console action on this product is attributed to the device itself. Verified
+     on hardware 2026-08-11: SATISense logged `src=172.32.0.100` (it binds
+     loopback explicitly and had forwarded-header handling at the time) while
+     media-gateway logged `src=[::ffff:127.0.0.1]` on the same unit and the same
+     build. The **Annex I §6 trail for the media gateway is therefore complete,
+     well-formed, and attributed to the wrong principal.**
+
+  Neither is visible from a browser: the console works correctly in both cases.
+  Both need fixing on the reverted design, independently of any console
+  architecture — an explicit `127.0.0.1:<port>` bind spec, and a peer identity
+  that survives a local TLS terminator. **Until then both products' Annex I #6
+  and Annex II port rows overstate what the shipped image does.**
+
+  *The process lesson, recorded because it cost the whole period:* the fault that
+  started it was diagnosed three times from source and never once from the
+  device, because the init script ran nginx as `>/dev/null 2>&1` and threw away
+  the one line that named the cause. A service that can fail at boot must be
+  built so its first failure is legible from the boot log. That applies equally
+  to the stunnel path this revert restores, which discards its output the same
+  way.
+
+
+## Remaining work (verified against both trees 2026-08-07, refreshed 2026-08-10)
 
 The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) and
 gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
@@ -426,12 +673,15 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    (`/.well-known/security.txt`). The signed-firmware-update decision (4b) also
    sits with Carl — raise both together. The docs must not ship to customers
    before the mailbox is live.
-2. ~~**Attack surface (4a)**~~ — **largely done 2026-08-08**, see the status entry
-   below. telnetd, adbd and Samba are out of the image and root SSH login is
-   key-only. The root password itself is *unchanged* — still `luckfox` from
-   `BR2_TARGET_GENERIC_ROOT_PASSWD` — but it is no longer reachable over the
-   network. What is left on this row: the empty `/etc/iptables.conf` (the
-   firewall restores a 0-byte ruleset, and IPv6 is uncovered entirely).
+2. ~~**Attack surface (4a)**~~ — **done 2026-08-08 and 2026-08-10.** telnetd, adbd
+   and Samba are out of the image and root SSH login is key-only (08-08);
+   `S40bluetoothd`, `S30dbus`, `S99hciinit`, the `S99python` root-execution boot
+   hook and 118 unused packages are out (08-10). The root password itself is
+   *unchanged* — still `luckfox` from `BR2_TARGET_GENERIC_ROOT_PASSWD` — but it is
+   no longer reachable over the network. **What is left on this row: the empty
+   `/etc/iptables.conf`** (the firewall restores a 0-byte ruleset, and IPv6 is
+   uncovered entirely) — now the largest single item — plus the uid-1000 image
+   ownership problem, root CGIs, and the `wifi_app` binaries in 5e.
 3. **Secure defaults (row #1)** — **closed for SatiSense Edge 2026-08-08**:
    `opcua.security` ships as `signencrypt` and `web.tls` as `true`, both with
    per-unit certificates minted on first boot. Still open: the default
@@ -440,8 +690,34 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    a comparison against MACH production.
 4. **OpenSSL 1.1.1 migration plan (4f)** — none yet. The SBOM now auto-flags the
    EOL component, so closure will be self-verifying.
-5. **CVE check as a release gate (row #2)** — feed the generated SBOM into a CVE
-   scan per release; the inventory exists as of 2026-08-06, the process does not.
+5. ~~**CVE check as a release gate (row #2)**~~ — **process done 2026-08-09**,
+   `./build.sh cve` (see the dated entry above). What the first run leaves open, in
+   priority order:
+   a. ~~**Trim the BSP defconfig**~~ — **done 2026-08-10**, see the dated entry
+      above. 118 packages removed, image rebuilt clean, **100 blocking → 19**,
+      zero CISA-KEV. avahi kept as intended (expat only, not glib or python).
+      **Still needs the bench pass** (item 8) — the image is verified but not yet
+      run on hardware.
+   b. **Triage what remains** — the 19 are libopenssl (13, folded into the EOL
+      migration in item 4 below), wget (2), busybox, libzlib, libcurl and dhcpcd.
+      All are components the products use, so none can be removed; each needs a
+      reachability decision or a package bump. Decisions go in
+      `scripts/compliance/cve-triage.csv` with a `REVIEW_BY` date. **13 rows
+      already recorded 2026-08-10**: expat ×8 (`not-affected`, evidence in the
+      avahi source) and python3 ×5 (`accepted-risk`, bench tooling only).
+   c. **Close the coverage gap** — 28 components (was 56) have no CPE from any
+      source and are reported as NOT CHECKED; resolve with
+      `cve-check.py --suggest-cpe`.
+   e. **Declare or drop the prebuilt `wifi_app` binaries** — `hostapd`, `dnsmasq`,
+      three `wpa_supplicant` variants, `wpa_cli` ×2, `iperf`, `rkwifi_server` and
+      3 libraries ship into `/usr/bin` from `project/app/wifi_app/` via
+      `build.sh:1424`, outside Buildroot — so the SBOM and the gate are both blind
+      to them, and no init script starts them. Either add them to
+      `app-manifest.csv` with CPEs so the gate covers them, or stop copying them
+      into the rootfs. Found 2026-08-10.
+   d. **Kernel/U-Boot currency** — report-only today (5098 and 41 findings). The
+      remediation is a vendor-base move, so it needs scoping against Rockchip's
+      releases rather than triage.
 6. **Audit-log off-device forwarding** — the one item left on Annex I #6; designed
    in `audit-log-forwarding-plan.md`, deferred pending a product decision (action
    plan item 5).
@@ -449,9 +725,14 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    headers (needs an outbound-license decision; our own components show as
    UNDECLARED in the SBOM), and no test coverage of the auth layer, CGIs, config
    writer or listeners.
-8. **Hardware bench session** — TC-S3 leg c (MQTT TLS) has still never run
-   (unblocked 2026-08-05); the secrets-CGI path, factory reset and audit-log
-   viewer are so far validated off-device only and need a flashed-image pass.
+8. **Hardware bench session** — *now the highest-value item.* TC-S3 leg c (MQTT
+   TLS) has still never run (unblocked 2026-08-05); the secrets-CGI path, factory
+   reset and audit-log viewer are validated off-device only. **And as of
+   2026-08-10 the image itself is 118 packages lighter**, so this pass must also
+   confirm nothing depended on what was removed — boot, console over HTTPS, OPC UA
+   Sign&Encrypt, mDNS (`satisense.local` — avahi lost dbus in the trim), CAN, and
+   the bench scripts themselves, which are why python3 was kept. A firmware image
+   is built and ready to flash (`output/image/update.img`, 2026-08-10).
 9. **Secrets at rest** — restricted (0600 sidecar) but not encrypted; accepted for
    now, revisit with the OpenSSL 3 migration.
 
@@ -461,11 +742,16 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
 in each tree, 2026-08-06), which are verified against the listening code. Kept
 here as the cross-product summary.*
 
-- Platform (both, from shared rootfs), **updated 2026-08-08**: :22 sshd (**key-only**,
+- Platform (both, from shared rootfs), **updated 2026-08-10**: :22 sshd (**key-only**,
   `PermitRootLogin prohibit-password`), serial getty. **Removed from the image:** :23
   telnetd, :139/:445 Samba, adbd (which also listened on **:5555 on all interfaces**,
   not only over USB as stated previously), and the stray buildroot stunnel running the
-  upstream sample config. The root password remains `luckfox`
+  upstream sample config (all 2026-08-08); plus `S40bluetoothd`, `S30dbus`,
+  `S99hciinit` and the `S99python` root-execution boot hook (2026-08-10).
+  **Present but not started:** the prebuilt `wifi_app` binaries — `hostapd`,
+  `dnsmasq`, `wpa_supplicant` ×3, `wpa_cli` ×2, `iperf`, `rkwifi_server` — sit in
+  `/usr/bin` with no init script launching them. No listener, but they are in the
+  image and outside the SBOM (item 5e). The root password remains `luckfox`
   (`BR2_TARGET_GENERIC_ROOT_PASSWD`) but is no longer reachable over the network.
   **Caveat:** `/etc/iptables.conf` is a 0-byte ruleset, so nothing is filtered on any
   interface, and IPv6 is not covered at all — `ip6tables` exists but `S35iptables`
@@ -495,13 +781,25 @@ here as the cross-product summary.*
 3. ~~**Annex II fact sheet per product**~~ — **done 2026-08-06**, `docs/compliance/cra-annex2-facts.md` in each tree. Re-verify per release; a stale fact sheet is worse than none because it gets copied verbatim.
 4. **Gap backlog with CRA dates as milestones**:
    a. ~~strip telnetd/adbd/Samba~~ — **done 2026-08-08**; root password left unchanged
-      but made unreachable over SSH (key-only login). Firewall ruleset still empty;
+      but made unreachable over SSH (key-only login). Firewall ruleset still empty.
+      **Reopened in a second form 2026-08-09** by the CVE gate: the defconfig also
+      inherits a media/desktop package set (mpv → ffmpeg, bluez/pulseaudio, pillow,
+      sdl2, rsync, p7zip, iperf3, …) that neither product uses and that carries 73
+      of the 100 blocking CVE findings — including the only CISA-KEV one. Same root
+      cause as the daemons stripped on 2026-08-08, one layer down. **And 2026-08-10**:
+      the built image still starts `S40bluetoothd` (root Bluetooth daemon) and
+      `S99python`, which executes `/root/main.py` as root at every boot. Both go in
+      the same pass. **All of this closed 2026-08-10** — 118 packages removed, the
+      four init scripts gone, verified against the packed rootfs, gate at 19
+      blocking. Firewall ruleset and the `wifi_app` prebuilt binaries remain;
    b. signed firmware update path — flag to Carl per the doc;
    c. ~~factory-reset function (both products)~~ — **done: SatiSense 2026-08-06, media-gateway 2026-08-07**;
    d. ~~security-event logging~~ — **done 2026-08-07, met on both** (incl. CAN-gateway peer
       identity and a console viewer); off-device export deferred, see item 5;
    e. encrypt-or-restrict secrets in `gateway.json` — **done (restrict) 2026-08-06**, see above;
-   f. OpenSSL 1.1.1 migration plan;
+   f. OpenSSL 1.1.1 migration plan — now also the largest single block of CVE
+      findings in a component we actually use (13 at CVSS ≥ 7.0 as of 2026-08-09),
+      so the gate re-states the case for it on every run;
    g. ~~kill the shipped default console password (both products)~~ — **done
       2026-08-09**, satisense-edge #48 / t1s-media-gateway #24. `admin`/`joral`
       now buys a session that can do exactly one thing: change itself. Enforced
