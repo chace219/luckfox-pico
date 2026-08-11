@@ -106,13 +106,18 @@ export RK_BUILD_APP_TO_OEM_PARTITION=y
 # enable rockchip test
 export RK_ENABLE_ROCKCHIP_TEST=y
 
-# enable rockchip wifi
-export RK_ENABLE_WIFI=y
-export RK_ENABLE_WIFI_CHIP=AIC8800DC
+# rockchip wifi disabled 2026-08-12: neither product has a Wi-Fi function, no
+# init script started any of it, and the SSID/PSK below were never set past
+# the BSP placeholders. Enabling this ships hostapd 2.6 / wpa_supplicant 2.6
+# (2016) plus prebuilt dnsmasq/iperf into /usr/bin, outside the SBOM and the
+# CVE gate (cve-check) entirely. Re-enabling requires declaring every binary
+# in scripts/compliance/ first.
+export RK_ENABLE_WIFI=n
+#export RK_ENABLE_WIFI_CHIP=AIC8800DC
 
 # config wifi ssid and passwd
-export LF_WIFI_SSID="Your wifi ssid"
-export LF_WIFI_PSK="Your wifi password"
+#export LF_WIFI_SSID="Your wifi ssid"
+#export LF_WIFI_PSK="Your wifi password"
 
 #################################################
 #  PRE and POST
