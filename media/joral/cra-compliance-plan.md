@@ -333,6 +333,26 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   them exercised the TCP path. A control verified only on a non-default
   configuration has not been verified.
 
+  **Closed the same day (t1s-media-gateway #27).** `can_udp_peer_seen` records a
+  source's **first** datagram with `peer=ip:port` and then stays quiet until that
+  source has been silent for five minutes. The interesting part is what the
+  design has to defend against, since the log is now reachable from the network:
+  peers are keyed on **address only** (address+port would make an ephemeral-port
+  sender a new peer on every datagram — the flood the record exists to avoid),
+  and the record rate is bounded **independently of the table size**, because
+  spraying novel source addresses is itself a log-eviction primitive. Past the
+  budget, new peers are counted and reported once per window as
+  `can_udp_peer_flood suppressed=N`, so a flood reads as a flood instead of
+  silently pushing history out, and the budget refreshes so a flood cannot
+  permanently mute a later genuine access. Attribution happens *before* decoding,
+  so a sender whose datagrams do not parse — what probing the port looks like —
+  is recorded too. 17 checks in `tests/test_udp_peers.c` (time injected, so the
+  shipped logic is the tested logic), each confirmed to fail against the code
+  mutated back to per-datagram logging, address+port keying and no rate limit.
+  **Row #6 is met on both products again — this time on both transports.**
+  Bench-unverified: the daemon change needs a flash, and the check is a `logread`
+  for `can_udp_peer_seen` after sending from two hosts.
+
 - **2026-08-07 — both products, Annex I #6 hardened and made usable: console viewer,
   bigger history, no silent loss.** Three things came out of working out what the
   storage layout actually *is* rather than reading the code:
@@ -1144,11 +1164,11 @@ here as the cross-product summary.*
       blocking. Firewall ruleset and the `wifi_app` prebuilt binaries remain;
    b. signed firmware update path — flag to Carl per the doc;
    c. ~~factory-reset function (both products)~~ — **done: SatiSense 2026-08-06, media-gateway 2026-08-07**;
-   d. **security-event logging** — console layer and viewer **done 2026-08-07,
-      met on both**; CAN-gateway peer identity covers the **TCP path only**, and
-      UDP is the shipped default, so media-gateway row #6 is **partial** (found
-      in review 2026-08-12, see the correction above); off-device export
-      deferred, see item 5;
+   d. ~~security-event logging~~ — **done 2026-08-07, met on both**, with
+      CAN-gateway peer identity extended to the **UDP** transport on 2026-08-12
+      after review found it covered TCP only while UDP is the shipped default
+      (see the correction and its closure above); off-device export deferred,
+      see item 5;
    e. encrypt-or-restrict secrets in `gateway.json` — **done (restrict) 2026-08-06**, see above;
    f. OpenSSL 1.1.1 migration plan — now also the largest single block of CVE
       findings in a component we actually use (13 at CVSS ≥ 7.0 as of 2026-08-09),
