@@ -995,6 +995,113 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   boundary — who supplied which bytes on the tunnel path — evidently needs
   adversarial review, not authorship-time reasoning.*
 
+- **2026-08-12/13 — SatiSense Edge, Annex I #3 (transmitted data): TC-S3 leg c
+  (MQTT TLS) is EXECUTED — the last never-run leg, open since ADR-127 on
+  2026-07-04 — and it found a keepalive defect that had nothing to do with TLS.**
+  Method and evidence in
+  [`satisense-edge/docs/implementation-artifacts/mqtt-tls-bench-runbook.md`](../../media/joral/satisense-edge/docs/implementation-artifacts/mqtt-tls-bench-runbook.md)
+  §6a/§6b.
+
+  *Why it kept slipping, and what unblocked it.* The leg needed a TLS broker on
+  the bench and never got one. `test.mosquitto.org` removed that dependency
+  entirely: it serves a CA-signed endpoint (:8883), a **deliberately expired**
+  certificate on :8887, and a Let's Encrypt endpoint on :8886 — so the positive
+  case, the validity-failure case and the system-trust-store case are three port
+  numbers rather than three certificates to mint. The far side of the session was
+  watched by an **independent subscriber on the build host**, which matters
+  because Diagnostics' `published` counter is the device's own account of itself;
+  a message decoded off the wire is not.
+
+  *What is proven on hardware.* TLS 1.3 with the broker certificate verified
+  against a CA **uploaded through the console** (no shell), and real tag data
+  arriving. Verification is enforced on **both** trust paths, each established by
+  a pair rather than a single observation:
+  - `:8887` (expired) **refused**, and the same endpoint **connected** with
+    `tls_insecure: true` — the control that isolates the refusal to certificate
+    validation instead of reachability.
+  - with `ca_path` blank, `:8883` (mosquitto's self-signed CA, absent from the
+    image's bundle) **refused** while `:8886` **connected** — proving the device's
+    own `/etc/ssl/certs` is reachable *and* constraining. Neither run alone shows
+    that: an empty store also refuses everything, and a bypassed check also
+    accepts everything. This is also the first on-device evidence that the CA
+    bundle works at all, which the LLM connector's libcurl HTTPS shares.
+
+  *Still unexercised:* mutual TLS and credentials-inside-the-channel. Both need a
+  broker whose authentication we control — `:8885` rejected its own documented
+  `rw`/`readwrite` credentials during the session, and `:8884` needs a CSR signed
+  through a web form. They move to the local-mosquitto session (runbook §2–§5).
+
+  **The defect: MQTT sessions did not survive their own keepalive.**
+  `connected_session()` scheduled PINGREQ from `last_tx`, but updated `last_tx`
+  whenever a new model *snapshot* arrived rather than when bytes were actually
+  sent — `publish_changed()` reported success identically whether it published
+  fifty points or none. A steady process yields a fresh snapshot every
+  `publish_interval_ms` in which nothing changed, so the deadline was never
+  reached and **no PINGREQ was ever sent**. With shipped defaults
+  (`publish_interval_ms` 1000 vs `keepalive_s` 60) the condition could never be
+  satisfied. **Not a TLS defect** — the plaintext path had it too — and it bit
+  *precisely when the gateway was healthy*, since static values are the normal
+  steady state and universal while quality is BAD. Every subscriber watching
+  `$status` saw the gateway flap offline once a minute.
+
+  Worth recording is how it was isolated, because two of the three steps were
+  cheap and decisive: payload `ts` climbing **continuously across the drops**
+  ruled out a daemon restart in one observation; changing `keepalive_s` 60 → 30
+  and seeing **no change in the period** ruled out our own keepalive; and probing
+  the broker directly established that it caps *idle* sessions at
+  `min(1.5×keepalive, 60)` while a client that pings survives indefinitely —
+  which located the fault at "the device is silent", not "the broker is strict".
+
+  Fixed (`publish_changed()` returns the count sent; only a non-zero count resets
+  `last_tx`) and guarded by `tests/test_mqtt_keepalive.c`, which stands a minimal
+  MQTT broker on loopback and runs the **real** worker against an unchanging
+  model — the bug is in *when* state is updated across two cooperating functions,
+  which no pure-function test could catch. Confirmed to fail against the pre-fix
+  code and pass after; **bench-confirmed by a 185s session with zero drops** where
+  the previous build dropped three times in the same window.
+
+  *The review lesson:* `tests/test_mqtt.c` already asserted that
+  `mqtt_enc_pingreq()` **encodes** two correct bytes. It never asserted that the
+  loop **calls** it. The encoder was verified and the scheduling was not — the
+  same shape as the CAN audit gap that covered TCP while UDP was the shipped
+  default.
+
+  *Two further findings from the same session, both filed rather than fixed:*
+  - **The SatiSense daemon writes no log anywhere.** `S60intelligence-edge`
+    starts it with `start-stop-daemon -b`, and busybox 1.36.1 implements `-b` as
+    `bb_daemon_helper(DAEMON_DEVNULL_STDIO …)` (`start_stop_daemon.c:527`), so the
+    daemon's stdio goes to `/dev/null` — the shell's `>> "$LOG" 2>&1` only ever
+    applied to `start-stop-daemon` itself, which `-q` silences. `main.c`'s 22
+    `fprintf(stderr, …)` calls are discarded, the daemon uses no syslog, and
+    `/var/log/intelligence-edge.log` is **0 bytes on a running unit** — while
+    `user-manual.md:1047` tells operators it contains "config load, connections,
+    rule engine, MQTT, AI". An MQTT failure reason exists **only** in the
+    console's Diagnostics field, which a restart clears. This is the 2026-08-11
+    nginx lesson ("a service that can fail at boot must be built so its first
+    failure is legible from the boot log") never applied to this init script, and
+    it is why this whole session had to be diagnosed from the broker side.
+    **Check media-gateway for the same pattern.** It weakens the *legibility*
+    half of Annex I #3 in the documented channel — the refusal is correct and
+    reported, but not where the manual says to look.
+  - **`dhcpcd` is running DHCP against `can0`**, logging `if_setmtu: Device or
+    resource busy` plus privilege-separation errors on a loop. `can0` is AF_CAN
+    and has no business in a DHCP client; `denyinterfaces can0` in
+    `/etc/dhcpcd.conf` (beside the `ipv4only` the firewall work added) settles it.
+    Cosmetic, except that a log full of errors that are not real makes a genuine
+    fault harder to see — the same theme as the item above.
+
+  *Also confirmed incidentally, closing half of an open bench item:* stunnel's
+  peer line is present in syslog on a running unit
+  (`Service [web] accepted connection from ::ffff:172.32.0.100:54724`,
+  `daemon.notice`) — the correlation source the `src=unknown-via-tls` audit
+  design depends on. Correlating an actual audit record against it is still owed.
+
+  *Hygiene:* the bench pointed a unit at a **public** broker, so the run used an
+  unguessable topic prefix; the three retained topics were cleared afterwards
+  (verified clean) and the unit was factory-reset. The staged factory config
+  restores `mqtt.enabled: false` with an empty host, so a reset cannot leave a
+  unit talking to a public broker.
+
 ## Remaining work (verified against both trees 2026-08-07, refreshed 2026-08-10)
 
 The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) and
@@ -1091,10 +1198,15 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    durable audit trail with `src=unknown-via-tls` attribution (full session
    captured incl. `default_password=true` on first login — see the
    attribution entry above), and the **secrets-CGI path** (sidecar 0600,
-   secret-free `gateway.json`, sentinel-only over the API). **Still open:**
-   TC-S3 leg c (MQTT TLS, never run — deferred by decision for now), the
-   media-gateway durable-audit spot-check, and a failed-login record
-   correlated against stunnel's peer line in syslog. With those three, the
+   secret-free `gateway.json`, sentinel-only over the API).
+   **TC-S3 leg c (MQTT TLS) was executed 2026-08-12/13** — see the dated entry
+   above: TLS 1.3 confirmed, certificate verification proven enforced on both
+   trust paths, and a pre-existing keepalive defect found, fixed, guarded by a
+   test that fails against the old code, and bench-confirmed. **Still open:**
+   the mutual-TLS and credentials-in-channel halves of that leg (they need a
+   local broker, runbook §2–§5), the media-gateway durable-audit spot-check,
+   and a failed-login record correlated against stunnel's peer line — the peer
+   line itself is now confirmed present on a running unit. With those, the
    bench backlog that accumulated since 2026-08-05 is cleared.
 9. **Secrets at rest** — restricted (0600 sidecar) but not encrypted; accepted
    for now. The named revisit trigger — the OpenSSL 3 migration — fired
