@@ -1,0 +1,75 @@
+#!/bin/sh
+# Board override of buildroot's package/iptables/S35iptables: loads the IPv4
+# AND IPv6 rulesets (the stock script never touched ip6tables, which left
+# dual-stack listeners reachable over IPv6 with no filter at all), and logs a
+# failed restore to syslog — a filter that silently failed to load looks
+# exactly like a filter that loaded, and the boot log must tell them apart.
+
+DAEMON="iptables"
+RULES4="/etc/iptables.conf"
+RULES6="/etc/ip6tables.conf"
+
+start() {
+	printf 'Starting %s: ' "$DAEMON"
+	status=0
+	if ! iptables-restore "$RULES4"; then
+		logger -t S35iptables -p daemon.err "iptables-restore $RULES4 FAILED - IPv4 traffic is UNFILTERED"
+		status=1
+	fi
+	if ! ip6tables-restore "$RULES6"; then
+		logger -t S35iptables -p daemon.err "ip6tables-restore $RULES6 FAILED - IPv6 traffic is UNFILTERED"
+		status=1
+	fi
+	if [ "$status" -eq 0 ]; then
+		echo "OK"
+	else
+		echo "FAIL"
+	fi
+	return "$status"
+}
+
+stop() {
+	# Policies must go back to ACCEPT before the flush: flushing while the
+	# policy is DROP would silently cut every network path to the unit.
+	printf 'Stopping %s: ' "$DAEMON"
+	status=0
+	for chain in INPUT FORWARD OUTPUT; do
+		iptables -P $chain ACCEPT || status=1
+		ip6tables -P $chain ACCEPT || status=1
+	done
+	iptables -F || status=1
+	ip6tables -F || status=1
+	if [ "$status" -eq 0 ]; then
+		echo "OK"
+	else
+		echo "FAIL"
+	fi
+	return "$status"
+}
+
+restart() {
+	stop
+	sleep 1
+	start
+}
+
+save() {
+	printf 'Saving %s: ' "$DAEMON"
+	if iptables-save -f "$RULES4" && ip6tables-save -f "$RULES6"; then
+		echo "OK"
+	else
+		echo "SKIP (read-only file system detected)"
+		return 1
+	fi
+}
+
+case "$1" in
+	start|stop|restart|save)
+		"$1";;
+	reload)
+		# Restart, since there is no true "reload" feature.
+		restart;;
+	*)
+		echo "Usage: $0 {start|stop|restart|save|reload}"
+		exit 1
+esac

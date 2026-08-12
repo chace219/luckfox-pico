@@ -316,6 +316,15 @@ SYSDRV_RAMDISK_DIR ?= $(SYSDRV_DIR_OUT_BOARD)
 HCITOOL_TOOL_PATH :=$(SYSDRV_DIR)/tools/board/buildroot/hcitool_patch
 MPV_PATCH_PATH :=$(SYSDRV_DIR)/tools/board/buildroot/mpv_patch
 BUSYBOX_PATCH_PATH :=$(SYSDRV_DIR)/tools/board/buildroot/busybox_patch
+# OpenSSL 3.5 LTS + open62541 1.3.15 package replacements (CRA item 4f: the
+# stock 2023.02.6 tarball pins EOL OpenSSL 1.1.1v). Tracked here so they
+# survive a clean re-extract of the buildroot tree; the libopenssl copy must
+# replace the whole package dir, since the 1.1.1 patches do not apply to 3.x.
+LIBOPENSSL3_PKG_PATH :=$(SYSDRV_DIR)/tools/board/buildroot/libopenssl
+OPEN62541_PKG_PATH :=$(SYSDRV_DIR)/tools/board/buildroot/open62541
+# pppd.mk only (overlay): disables EAP-TLS, which needs the ENGINE API that
+# OpenSSL 3.x no longer builds. See the comment in the file.
+PPPD_PKG_PATH :=$(SYSDRV_DIR)/tools/board/buildroot/pppd
 
 export SYSDRV_DIR_OUT_PC
 export SYSDRV_DIR_OUT_BOARD
@@ -607,6 +616,10 @@ buildroot_create:
 	cp ${HCITOOL_TOOL_PATH}/*.patch $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/bluez5_utils/
 	cp ${MPV_PATCH_PATH}/*.patch $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/mpv/
 	cp ${BUSYBOX_PATCH_PATH}/*.patch  $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/busybox/
+	rm -rf $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/libopenssl/*
+	cp ${LIBOPENSSL3_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/libopenssl/
+	cp ${OPEN62541_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/open62541/
+	cp ${PPPD_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/pppd/
 
 buildroot: prepare
 	@echo -e "$(C_GREEN) ==sysdrv== build buildroot   $(C_NORMAL)"
@@ -619,6 +632,10 @@ buildroot: prepare
 		cp ${HCITOOL_TOOL_PATH}/*.patch $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/bluez5_utils/ ;\
 		cp ${MPV_PATCH_PATH}/*.patch $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/mpv/ ;\
 		cp ${BUSYBOX_PATCH_PATH}/*.patch  $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/busybox/ ;\
+		rm -rf $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/libopenssl/* ;\
+		cp ${LIBOPENSSL3_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/libopenssl/ ;\
+		cp ${OPEN62541_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/open62541/ ;\
+		cp ${PPPD_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/pppd/ ;\
 	);
 
 	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) BR2_EXTERNAL=$(BR2_EXTERNAL_DIR) $(BUILDROOT_DEFCONFIG) -C $(BUILDROOT_DIR)/$(BUILDROOT_VER)
