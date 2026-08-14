@@ -1,0 +1,15 @@
+#!/bin/sh
+# S80swupdate — DELIBERATELY INERT (overrides buildroot's stock daemon
+# launcher, same pattern as the S35iptables override in this overlay).
+#
+# SWUpdate on this platform is NOT a resident daemon: updates are
+# operator-initiated through each product's authenticated web console
+# (api-update.sh), which invokes /usr/bin/swupdate once per update with
+# signature verification against /etc/swupdate/trusted-certs.pem. A
+# standing daemon would add an unauthenticated local control socket and a
+# process on every boot for an operation that happens a few times a year.
+# See media/joral/swupdate-implementation-plan.md.
+case "$1" in
+	start|stop|restart|reload) exit 0 ;;
+	*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

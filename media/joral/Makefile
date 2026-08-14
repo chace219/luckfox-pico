@@ -7,7 +7,9 @@ export LC_ALL=C
 SHELL:=/bin/bash
 
 CURRENT_DIR := $(shell pwd)
-SUBDIRS := satisense-edge media-gateway
+# ab-boot: platform A/B update machinery (misc_ab, health check, swupdate
+# config + trust store) — swupdate-implementation-plan.md
+SUBDIRS := satisense-edge media-gateway ab-boot
 
 .PHONY: all clean distclean
 

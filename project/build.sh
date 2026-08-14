@@ -472,6 +472,7 @@ function usage() {
 	echo "info               -see the current board building information"
 	echo "sbom               -generate the CRA software bill of materials (add --reuse to skip legal-info)"
 	echo "cve                -check image components against NVD; fails on unaccepted findings (add --offline for cache only)"
+	echo "swu                -pack + sign the A/B firmware update package from rootfs.img (--sig <file> to resume the offline-signing flow)"
 	echo ""
 	echo "buildrootconfig    -config b	# EMMCuildroot and save defconfig"
 	echo "kernelconfig       -config kernel and save defconfig"
@@ -832,6 +833,144 @@ function build_cve() {
 		echo "a dated decision in scripts/compliance/cve-triage.csv."
 		exit $rc
 	fi
+
+	finish_build
+}
+
+# ── A/B boot image + misc record (the ...-IPC-AB board profile) ─────────────
+# The kernel stage regenerates a STOCK boot.img (kernel+fdt+resource, NO
+# ramdisk) on every build, silently replacing the A/B slot-selector FIT. A unit
+# flashed with that boots rootfs_a directly and ignores an installed update —
+# it cost a full bench day on 2026-08-14, twice. So rebuild the FIT here, inside
+# firmware packing, where no sequence of build commands can miss it.
+#
+# The ramdisk node's `load` address is load-bearing: without it U-Boot proper's
+# boot_fit loads the kernel but never places or passes the initrd (verified on
+# hardware — "Trying to unpack rootfs image as initramfs" appears only with it).
+# It lives in boot-ab.its; do not drop it.
+function build_ab_bootimg() {
+	# Only on an A/B layout, detected from the partition table itself.
+	case "$RK_PARTITION_CMD_IN_ENV" in *rootfs_a*) ;; *) return 0 ;; esac
+
+	local ABDIR=$SDK_ROOT_DIR/media/joral/ab-boot
+	local KOUT=$SDK_SYSDRV_DIR/source/objs_kernel/out
+	local MKIMAGE=$SDK_SYSDRV_DIR/tools/pc/uboot_tools/mkimage
+	local RAMDISK=$ABDIR/build/ramdisk.cpio.gz
+
+	if [ ! -f "$RAMDISK" ]; then
+		msg_warn "A/B layout but no $RAMDISK — boot.img will NOT contain the"
+		msg_warn "slot selector; the unit will ignore installed updates."
+		msg_warn "Build it: cd media/joral/ab-boot && make && scripts/mkinitramfs.sh <static-busybox> build/ramdisk.cpio.gz"
+		return 0
+	fi
+	[ -f "$KOUT/kernel" ] && [ -f "$KOUT/fdt" ] && [ -f "$KOUT/resource" ] || {
+		msg_warn "no kernel blobs in $KOUT — keeping the existing boot.img"
+		return 0
+	}
+
+	cp -f "$RAMDISK" "$KOUT/ramdisk.cpio.gz"
+	cp -f "$ABDIR/boot-ab.its" "$KOUT/boot-ab.its"
+	# Same substitutions the kernel's scripts/mkimg applies to boot.its.
+	sed -i -e 's/arch = ""/arch = "arm"/g' \
+	       -e 's/compression = ""/compression = "none"/' "$KOUT/boot-ab.its"
+	( cd "$KOUT" && $MKIMAGE -E -p 0x800 -f boot-ab.its boot-ab.img ) >/dev/null || {
+		msg_error "failed to build the A/B boot FIT"
+		return 1
+	}
+	cp -f "$KOUT/boot-ab.img" "$RK_PROJECT_OUTPUT_IMAGE/boot.img"
+	cp -f "$KOUT/boot-ab.img" "$ABDIR/build/boot-ab.img"
+	msg_info "boot.img: A/B slot-selector FIT (kernel+fdt+resource+initramfs)"
+
+	# Pre-initialised misc record, so a freshly flashed unit starts from the
+	# factory A/B state instead of relying on lazy self-init (work item 7).
+	local MISC_IMG=$RK_PROJECT_OUTPUT_IMAGE/misc.img
+	if [ ! -f "$MISC_IMG" ] && [ -x "$ABDIR/build/misc_ab.host" ]; then
+		dd if=/dev/zero of="$MISC_IMG" bs=1M count=4 status=none
+		"$ABDIR/build/misc_ab.host" init "$MISC_IMG" >/dev/null && \
+			msg_info "misc.img: factory A/B record (A={15,7,0} B={14,7,0})"
+	fi
+	return 0
+}
+
+function build_swu() {
+	echo "============Start building signed .swu update package (CRA Annex I #7)============"
+
+	# Packs output/image/rootfs.img into a SWUpdate package for the A/B
+	# update path (media/joral/swupdate-implementation-plan.md). The CMS
+	# signature over sw-description is the unit's install gate; which key
+	# signs depends on what exists (firmware-signing-and-support-policy.md):
+	#
+	#   PRODUCTION  scripts/compliance/keys/trusted-certs.pem committed
+	#               (post-ceremony): this target writes the unsigned
+	#               sw-description + payload and STOPS with offline-signing
+	#               instructions (A.4). Resume with:
+	#                 ./build.sh swu --sig <sw-description.sig>
+	#   DEV         no ceremony output yet: signs with the per-checkout DEV
+	#               key media/joral/ab-boot/keys-dev/ (auto-created by the
+	#               media build). NOT FOR SHIPMENT — the image's own trust
+	#               store carries the matching DEV cert, so bench units
+	#               accept it; a customer unit never will.
+	#
+	# Either way the result is verified against the trust store STAGED FOR
+	# THE IMAGE before it is called a release artifact — a .swu the shipped
+	# rootfs would reject must never leave the build.
+
+	local ROOTFS_IMG="$RK_PROJECT_OUTPUT_IMAGE/rootfs.img"
+	local ABDIR="$SDK_ROOT_DIR/media/joral/ab-boot"
+	local OUTDIR="$RK_PROJECT_OUTPUT_IMAGE"
+	local SIGN="$SDK_ROOT_DIR/scripts/compliance/fw-sign.sh"
+	local PROD_CERTS="$SDK_ROOT_DIR/scripts/compliance/keys/trusted-certs.pem"
+	local STAGED_CERTS="$SDK_ROOT_DIR/media/out/root/etc/swupdate/trusted-certs.pem"
+	local SWDESC="$OUTDIR/sw-description"
+	local SIGFILE=""
+
+	if [ "${1:-}" = "--sig" ]; then
+		SIGFILE="${2:?--sig needs a signature file}"
+	fi
+
+	[ -f "$ROOTFS_IMG" ] || { msg_error "no $ROOTFS_IMG — run ./build.sh firmware first"; exit 1; }
+	[ -f "$ABDIR/swupdate/sw-description.in" ] || { msg_error "missing $ABDIR/swupdate/sw-description.in"; exit 1; }
+
+	local FW_VERSION FW_SHA
+	FW_VERSION=$(git -C "$SDK_ROOT_DIR" describe --always --dirty 2>/dev/null || echo unknown)
+	FW_SHA=$(sha256sum "$ROOTFS_IMG" | cut -d' ' -f1)
+
+	sed -e "s/@VERSION@/$FW_VERSION/" -e "s/@SHA256@/$FW_SHA/" \
+		"$ABDIR/swupdate/sw-description.in" > "$SWDESC"
+
+	if [ -n "$SIGFILE" ]; then
+		cp "$SIGFILE" "$SWDESC.sig"
+	elif [ -f "$PROD_CERTS" ]; then
+		msg_warn "PRODUCTION keys exist — offline signing required (policy A.4):"
+		msg_warn "  1. take $SWDESC to the offline laptop"
+		msg_warn "     (sha256: $(sha256sum "$SWDESC" | cut -d' ' -f1))"
+		msg_warn "  2. sign: fw-sign.sh sign sw-description <token-key> <active-cert>"
+		msg_warn "  3. back here: ./build.sh swu --sig <sw-description.sig>"
+		exit 2
+	else
+		[ -f "$ABDIR/keys-dev/dev-signing.key.pem" ] || { msg_error "no DEV key — run ./build.sh media first"; exit 1; }
+		msg_warn "signing with the DEV key — NOT FOR SHIPMENT"
+		sh "$SIGN" sign "$SWDESC" "$ABDIR/keys-dev/dev-signing.key.pem" \
+			"$ABDIR/keys-dev/dev-signing.crt.pem"
+	fi
+
+	# Release gate: the .swu must verify against the trust store the image
+	# actually ships. Prefer the staged copy; fall back to the dev bundle.
+	local TRUST="$STAGED_CERTS"
+	[ -f "$TRUST" ] || TRUST="$ABDIR/keys-dev/trusted-certs.pem"
+	sh "$SIGN" verify "$SWDESC" "$SWDESC.sig" "$TRUST" || {
+		msg_error "signature does not verify against the image trust store ($TRUST)"; exit 1; }
+
+	# Pack. SWUpdate requires sw-description as the FIRST cpio member.
+	local SWU="$OUTDIR/joral-platform-$FW_VERSION.swu"
+	( cd "$OUTDIR" && for f in sw-description sw-description.sig rootfs.img; do
+		echo "$f"; done | cpio -o -H crc --quiet > "$SWU" )
+
+	msg_info ".swu: $SWU"
+	msg_info "  version:  $FW_VERSION"
+	msg_info "  sha256:   $(sha256sum "$SWU" | cut -d' ' -f1)"
+	msg_info "  trust:    $TRUST"
+	msg_info "Append the release line to docs/compliance/signing-log.md (policy A.4)."
 
 	finish_build
 }
@@ -2634,6 +2773,10 @@ function build_firmware() {
 	fi
 	build_mkimg userdata $RK_PROJECT_PACKAGE_USERDATA_DIR
 
+	# Must precede the flash-script and update.img generation below: both read
+	# boot.img/misc.img straight out of the image dir.
+	build_ab_bootimg
+
 	build_tftp_sd_update
 
 	[ "$RK_ENABLE_RECOVERY" = "y" -o "$RK_ENABLE_OTA" = "y" ] && build_ota
@@ -2908,6 +3051,10 @@ while [ $# -ne 0 ]; do
 		;;
 	cve)
 		option="build_cve ${@:2}"
+		break
+		;;
+	swu)
+		option="build_swu ${@:2}"
 		break
 		;;
 	info) option=build_info ;;

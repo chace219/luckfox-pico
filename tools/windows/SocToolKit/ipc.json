@@ -25,27 +25,45 @@
             "state": false
         },
         {
-            "name": "boot",
-            "file": "boot.img",
-            "address": "0x00488000",
+            "name": "misc",
+            "file": "misc.img",
+            "address": "0x000C8000",
             "state": false
         },
         {
-            "name": "rootfs",
-            "file": "rootfs.img",
-            "address": "0x02488000",
+            "name": "boot",
+            "file": "boot.img",
+            "address": "0x004C8000",
+            "state": false
+        },
+        {
+            "name": "boot_b",
+            "file": "boot.img",
+            "address": "0x024C8000",
             "state": false
         },
         {
             "name": "oem",
             "file": "oem.img",
-            "address": "0x82488000",
+            "address": "0x044C8000",
             "state": false
         },
         {
             "name": "userdata",
             "file": "userdata.img",
-            "address": "0xC2488000",
+            "address": "0x244C8000",
+            "state": false
+        },
+        {
+            "name": "rootfs_a",
+            "file": "rootfs.img",
+            "address": "0x444C8000",
+            "state": false
+        },
+        {
+            "name": "rootfs_b",
+            "file": "rootfs.img",
+            "address": "0xA44C8000",
             "state": false
         }
     ]
