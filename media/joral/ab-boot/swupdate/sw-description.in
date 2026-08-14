@@ -1,0 +1,57 @@
+/*
+ * sw-description template — filled by `./build.sh swu` (@VERSION@, @SHA256@).
+ *
+ * One .swu carries the rootfs image once, deliverable to EITHER slot: the
+ * two `stable` modes select the target partition, and the console CGI picks
+ * the INACTIVE slot at apply time (`swupdate -e stable,<a|b>` after asking
+ * misc_ab which slot is running). Partition indices match the -AB board
+ * profile: p9 = rootfs_a, p10 = rootfs_b — reflashing the RUNNING slot is
+ * impossible by construction because the CGI always names the other one.
+ *
+ * sha256 per image + CMS signature over this file: the signature covers the
+ * hashes, the hashes cover the payload, so nothing installs unless the
+ * whole chain verifies (fw-sign.sh / policy A.4).
+ *
+ * The version is the release identity (git describe). swupdate records it
+ * in /etc/sw-versions on the target slot; the console shows both slots'
+ * versions from there.
+ *
+ * DOWNGRADE POLICY IS NOT IMPLEMENTED (corrected 2026-08-14 — an earlier
+ * comment here claimed the console warned and required confirmation; it
+ * never did). It cannot be, while @VERSION@ is `git describe` on an untagged
+ * tree: a commit hash has no order, so nothing can tell older from newer.
+ * Fixing this needs a monotonic version scheme — one-way door #4, decide it
+ * before first shipment (swupdate-implementation-plan.md, "Item 5").
+ */
+software = {
+	version = "@VERSION@";
+	description = "Joral edge platform rootfs (media-gateway + satisense-edge)";
+
+	stable = {
+		a = {
+			images: ({
+				filename = "rootfs.img";
+				device = "/dev/mmcblk0p9";
+				type = "raw";
+				sha256 = "@SHA256@";
+				/* Stream straight to the handler. Without this SWUpdate
+				 * first extracts the payload to TMPDIR — /tmp is a
+				 * RAM-backed tmpfs far smaller than the image, and the
+				 * overflow kills the extractor mid-stream ("Connection
+				 * reset by peer", found on the bench 2026-08-14). Safe:
+				 * the target is always the INACTIVE slot, which is only
+				 * marked active after swupdate exits clean. */
+				installed-directly = true;
+			});
+		};
+		b = {
+			images: ({
+				filename = "rootfs.img";
+				device = "/dev/mmcblk0p10";
+				type = "raw";
+				sha256 = "@SHA256@";
+				installed-directly = true;
+			});
+		};
+	};
+};

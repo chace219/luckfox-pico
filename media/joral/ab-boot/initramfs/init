@@ -1,0 +1,83 @@
+#!/bin/sh
+# ab-boot initramfs /init — A/B slot selection in userspace.
+#
+# The design (media/joral/swupdate-implementation-plan.md, "Chosen design"):
+# SPL and U-Boot proper are UNTOUCHED and load a single-copy kernel+initramfs
+# from `boot`; this script then implements the same AVB slot semantics the
+# bootloader would (misc_ab mirrors common/spl/spl_ab.c byte-exactly), mounts
+# the chosen rootfs slot, and switch_roots into it.
+#
+# Slot state machine per boot:
+#   1. `misc_ab select` picks the slot, burns a try if the slot is unproven,
+#      records last_boot, and prints "a" or "b".
+#   2. If mounting that slot fails, it is marked unbootable on the spot and
+#      selection runs again — a corrupt slot costs one boot, not seven.
+#   3. Userspace (S99ab-health, later work item) calls `misc_ab
+#      mark-successful` once the services are up; until then every boot
+#      spends a try, and 7 failures roll back to the other slot.
+#
+# Partitions are found by PARTNAME from sysfs, never by index: the kernel's
+# cmdline partition parser (CONFIG_CMDLINE_PARTITION) publishes the
+# blkdevparts= names in each partition's uevent, so this script survives
+# layout changes that would break hardcoded /dev/mmcblk0pN.
+#
+# Keep this script BUSYBOX-SH ONLY (no bashisms) and keep it small: it is the
+# one component of the update design that is single-copy and cannot be fixed
+# by an update without touching `boot`.
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+mount -t proc     proc  /proc
+mount -t sysfs    sysfs /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+
+msg() { echo "ab-boot: $*"; }
+
+# Resolve a blkdevparts partition name to its /dev node via sysfs uevents.
+find_part() { # find_part <partname> -> echoes /dev/<node> or returns 1
+	for u in /sys/block/mmcblk*/mmcblk*/uevent; do
+		[ -f "$u" ] || continue
+		if grep -q "^PARTNAME=$1$" "$u"; then
+			echo "/dev/$(grep '^DEVNAME=' "$u" | cut -d= -f2)"
+			return 0
+		fi
+	done
+	return 1
+}
+
+fatal() {
+	msg "FATAL: $*"
+	msg "dropping to a shell (bench build; production policy is reboot)"
+	exec sh
+}
+
+MISC=$(find_part misc) || fatal "no 'misc' partition — wrong blkdevparts?"
+
+tries=0
+while [ "$tries" -lt 2 ]; do
+	SLOT=$(misc_ab select "$MISC") || fatal "misc_ab select failed on $MISC"
+	DEV=$(find_part "rootfs_$SLOT") || fatal "no 'rootfs_$SLOT' partition"
+
+	msg "slot $SLOT -> $DEV"
+	# ro here; the system's own inittab remounts rw. A rootfs that cannot
+	# even mount read-only has nothing to say for itself.
+	if mount -o ro -t ext4 "$DEV" /mnt; then
+		if [ -x /mnt/sbin/init ]; then
+			msg "switching root to $DEV"
+			mount --move /proc /mnt/proc 2>/dev/null || umount /proc
+			mount --move /sys  /mnt/sys  2>/dev/null || umount /sys
+			mount --move /dev  /mnt/dev  2>/dev/null
+			exec switch_root /mnt /sbin/init
+		fi
+		msg "slot $SLOT mounts but has no /sbin/init"
+		umount /mnt
+	else
+		msg "slot $SLOT failed to mount"
+	fi
+
+	# This slot is broken NOW — don't spend six more boots proving it.
+	misc_ab mark-unbootable "$MISC" "$SLOT"
+	tries=$((tries + 1))
+done
+
+fatal "no bootable rootfs slot"
