@@ -1114,9 +1114,13 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    `SECURITY.md`. What is left sits with Carl: **create the
    `security@joralllc.com` Workspace group** (product management + at least one
    engineer; alias `psirt@` to it), and publish the policy on joralllc.com
-   (`/.well-known/security.txt`). The signed-firmware-update decision (4b) also
-   sits with Carl — raise both together. The docs must not ship to customers
-   before the mailbox is live.
+   (`/.well-known/security.txt`). The two firmware-update decisions (4b) —
+   **signing-key custody** and the **declared support period** — are now a
+   ready-to-sign memo: `firmware-signing-and-support-policy.md` (2026-08-14;
+   offline two-key ceremony + compromise runbook, 5-year support period with
+   published end date). What Carl owes is a signature and one hour for the
+   key ceremony — raise it in the same conversation as the mailbox. The docs
+   must not ship to customers before the mailbox is live.
 2. ~~**Attack surface (4a)**~~ — **done 2026-08-08 and 2026-08-10.** telnetd, adbd
    and Samba are out of the image and root SSH login is key-only (08-08);
    `S40bluetoothd`, `S30dbus`, `S99hciinit`, the `S99python` root-execution boot
@@ -1274,7 +1278,33 @@ here as the cross-product summary.*
       the same pass. **All of this closed 2026-08-10** — 118 packages removed, the
       four init scripts gone, verified against the packed rootfs, gate at 19
       blocking. Firewall ruleset and the `wifi_app` prebuilt binaries remain;
-   b. signed firmware update path — flag to Carl per the doc;
+   b. signed firmware update path — **design decided + Phase 0 implemented
+      2026-08-14** (no units in the field yet, so the layout can still be set
+      right before first shipment): SWUpdate over an initramfs-driven A/B
+      rootfs, no bootloader changes — full plan in
+      `swupdate-implementation-plan.md`, status note at its top. Done so far:
+      both products' mutable state (config, secrets sidecar, console
+      credential, per-unit TLS material, usage state, KB) moved off the
+      rootfs to `/userdata/<product>/state/` with first-boot seeding and the
+      factory-reset boundary preserving the audit trail (host suites green
+      on both, clean cross-build); `media/joral/ab-boot/` staged for the
+      bench spike (misc_ab AVB-record tool with 13 contract tests, initramfs
+      slot selector, ramdisk FIT, `-AB` board profile). The two gating
+      product decisions — **signing-key custody + declared support period**
+      — are drafted as a ready-to-sign memo with ceremony procedure and
+      compromise runbook (`firmware-signing-and-support-policy.md`,
+      2026-08-14): offline two-key ceremony, 5-year support period; the
+      direction is adopted, the **physical ceremony/token purchase is
+      deferred** (documented in the memo) and builds sign with a
+      per-checkout DEV key until it happens — **no customer shipment on a
+      DEV-keyed trust store.** **Later the same day the update pipeline
+      went software-complete** (see the swupdate plan's status block):
+      SWUpdate enabled in buildroot (CMS verification, no webserver, inert
+      S80), `S99ab-health`, shared `api-update.sh` + UI panels on both
+      consoles (both suites green), and `./build.sh swu` producing a
+      signed+verified artifact end-to-end on the DEV key. Next: 2–3 day
+      bench spike (`ab-boot/README.md`), then freeze the partition layout —
+      a one-way door once the first customer unit ships;
    c. ~~factory-reset function (both products)~~ — **done: SatiSense 2026-08-06, media-gateway 2026-08-07**;
    d. ~~security-event logging~~ — **done 2026-08-07, met on both**, with
       CAN-gateway peer identity extended to the **UDP** transport on 2026-08-12
