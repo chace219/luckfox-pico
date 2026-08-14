@@ -1,0 +1,104 @@
+#!/bin/sh
+# S99ab-health — first-good-boot health check for the A/B update design
+# (swupdate-implementation-plan.md, work item 10 — the one most often
+# skipped and load-bearing: the initramfs burns one of 7 tries on every
+# boot of an unproven slot, and ONLY this script stops the countdown).
+#
+# Runs last (S99): by now S39/S50 (media-gateway) and S60 (SatiSense) have
+# started whatever this unit is configured to run. If the booted slot is not
+# yet marked successful, verify the products actually came up, then
+# `misc_ab mark-successful`. If the checks fail, DO NOTHING — the try stays
+# burned, and 7 failed boots roll the unit back to the previous slot without
+# any human involved.
+#
+# "Came up" is deliberately the same bar the bench uses: daemon processes
+# alive and the console port listening — not a deep functional test. A unit
+# that reaches that bar can be updated again remotely, which is the property
+# rollback exists to protect.
+
+MISC_DEV=""
+SLOT=""
+
+log() { logger -t ab-health "$1" 2>/dev/null; echo "ab-health: $1"; }
+
+find_part() { # by PARTNAME, same method as the initramfs
+	for u in /sys/block/mmcblk*/mmcblk*/uevent; do
+		[ -f "$u" ] || continue
+		if grep -q "^PARTNAME=$1$" "$u"; then
+			echo "/dev/$(grep '^DEVNAME=' "$u" | cut -d= -f2)"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# The booted slot is last_boot — the initramfs's select wrote it just
+# before switch_root, so it is authoritative even this early.
+current_slot() {
+	misc_ab status "$MISC_DEV" 2>/dev/null | sed -n 's/^last_boot=//p'
+}
+
+slot_successful() {
+	misc_ab status "$MISC_DEV" 2>/dev/null | \
+		grep -q "^slot_$SLOT:.*successful_boot=1"
+}
+
+# One product healthy = its daemon process is alive. Deliberately NOT a
+# port check: which ports are open depends on operator configuration (web
+# console can be legitimately disabled, TLS can be re-pointed), and a unit
+# must never roll back because of a configuration choice. A daemon that
+# starts and stays up for the check window has loaded its config from
+# /userdata and survived — that is the "remotely updatable again" bar
+# rollback exists to protect. Deeper checks belong on the bench.
+daemon_ok() {
+	pidof "$1" >/dev/null 2>&1
+}
+
+products_ok() {
+	checked=0
+	if [ -x /usr/sbin/media-gateway ]; then
+		checked=1
+		daemon_ok media-gateway || return 1
+	fi
+	if [ -x /usr/sbin/intelligence_edge_opcua ]; then
+		checked=1
+		daemon_ok intelligence_edge_opcua || return 1
+	fi
+	# An image with neither product is a platform image under test; count
+	# reaching S99 at all as healthy rather than bricking the bench.
+	[ "$checked" = "1" ] || log "no product daemons installed; minimal health bar"
+	return 0
+}
+
+case "$1" in
+start)
+	command -v misc_ab >/dev/null 2>&1 || exit 0
+	MISC_DEV=$(find_part misc) || exit 0   # single-slot layout: nothing to do
+	SLOT=$(current_slot)
+	[ "$SLOT" = "a" ] || [ "$SLOT" = "b" ] || exit 0
+	if slot_successful; then
+		exit 0                         # steady state, boots are free
+	fi
+	# Give slow services a moment; S99 runs right after them.
+	n=0
+	while [ $n -lt 6 ]; do
+		if products_ok; then
+			misc_ab mark-successful "$MISC_DEV" "$SLOT" && \
+				log "slot $SLOT verified healthy -> marked successful"
+			# Audit trail (Annex I #6): a slot switch is a
+			# security-relevant lifecycle event.
+			for d in /userdata/satisense /userdata/media-gateway; do
+				[ -d "$d" ] && ( umask 077; printf '%s event=ab_slot_marked_successful slot=%s\n' \
+					"$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$SLOT" >> "$d/audit.log" ) 2>/dev/null
+			done
+			exit 0
+		fi
+		n=$((n + 1)); sleep 5
+	done
+	log "slot $SLOT NOT healthy after 30s; try stays burned ($(misc_ab status "$MISC_DEV" | grep "slot_$SLOT"))"
+	exit 0   # never block boot
+	;;
+stop) ;;
+*) echo "Usage: $0 {start|stop}" ;;
+esac
+exit 0

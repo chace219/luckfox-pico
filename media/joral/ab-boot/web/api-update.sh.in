@@ -1,0 +1,288 @@
+#!/bin/sh
+# api-update.sh — console CGI for the A/B firmware update (CRA Annex I #7).
+#
+# TEMPLATE: each product tree installs a copy with @WEBAUTH@ replaced by its
+# own auth library path (see media/joral/ab-boot/README.md). Everything else
+# is identical on both products — the update is a PLATFORM operation (one
+# shared rootfs), the consoles are just two doors to it.
+#
+# Actions (all require an authenticated session; every one is audit-logged):
+#   GET  ?action=status   slot table (misc_ab), staged-.swu info, layout
+#   POST ?action=upload   raw .swu body -> staged to /userdata/update.swu,
+#                         then VERIFIED (swupdate -c: signature + hashes)
+#                         before it is reported as ready. A file that fails
+#                         verification is deleted on the spot.
+#   POST ?action=apply    install the staged .swu to the INACTIVE slot
+#                         (swupdate -e stable,<other>), mark-active on
+#                         success. The unit keeps serving throughout;
+#                         the switch happens at the next reboot.
+#   POST ?action=reboot   reboot the unit — the operator's explicit "switch
+#                         now". DELIBERATELY not automatic after apply: this
+#                         gateway carries machine-control traffic, and only
+#                         the operator knows when the maintenance window is.
+#                         Deferred switching is exactly what A/B buys.
+#
+# Security posture, in the ADR-130 discipline:
+#   - no client-supplied filesystem paths — the staging path is fixed;
+#   - the ONLY trust decision is swupdate's own CMS verification against
+#     /etc/swupdate/trusted-certs.pem (the same check a tampered or
+#     wrong-key .swu fails on the bench);
+#   - the running slot can never be written: the target is computed from
+#     misc_ab last_boot, never taken from the client;
+#   - upload and apply are separate steps so the operator confirms against
+#     the verified version string, not a filename.
+WEBAUTH=@WEBAUTH@
+. "$WEBAUTH"
+require_auth
+
+STAGED=/userdata/update.swu
+MAX_BYTES=268435456   # 256 MB cap: rootfs slot is 1536M, image ~160M today
+# Detached-install bookkeeping (see the apply/progress actions). Small files in
+# /tmp; the install itself outlives the CGI request that starts it.
+APPLY_PID=/tmp/swu-apply.pid
+APPLY_PCT=/tmp/swu-apply.pct
+APPLY_STATE=/tmp/swu-apply.state
+APPLY_LOG=/tmp/swu-apply.log
+OP_LOCK=/tmp/swu-op.lock   # flock target, see op_lock() below
+
+printf 'Content-Type: application/json\r\n\r\n'
+
+qs_get() { echo "$QUERY_STRING" | tr '&' '\n' | sed -n "s/^$1=//p" | head -n1; }
+ACTION=$(qs_get action)
+
+find_part() { # by PARTNAME, same method as the initramfs / S99ab-health
+	for u in /sys/block/mmcblk*/mmcblk*/uevent; do
+		[ -f "$u" ] || continue
+		if grep -q "^PARTNAME=$1$" "$u"; then
+			echo "/dev/$(grep '^DEVNAME=' "$u" | cut -d= -f2)"
+			return 0
+		fi
+	done
+	return 1
+}
+
+json_escape() { sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' '; }
+
+# Mutual exclusion for the two MUTATING operations. Both touch shared state --
+# upload replaces the single staged package, apply writes a rootfs slot -- and a
+# check-then-act test ("is a pid file there?") is not enough: two requests can
+# both pass the test before either records itself, and two SWUpdate processes
+# writing the same slot corrupt it.
+#
+# flock, not a lock file we manage ourselves. The lock lives in the KERNEL and
+# is attached to the open descriptor, so it is released automatically when the
+# holder exits -- however it exits. That removes the entire stale-lock problem:
+# there is no leftover state to inspect, and therefore no "is the holder still
+# alive?" test, which cannot be made race-free in shell. Two earlier attempts
+# here (pid file, then mkdir + pid check) both let a second caller in while a
+# first was recovering a stale lock.
+#
+# The descriptor is inherited across fork and exec, so the DETACHED installer
+# keeps holding the same lock for as long as it runs, with no handover.
+op_lock() {
+	exec 9>>"$OP_LOCK" || return 1
+	flock -n 9
+}
+op_unlock() { flock -u 9 2>/dev/null; exec 9>&-; }
+
+# The slot an install would target: the one NOT booted last. Echoes "a" or
+# "b"; fails on a single-slot layout or an unreadable misc record.
+inactive_slot() {
+	local misc cur
+	misc=$(find_part misc) || return 1
+	cur=$(misc_ab status "$misc" 2>/dev/null | sed -n 's/^last_boot=//p')
+	case "$cur" in
+		a) echo b ;;
+		b) echo a ;;
+		*) return 1 ;;
+	esac
+}
+
+slot_json() { # emits {"layout":...,"slots":...,"pending":...} fragment
+	MISC=$(find_part misc) || { printf '"layout":"single-slot"'; return; }
+	RAW=$(misc_ab status "$MISC" 2>/dev/null)
+	S=$(printf '%s' "$RAW" | json_escape)
+	# A switch is pending when the slot the selector would boot next differs
+	# from the one running now — i.e. an installed update is waiting for the
+	# reboot. The UI keys its "Reboot now to switch" button off this.
+	CHOICE=$(printf '%s' "$RAW" | sed -n 's/^choice=//p')
+	LASTB=$(printf '%s' "$RAW" | sed -n 's/^last_boot=//p')
+	PEND=false
+	[ -n "$CHOICE" ] && [ "$CHOICE" != "none" ] && [ "$CHOICE" != "$LASTB" ] && PEND=true
+	printf '"layout":"ab","misc":"%s","slots":"%s","pending":%s' "$MISC" "$S" "$PEND"
+}
+
+staged_json() {
+	if [ -f "$STAGED" ]; then
+		V=$(cpio -i --to-stdout sw-description < "$STAGED" 2>/dev/null | \
+			sed -n 's/.*version = "\([^"]*\)".*/\1/p' | head -n1)
+		printf ',"staged":{"present":true,"version":"%s","bytes":%s}' \
+			"$V" "$(wc -c < "$STAGED")"
+	else
+		printf ',"staged":{"present":false}'
+	fi
+}
+
+case "$ACTION" in
+status)
+	printf '{"ok":true,'
+	slot_json
+	staged_json
+	printf '}'
+	;;
+
+upload)
+	[ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}'; exit 0; }
+	# A missing updater is an image-build defect, not a bad signature —
+	# report it as itself (and before streaming a 150 MB body).
+	if ! command -v swupdate >/dev/null 2>&1; then
+		audit_log fw_upload fail "$(current_user)" "reason=swupdate_missing"
+		printf '{"ok":false,"error":"swupdate binary missing from this image — reflash a rootfs built with SWUpdate enabled"}'; exit 0
+	fi
+	# One mutating operation at a time: a second upload would interleave into
+	# the same staging file, and an upload must not swap the package out from
+	# under a running install.
+	op_lock || {
+		printf '{"ok":false,"error":"another update operation is in progress — wait for it to finish"}'; exit 0
+	}
+	trap op_unlock EXIT INT TERM
+	len="${CONTENT_LENGTH:-0}"
+	case "$len" in ''|*[!0-9]*) len=0 ;; esac
+	if [ "$len" -lt 512 ] || [ "$len" -gt "$MAX_BYTES" ]; then
+		printf '{"ok":false,"error":"body must be 512..%s bytes"}' "$MAX_BYTES"; exit 0
+	fi
+	# Space check before we stream a couple hundred MB at /userdata.
+	free_kb=$(df -k /userdata 2>/dev/null | awk 'NR==2{print $4}')
+	if [ -n "$free_kb" ] && [ $((len / 1024 + 4096)) -gt "$free_kb" ]; then
+		printf '{"ok":false,"error":"not enough space on /userdata"}'; exit 0
+	fi
+	rm -f "$STAGED"
+	dd of="$STAGED.tmp" bs=64k 2>/dev/null
+	got=$(wc -c < "$STAGED.tmp")
+	if [ "$got" != "$len" ]; then
+		rm -f "$STAGED.tmp"
+		audit_log fw_upload fail "$(current_user)" "reason=short_body got=$got want=$len"
+		printf '{"ok":false,"error":"short upload (%s of %s bytes)"}' "$got" "$len"; exit 0
+	fi
+	# Verify BEFORE accepting: signature chain + per-image sha256, with the
+	# SAME software-set selection the install will use. Without -e this
+	# two-mode sw-description selects nothing and swupdate 2022.12 aborts
+	# with only a bare "Image invalid or corrupted" (bench, 2026-08-14);
+	# with it, the payload hash for the target slot is verified here, not
+	# just the cpio member CRCs. -c is a dry run — the handler is replaced
+	# by a dummy, so nothing is written to the slot.
+	SEL=$(inactive_slot) || {
+		rm -f "$STAGED.tmp"
+		audit_log fw_upload fail "$(current_user)" "reason=no_slot"
+		printf '{"ok":false,"error":"cannot determine target slot — single-slot layout or unreadable misc record"}'; exit 0
+	}
+	if swupdate -c -i "$STAGED.tmp" -e "stable,$SEL" >/tmp/swu-check.log 2>&1; then
+		mv "$STAGED.tmp" "$STAGED"
+		V=$(cpio -i --to-stdout sw-description < "$STAGED" 2>/dev/null | \
+			sed -n 's/.*version = "\([^"]*\)".*/\1/p' | head -n1)
+		audit_log fw_upload success "$(current_user)" "version=$V bytes=$len"
+		printf '{"ok":true,"verified":true,"version":"%s"}' "$V"
+	else
+		rm -f "$STAGED.tmp"
+		# The PRIMARY error is an [ERROR] line that can scroll far above the
+		# end of the log; a bare tail showed only secondary noise (broken
+		# internal pipes) and cost two bench debugging rounds on 2026-08-14.
+		ERR=$({ grep -iE "error|fail" /tmp/swu-check.log | head -n4;
+			tail -n1 /tmp/swu-check.log; } | json_escape)
+		audit_log fw_upload fail "$(current_user)" "reason=verify_failed"
+		printf '{"ok":false,"error":"verification failed — wrong signature or corrupt file","detail":"%s"}' "$ERR"
+	fi
+	;;
+
+apply)
+	[ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}'; exit 0; }
+	if ! command -v swupdate >/dev/null 2>&1; then
+		audit_log fw_apply fail "$(current_user)" "reason=swupdate_missing"
+		printf '{"ok":false,"error":"swupdate binary missing from this image — reflash a rootfs built with SWUpdate enabled"}'; exit 0
+	fi
+	[ -f "$STAGED" ] || { printf '{"ok":false,"error":"no verified update staged — upload first"}'; exit 0; }
+	MISC=$(find_part misc) || { printf '{"ok":false,"error":"single-slot layout — this image cannot A/B update"}'; exit 0; }
+	TARGET=$(inactive_slot) || { printf '{"ok":false,"error":"cannot determine running slot"}'; exit 0; }
+	# Exactly one installer, ever: two SWUpdate processes writing the same slot
+	# would corrupt it. The lock is NOT released here -- the worker inherits it.
+	op_lock || {
+		printf '{"ok":true,"started":true,"target":"%s","note":"an update operation is already in progress"}' "$TARGET"; exit 0
+	}
+	audit_log fw_apply started "$(current_user)" "target=$TARGET"
+	AUSER=$(current_user)
+	echo 0 > "$APPLY_PCT"
+	rm -f "$APPLY_STATE"
+	# The install writes ~150 MB to the standby slot and takes a minute or two,
+	# far longer than a browser will wait on one request. Hand it to the worker
+	# beside webauth.sh under a fresh session (setsid) with fds off the HTTP
+	# socket, so httpd closes THIS response at once while the install runs on.
+	# The browser then polls ?action=progress.
+	INSTALLER="$(dirname "$WEBAUTH")/swu-install.sh"
+	[ -x "$INSTALLER" ] || {
+		audit_log fw_apply fail "$AUSER" "target=$TARGET reason=worker_missing"
+		printf '{"ok":false,"error":"install worker %s missing from this image"}' "$INSTALLER"; exit 0
+	}
+	# The worker INHERITS fd 9 and with it the flock, so the lock stays held for
+	# the whole install with no handover and nothing to clean up if it dies.
+	# It stamps its own pid into $APPLY_PID for the progress action; neither $!
+	# nor setsid's pid can be trusted for that, since setsid may fork and its
+	# pid can vanish immediately -- which would make `progress` report a running
+	# install as finished.
+	rm -f "$APPLY_PID"
+	setsid "$INSTALLER" "$STAGED" "$TARGET" "$MISC" "$AUSER" >/dev/null 2>&1 </dev/null &
+	printf '{"ok":true,"started":true,"target":"%s","note":"installing to the standby slot — poll ?action=progress"}' "$TARGET"
+	;;
+
+progress)
+	# Non-destructive poll for a running/finished install (see apply).
+	PCT=$(cat "$APPLY_PCT" 2>/dev/null); case "$PCT" in ''|*[!0-9]*) PCT=0 ;; esac
+	if [ -f "$APPLY_STATE" ]; then
+		ST=$(cat "$APPLY_STATE")
+		case "$ST" in
+		done*)
+			TGT=${ST#done target=}
+			printf '{"ok":true,"state":"done","percent":100,"target":"%s","note":"reboot to switch; automatic rollback if the new slot fails to come up"}' "$TGT"
+			;;
+		*)
+			DET=$(printf '%s' "${ST#fail }" | json_escape)
+			printf '{"ok":false,"state":"failed","percent":%s,"error":"install failed — running system untouched","detail":"%s"}' "$PCT" "$DET"
+			;;
+		esac
+	elif [ -f "$APPLY_PID" ] && kill -0 "$(cat "$APPLY_PID" 2>/dev/null)" 2>/dev/null; then
+		printf '{"ok":true,"state":"running","percent":%s}' "$PCT"
+	else
+		printf '{"ok":true,"state":"idle","percent":0}'
+	fi
+	;;
+
+reboot)
+	[ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}'; exit 0; }
+	# Refuse while ANY update operation is running: rebooting mid-write leaves
+	# the standby slot half-written (recoverable — it was never marked active —
+	# but it pointlessly burns the staged update), and mid-upload it discards
+	# the transfer.
+	#
+	# Take the same flock rather than testing the pid file. The pid file is
+	# written by the worker once it is scheduled, so a pid test has a blind
+	# window between apply returning and the worker starting, and would let a
+	# reboot through exactly when an install is being handed over. The lock has
+	# no such window: the CGI holds it from before the launch and the worker
+	# inherits it, so it is continuously held for the whole operation.
+	op_lock || {
+		printf '{"ok":false,"error":"an update operation is in progress — wait for it to finish, then reboot"}'; exit 0
+	}
+	trap op_unlock EXIT INT TERM
+	audit_log fw_reboot requested "$(current_user)" ""
+	# Detach so this JSON response reaches the browser before the unit goes
+	# down; the sleep gives httpd time to flush the socket.
+	# 9>&- so the detached rebooter does not inherit the lock and keep it held
+	# for its two-second life (or longer, if the reboot stalls).
+	setsid sh -c 'sleep 2; sync; reboot' >/dev/null 2>&1 </dev/null 9>&- &
+	printf '{"ok":true,"note":"rebooting — the console drops for ~40 s, then answers from the newly selected slot"}'
+	;;
+
+*)
+	printf '{"ok":false,"error":"action must be status|upload|apply|progress|reboot"}'
+	;;
+esac
+exit 0

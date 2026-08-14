@@ -620,6 +620,7 @@ buildroot_create:
 	cp ${LIBOPENSSL3_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/libopenssl/
 	cp ${OPEN62541_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/open62541/
 	cp ${PPPD_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/pppd/
+	cp $(SYSDRV_DIR)/tools/board/buildroot/swupdate/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/swupdate/
 
 buildroot: prepare
 	@echo -e "$(C_GREEN) ==sysdrv== build buildroot   $(C_NORMAL)"
@@ -636,6 +637,7 @@ buildroot: prepare
 		cp ${LIBOPENSSL3_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/libopenssl/ ;\
 		cp ${OPEN62541_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/open62541/ ;\
 		cp ${PPPD_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/pppd/ ;\
+		cp $(SYSDRV_DIR)/tools/board/buildroot/swupdate/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/swupdate/ ;\
 	);
 
 	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) BR2_EXTERNAL=$(BR2_EXTERNAL_DIR) $(BUILDROOT_DEFCONFIG) -C $(BUILDROOT_DIR)/$(BUILDROOT_VER)

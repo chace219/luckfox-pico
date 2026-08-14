@@ -1,0 +1,102 @@
+/*
+ * boot-ab.its — FIT source for the A/B boot image: kernel + FDT + resource
+ * (identical to sysdrv/source/kernel/boot.its) PLUS the ab-boot initramfs.
+ *
+ * Spike item (a) of media/joral/swupdate-implementation-plan.md: build the
+ * boot FIT from this file instead of boot.its and confirm U-Boot proper
+ * loads the ramdisk and the kernel runs /init from it.
+ *
+ * To use: point the kernel image build at this file —
+ *   make ... BOOT_ITS=<abs path>/boot-ab.its   (see sysdrv/Makefile:504)
+ * with `ramdisk.cpio.gz` (from scripts/mkinitramfs.sh) copied next to the
+ * `kernel`/`fdt`/`resource` blobs in the kernel objs output dir first.
+ *
+ * The ramdisk node follows project/sfc_scripts/rv1106-boot-tb-ramdisk.its
+ * (the vendor's own ramdisk-in-FIT example for this SoC family), minus the
+ * tiny-boot preload/decomp attributes that only the SPL_KERNEL_BOOT path
+ * consumes. The kernel needs no root=/init= bootargs change: a FIT-supplied
+ * ramdisk with a /init is entered automatically (CONFIG_BLK_DEV_INITRD=y).
+ */
+
+/dts-v1/;
+/ {
+    description = "FIT image with Linux kernel, FDT blob, resource and A/B initramfs";
+
+    images {
+        fdt {
+            data = /incbin/("fdt");
+            type = "flat_dt";
+            arch = "";
+            compression = "none";
+            load = <0xffffff00>;
+
+            hash {
+                algo = "sha256";
+            };
+        };
+
+        kernel {
+            data = /incbin/("kernel");
+            type = "kernel";
+            arch = "";
+            os = "linux";
+            compression = "";
+            entry = <0xffffff01>;
+            load = <0xffffff01>;
+
+            hash {
+                algo = "sha256";
+            };
+        };
+
+        resource {
+            data = /incbin/("resource");
+            type = "multi";
+            arch = "";
+            compression = "none";
+
+            hash {
+                algo = "sha256";
+            };
+        };
+
+        ramdisk {
+            data = /incbin/("ramdisk.cpio.gz");
+            type = "ramdisk";
+            arch = "arm";
+            os = "linux";
+            compression = "gzip";
+            /* load address (ramdisk_addr_r for rv1106, rv1106_common.h) —
+             * WITHOUT it U-Boot proper's boot_fit loads the kernel but never
+             * places/passes the ramdisk, so the kernel falls straight to
+             * root= and the A/B initramfs never runs (bench, 2026-08-14).
+             * uboot-ignore mirrors the vendor rv1106-boot-tb-ramdisk.its so
+             * U-Boot does not re-verify the ramdisk hash before handing off. */
+            load = <0x00e00000>;
+
+            hash {
+                algo = "sha256";
+                uboot-ignore = <1>;
+            };
+        };
+    };
+
+    configurations {
+        default = "conf";
+
+        conf {
+            rollback-index = <0x00>;
+            fdt = "fdt";
+            kernel = "kernel";
+            multi = "resource";
+            ramdisk = "ramdisk";
+
+            signature {
+                algo = "sha256,rsa2048";
+                padding = "pss";
+                key-name-hint = "dev";
+                sign-images = "fdt", "kernel", "multi", "ramdisk";
+            };
+        };
+    };
+};

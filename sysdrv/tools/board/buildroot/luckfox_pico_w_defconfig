@@ -174,3 +174,12 @@ BR2_PACKAGE_PROCPS_NG=y
 BR2_PACKAGE_UTIL_LINUX_LIBMOUNT=y
 BR2_PACKAGE_NANO=y
 BR2_PACKAGE_HOST_DTC=y
+
+# In-product firmware update (CRA Annex I #7): SWUpdate, console-driven.
+# Signature verification (CMS via OpenSSL) is configured in the package
+# build config below; the embedded webserver stays OFF — the product web
+# consoles drive updates through their own authenticated CGIs, and the
+# firewall ships default-deny (media/joral/swupdate-implementation-plan.md).
+BR2_PACKAGE_SWUPDATE=y
+BR2_PACKAGE_SWUPDATE_CONFIG="package/swupdate/swupdate-joral.config"
+# BR2_PACKAGE_SWUPDATE_WEBSERVER is not set
