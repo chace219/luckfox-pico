@@ -43,6 +43,7 @@ APPLY_PID=/tmp/swu-apply.pid
 APPLY_PCT=/tmp/swu-apply.pct
 APPLY_STATE=/tmp/swu-apply.state
 APPLY_LOG=/tmp/swu-apply.log
+OP_LOCK=/tmp/swu-op.lock   # flock target, see op_lock() below
 
 printf 'Content-Type: application/json\r\n\r\n'
 
@@ -61,6 +62,28 @@ find_part() { # by PARTNAME, same method as the initramfs / S99ab-health
 }
 
 json_escape() { sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' '; }
+
+# Mutual exclusion for the two MUTATING operations. Both touch shared state --
+# upload replaces the single staged package, apply writes a rootfs slot -- and a
+# check-then-act test ("is a pid file there?") is not enough: two requests can
+# both pass the test before either records itself, and two SWUpdate processes
+# writing the same slot corrupt it.
+#
+# flock, not a lock file we manage ourselves. The lock lives in the KERNEL and
+# is attached to the open descriptor, so it is released automatically when the
+# holder exits -- however it exits. That removes the entire stale-lock problem:
+# there is no leftover state to inspect, and therefore no "is the holder still
+# alive?" test, which cannot be made race-free in shell. Two earlier attempts
+# here (pid file, then mkdir + pid check) both let a second caller in while a
+# first was recovering a stale lock.
+#
+# The descriptor is inherited across fork and exec, so the DETACHED installer
+# keeps holding the same lock for as long as it runs, with no handover.
+op_lock() {
+	exec 9>>"$OP_LOCK" || return 1
+	flock -n 9
+}
+op_unlock() { flock -u 9 2>/dev/null; exec 9>&-; }
 
 # The slot an install would target: the one NOT booted last. Echoes "a" or
 # "b"; fails on a single-slot layout or an unreadable misc record.
@@ -116,6 +139,13 @@ upload)
 		audit_log fw_upload fail "$(current_user)" "reason=swupdate_missing"
 		printf '{"ok":false,"error":"swupdate binary missing from this image — reflash a rootfs built with SWUpdate enabled"}'; exit 0
 	fi
+	# One mutating operation at a time: a second upload would interleave into
+	# the same staging file, and an upload must not swap the package out from
+	# under a running install.
+	op_lock || {
+		printf '{"ok":false,"error":"another update operation is in progress — wait for it to finish"}'; exit 0
+	}
+	trap op_unlock EXIT INT TERM
 	len="${CONTENT_LENGTH:-0}"
 	case "$len" in ''|*[!0-9]*) len=0 ;; esac
 	if [ "$len" -lt 512 ] || [ "$len" -gt "$MAX_BYTES" ]; then
@@ -173,10 +203,11 @@ apply)
 	[ -f "$STAGED" ] || { printf '{"ok":false,"error":"no verified update staged — upload first"}'; exit 0; }
 	MISC=$(find_part misc) || { printf '{"ok":false,"error":"single-slot layout — this image cannot A/B update"}'; exit 0; }
 	TARGET=$(inactive_slot) || { printf '{"ok":false,"error":"cannot determine running slot"}'; exit 0; }
-	# Don't launch a second installer over a running one.
-	if [ -f "$APPLY_PID" ] && kill -0 "$(cat "$APPLY_PID" 2>/dev/null)" 2>/dev/null; then
-		printf '{"ok":true,"started":true,"target":"%s","note":"install already running"}' "$TARGET"; exit 0
-	fi
+	# Exactly one installer, ever: two SWUpdate processes writing the same slot
+	# would corrupt it. The lock is NOT released here -- the worker inherits it.
+	op_lock || {
+		printf '{"ok":true,"started":true,"target":"%s","note":"an update operation is already in progress"}' "$TARGET"; exit 0
+	}
 	audit_log fw_apply started "$(current_user)" "target=$TARGET"
 	AUSER=$(current_user)
 	echo 0 > "$APPLY_PCT"
@@ -191,9 +222,12 @@ apply)
 		audit_log fw_apply fail "$AUSER" "target=$TARGET reason=worker_missing"
 		printf '{"ok":false,"error":"install worker %s missing from this image"}' "$INSTALLER"; exit 0
 	}
-	# The worker writes $APPLY_PID itself — $! here would be setsid's pid,
-	# which can vanish the instant it forks, making `progress` report an
-	# install that is still running as finished.
+	# The worker INHERITS fd 9 and with it the flock, so the lock stays held for
+	# the whole install with no handover and nothing to clean up if it dies.
+	# It stamps its own pid into $APPLY_PID for the progress action; neither $!
+	# nor setsid's pid can be trusted for that, since setsid may fork and its
+	# pid can vanish immediately -- which would make `progress` report a running
+	# install as finished.
 	rm -f "$APPLY_PID"
 	setsid "$INSTALLER" "$STAGED" "$TARGET" "$MISC" "$AUSER" >/dev/null 2>&1 </dev/null &
 	printf '{"ok":true,"started":true,"target":"%s","note":"installing to the standby slot — poll ?action=progress"}' "$TARGET"
@@ -223,16 +257,27 @@ progress)
 
 reboot)
 	[ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}'; exit 0; }
-	# Refuse while an install is writing the standby slot: rebooting
-	# mid-write leaves that slot half-written (recoverable — it was never
-	# marked active — but pointlessly burns the staged update).
-	if [ -f "$APPLY_PID" ] && kill -0 "$(cat "$APPLY_PID" 2>/dev/null)" 2>/dev/null; then
-		printf '{"ok":false,"error":"an install is still writing the standby slot — wait for it to finish"}'; exit 0
-	fi
+	# Refuse while ANY update operation is running: rebooting mid-write leaves
+	# the standby slot half-written (recoverable — it was never marked active —
+	# but it pointlessly burns the staged update), and mid-upload it discards
+	# the transfer.
+	#
+	# Take the same flock rather than testing the pid file. The pid file is
+	# written by the worker once it is scheduled, so a pid test has a blind
+	# window between apply returning and the worker starting, and would let a
+	# reboot through exactly when an install is being handed over. The lock has
+	# no such window: the CGI holds it from before the launch and the worker
+	# inherits it, so it is continuously held for the whole operation.
+	op_lock || {
+		printf '{"ok":false,"error":"an update operation is in progress — wait for it to finish, then reboot"}'; exit 0
+	}
+	trap op_unlock EXIT INT TERM
 	audit_log fw_reboot requested "$(current_user)" ""
 	# Detach so this JSON response reaches the browser before the unit goes
 	# down; the sleep gives httpd time to flush the socket.
-	setsid sh -c 'sleep 2; sync; reboot' >/dev/null 2>&1 </dev/null &
+	# 9>&- so the detached rebooter does not inherit the lock and keep it held
+	# for its two-second life (or longer, if the reboot stalls).
+	setsid sh -c 'sleep 2; sync; reboot' >/dev/null 2>&1 </dev/null 9>&- &
 	printf '{"ok":true,"note":"rebooting — the console drops for ~40 s, then answers from the newly selected slot"}'
 	;;
 

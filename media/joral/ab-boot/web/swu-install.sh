@@ -24,20 +24,34 @@ PCT=/tmp/swu-apply.pct
 STATE=/tmp/swu-apply.state
 LOG=/tmp/swu-apply.log
 PIDF=/tmp/swu-apply.pid
-
-# WE own the pid file, not the caller: the CGI launches us through setsid,
-# whose $! is setsid's own pid and may be gone the moment it forks — the
-# progress poll then reports "nothing running" while the install is in fact
-# still writing the slot.
+# The CGI holds an flock on fd 9 and we INHERITED that descriptor across
+# fork+exec, so the operation stays locked for as long as this worker runs and
+# the kernel releases it when we exit, however we exit. Nothing to acquire here
+# and nothing to clean up -- which is the point: a lock we managed ourselves
+# would need a staleness test, and that cannot be made race-free in shell.
+#
+# The pid file is only for the progress action; $! and setsid's pid are both
+# unreliable for it, so we record our own.
+trap 'rm -f "$PIDF"' EXIT INT TERM
 echo $$ > "$PIDF"
 
 # Stream SWUpdate's own progress IPC into a single-number file. -w makes the
 # reader wait/reconnect until swupdate opens the socket, so start order does
 # not matter. Each progress line is "[bar] N of M P% (image), dwl X% of Y" —
 # take the per-step "P% (", not the download "X% of".
-swupdate-progress -w 2>/dev/null | tr '\r' '\n' \
-  | awk 'match($0,/[0-9]+% \(/){s=substr($0,RSTART,RLENGTH);gsub(/[^0-9]/,"",s);print s;fflush()}' \
-  | while IFS= read -r p; do echo "$p" > "$PCT"; done &
+#
+# 9>&- closes the inherited lock descriptor for this pipeline. The flock is
+# held by whoever holds the fd, so a progress reader that outlived us -- it
+# blocks on a socket and there are three processes to reap -- would keep the
+# update locked until the unit rebooted. Only the worker itself should hold it.
+# EVERY stage closes fd 9, not just the ends: each is a separate process and
+# any one of them still holding the descriptor keeps the flock held. The reader
+# blocks on a socket, so it is the likeliest straggler, but a lingering tr or
+# awk would lock out updates just as effectively -- until the unit rebooted.
+{ swupdate-progress -w 2>/dev/null 9>&- \
+  | tr '\r' '\n' 9>&- \
+  | awk 'match($0,/[0-9]+% \(/){s=substr($0,RSTART,RLENGTH);gsub(/[^0-9]/,"",s);print s;fflush()}' 9>&- \
+  | while IFS= read -r p; do echo "$p" > "$PCT"; done 9>&- ; } 9>&- &
 PROG=$!
 
 if swupdate -i "$STAGED" -e "stable,$TARGET" > "$LOG" 2>&1; then
@@ -56,4 +70,4 @@ else
 fi
 
 kill "$PROG" 2>/dev/null
-rm -f "$PIDF"
+# pid file and lock are released by the EXIT trap.
