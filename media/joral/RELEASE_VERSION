@@ -1,0 +1,30 @@
+# The platform release identity — ONE line, YYYY.MM.PATCH.
+#
+# This is the version a unit reports as its own and the version a .swu declares
+# in its manifest; both are derived from this file, never typed twice. Bump it
+# for every image that leaves this tree as a release candidate.
+#
+# Why a date and not a semantic version: the .swu carries ONE rootfs shared by
+# both products, so there is no single API whose compatibility a major number
+# could describe. What the field has to support is ORDER — deciding whether an
+# update is a step forward or a rollback to something a published advisory
+# already covers — and a date does that without a release database, while
+# staying readable as an age to whoever is holding the unit.
+#
+#   YYYY  four-digit year
+#   MM    zero-padded month, 01-12
+#   PATCH release within that month, from 1, NOT zero-padded and free to reach
+#         two digits (the comparator is numeric per field: 2026.08.10 is newer
+#         than 2026.08.9, which every string sort gets backwards)
+#
+# Enforced, not merely documented: ab-boot's `make install` stamps this into
+# /etc/sw-versions and FAILS THE BUILD if the value is not a well-formed
+# identity, and `./build.sh swu` reads the version back OUT of the packed
+# rootfs rather than trusting this file a second time — so a manifest can never
+# claim a version the image does not carry.
+#
+# Format and ordering rules live in media/joral/ab-boot/web/swu-version.sh,
+# pinned by media/joral/ab-boot/tests/test_swu_version.sh. Background:
+# swupdate-implementation-plan.md, "Item 5 / one-way door #4".
+
+2026.08.1

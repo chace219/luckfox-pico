@@ -39,6 +39,15 @@ SDK_ROOT   := $(abspath $(CURDIR)/../../..)
 PROD_CERTS := $(SDK_ROOT)/scripts/compliance/keys/trusted-certs.pem
 DEV_KEYDIR := keys-dev
 
+# Release identity (one-way door #4). The tracked version is stamped into the
+# image as /etc/sw-versions, per slot, so a running unit can say which release
+# it carries and the console can tell an upgrade from a rollback. A malformed
+# value FAILS THE BUILD here rather than producing an image whose version
+# cannot be ordered — the defect would otherwise surface only when an operator
+# tried to install over it. See web/swu-version.sh.
+RELEASE_FILE := $(SDK_ROOT)/media/joral/RELEASE_VERSION
+VERSION_LIB  := $(CURDIR)/web/swu-version.sh
+
 .PHONY: all clean install test
 
 all: $(BUILDDIR)/misc_ab
@@ -71,6 +80,8 @@ install: all $(if $(wildcard $(PROD_CERTS)),,$(DEV_KEYDIR)/trusted-certs.pem)
 	install -m 755 $(BUILDDIR)/misc_ab $(SBINDIR)/misc_ab
 	install -m 755 scripts/init.d/S99ab-health $(INITDIR)/S99ab-health
 	install -m 644 swupdate/swupdate.cfg $(DESTDIR)/etc/swupdate.cfg
+	@sh -c '. "$(VERSION_LIB)"; v=$$(sw_version_stamp "$(RELEASE_FILE)" "$(DESTDIR)/etc/sw-versions") || exit 1; \
+		echo "  STAMP    release $$v -> /etc/sw-versions"'
 ifneq ($(wildcard $(PROD_CERTS)),)
 	install -m 644 $(PROD_CERTS) $(SWUDIR)/trusted-certs.pem
 	@echo "  INSTALL  PRODUCTION trust store -> /etc/swupdate/trusted-certs.pem"
@@ -81,6 +92,14 @@ endif
 
 test: $(BUILDDIR)/misc_ab.host
 	MISC_AB=$(BUILDDIR)/misc_ab.host sh tests/test_misc_ab.sh
+	sh tests/test_swu_version.sh
+	sh tests/test_update_gate.sh
+	@# The tracked release identity must itself be valid — otherwise the first
+	@# sign of trouble is a failed `make install` in the middle of a platform
+	@# build, long after whoever bumped the file has moved on.
+	@sh -c '. "$(VERSION_LIB)"; v=$$(sw_version_read_file "$(RELEASE_FILE)") || exit 1; \
+		sw_version_valid "$$v" || { echo "RELEASE_VERSION holds an unorderable identity: $$v" >&2; exit 1; }; \
+		echo "release-version: $$v ok"'
 
 clean:
 	rm -rf $(BUILDDIR) out

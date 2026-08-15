@@ -16,6 +16,9 @@
 #                         (swupdate -e stable,<other>), mark-active on
 #                         success. The unit keeps serving throughout;
 #                         the switch happens at the next reboot.
+#                         REFUSED with code=confirm_required unless the package
+#                         is an upgrade or a reinstall — see the downgrade gate
+#                         below; override with &confirm=DOWNGRADE.
 #   POST ?action=reboot   reboot the unit — the operator's explicit "switch
 #                         now". DELIBERATELY not automatic after apply: this
 #                         gateway carries machine-control traffic, and only
@@ -30,20 +33,48 @@
 #   - the running slot can never be written: the target is computed from
 #     misc_ab last_boot, never taken from the client;
 #   - upload and apply are separate steps so the operator confirms against
-#     the verified version string, not a filename.
+#     the verified version string, not a filename;
+#   - a package that is not an upgrade needs the operator to type a phrase,
+#     re-checked HERE and not in the console JavaScript, so it also covers a
+#     caller driving the CGI directly.
+#
+# The downgrade gate (one-way door #4, swupdate-implementation-plan.md
+# "Item 5"). The signature says a package is genuinely ours; it says nothing
+# about its AGE, because CMS attests who built an image and never when. So a
+# properly signed old release — one a published advisory already covers —
+# would install over a fixed one with no warning at all. The release identity
+# is what makes that visible: swu-version.sh orders the staged package against
+# the running one, and anything that is not `newer` or `same` needs an explicit
+# typed confirmation. "unknown" counts as needing it, which is what a unit
+# running a pre-scheme image reports.
 WEBAUTH=@WEBAUTH@
+
+# SWU_PREFIX roots every path this script touches — empty on a real device, a
+# scratch tree under tests/. Same idiom as the factory reset's MG_RESET_PREFIX
+# and for the same reason: the script that ships has to be the script the
+# downgrade-gate test drives, or the gate is only ever tested by reimplementing
+# it. It is a prefix, never a substitute: the shipped defaults are still right
+# here in the source.
+R="${SWU_PREFIX:-}"
+
+# The release identity of THIS rootfs. Set before the library is sourced so the
+# prefix reaches it too; the library's own default is the bare /etc path.
+SW_VERSIONS_FILE="${SW_VERSIONS_FILE:-$R/etc/sw-versions}"
+
 . "$WEBAUTH"
+# Beside webauth.sh, installed by the same product Makefile.
+. "$(dirname "$WEBAUTH")/swu-version.sh"
 require_auth
 
-STAGED=/userdata/update.swu
+STAGED=$R/userdata/update.swu
 MAX_BYTES=268435456   # 256 MB cap: rootfs slot is 1536M, image ~160M today
 # Detached-install bookkeeping (see the apply/progress actions). Small files in
 # /tmp; the install itself outlives the CGI request that starts it.
-APPLY_PID=/tmp/swu-apply.pid
-APPLY_PCT=/tmp/swu-apply.pct
-APPLY_STATE=/tmp/swu-apply.state
-APPLY_LOG=/tmp/swu-apply.log
-OP_LOCK=/tmp/swu-op.lock   # flock target, see op_lock() below
+APPLY_PID=$R/tmp/swu-apply.pid
+APPLY_PCT=$R/tmp/swu-apply.pct
+APPLY_STATE=$R/tmp/swu-apply.state
+APPLY_LOG=$R/tmp/swu-apply.log
+OP_LOCK=$R/tmp/swu-op.lock   # flock target, see op_lock() below
 
 printf 'Content-Type: application/json\r\n\r\n'
 
@@ -51,10 +82,10 @@ qs_get() { echo "$QUERY_STRING" | tr '&' '\n' | sed -n "s/^$1=//p" | head -n1; }
 ACTION=$(qs_get action)
 
 find_part() { # by PARTNAME, same method as the initramfs / S99ab-health
-	for u in /sys/block/mmcblk*/mmcblk*/uevent; do
+	for u in "$R"/sys/block/mmcblk*/mmcblk*/uevent; do
 		[ -f "$u" ] || continue
 		if grep -q "^PARTNAME=$1$" "$u"; then
-			echo "/dev/$(grep '^DEVNAME=' "$u" | cut -d= -f2)"
+			echo "$R/dev/$(grep '^DEVNAME=' "$u" | cut -d= -f2)"
 			return 0
 		fi
 	done
@@ -112,12 +143,22 @@ slot_json() { # emits {"layout":...,"slots":...,"pending":...} fragment
 	printf '"layout":"ab","misc":"%s","slots":"%s","pending":%s' "$MISC" "$S" "$PEND"
 }
 
+# The release this rootfs carries, or "" on an image built before the scheme.
+# Read once per request: it cannot change while the CGI runs (a new release
+# only takes effect after a reboot into the other slot).
+RUNNING=$(sw_version_running 2>/dev/null) || RUNNING=""
+
 staged_json() {
 	if [ -f "$STAGED" ]; then
-		V=$(cpio -i --to-stdout sw-description < "$STAGED" 2>/dev/null | \
-			sed -n 's/.*version = "\([^"]*\)".*/\1/p' | head -n1)
-		printf ',"staged":{"present":true,"version":"%s","bytes":%s}' \
-			"$V" "$(wc -c < "$STAGED")"
+		V=$(sw_version_from_swu "$STAGED") || V=""
+		ORD=$(sw_version_order "$RUNNING" "$V")
+		# `downgrade` is the UI's cue to demand the typed phrase. It is the
+		# same predicate the apply action enforces — exported here only so the
+		# console can warn BEFORE the operator commits, never as the control
+		# itself.
+		if sw_version_needs_confirm "$ORD"; then DG=true; else DG=false; fi
+		printf ',"staged":{"present":true,"version":"%s","order":"%s","downgrade":%s,"bytes":%s}' \
+			"$V" "$ORD" "$DG" "$(wc -c < "$STAGED")"
 	else
 		printf ',"staged":{"present":false}'
 	fi
@@ -125,7 +166,10 @@ staged_json() {
 
 case "$ACTION" in
 status)
-	printf '{"ok":true,'
+	# running_version is "" on a pre-scheme image; the console says so rather
+	# than showing a blank, because "we cannot tell what this unit runs" is
+	# itself the answer an operator needs before installing anything.
+	printf '{"ok":true,"running_version":"%s",' "$RUNNING"
 	slot_json
 	staged_json
 	printf '}'
@@ -152,7 +196,7 @@ upload)
 		printf '{"ok":false,"error":"body must be 512..%s bytes"}' "$MAX_BYTES"; exit 0
 	fi
 	# Space check before we stream a couple hundred MB at /userdata.
-	free_kb=$(df -k /userdata 2>/dev/null | awk 'NR==2{print $4}')
+	free_kb=$(df -k "$R/userdata" 2>/dev/null | awk 'NR==2{print $4}')
 	if [ -n "$free_kb" ] && [ $((len / 1024 + 4096)) -gt "$free_kb" ]; then
 		printf '{"ok":false,"error":"not enough space on /userdata"}'; exit 0
 	fi
@@ -176,19 +220,26 @@ upload)
 		audit_log fw_upload fail "$(current_user)" "reason=no_slot"
 		printf '{"ok":false,"error":"cannot determine target slot — single-slot layout or unreadable misc record"}'; exit 0
 	}
-	if swupdate -c -i "$STAGED.tmp" -e "stable,$SEL" >/tmp/swu-check.log 2>&1; then
+	if swupdate -c -i "$STAGED.tmp" -e "stable,$SEL" >"$R/tmp/swu-check.log" 2>&1; then
 		mv "$STAGED.tmp" "$STAGED"
-		V=$(cpio -i --to-stdout sw-description < "$STAGED" 2>/dev/null | \
-			sed -n 's/.*version = "\([^"]*\)".*/\1/p' | head -n1)
-		audit_log fw_upload success "$(current_user)" "version=$V bytes=$len"
-		printf '{"ok":true,"verified":true,"version":"%s"}' "$V"
+		V=$(sw_version_from_swu "$STAGED") || V=""
+		# Order it now, so the console can warn the moment the package is
+		# accepted rather than only when the operator clicks install. The
+		# audit record carries the transition either way — "what was staged
+		# onto what" is the question an incident review asks first.
+		ORD=$(sw_version_order "$RUNNING" "$V")
+		if sw_version_needs_confirm "$ORD"; then DG=true; else DG=false; fi
+		audit_log fw_upload success "$(current_user)" \
+			"version=$V running=$RUNNING order=$ORD bytes=$len"
+		printf '{"ok":true,"verified":true,"version":"%s","order":"%s","downgrade":%s,"running":"%s"}' \
+			"$V" "$ORD" "$DG" "$RUNNING"
 	else
 		rm -f "$STAGED.tmp"
 		# The PRIMARY error is an [ERROR] line that can scroll far above the
 		# end of the log; a bare tail showed only secondary noise (broken
 		# internal pipes) and cost two bench debugging rounds on 2026-08-14.
-		ERR=$({ grep -iE "error|fail" /tmp/swu-check.log | head -n4;
-			tail -n1 /tmp/swu-check.log; } | json_escape)
+		ERR=$({ grep -iE "error|fail" "$R/tmp/swu-check.log" | head -n4;
+			tail -n1 "$R/tmp/swu-check.log"; } | json_escape)
 		audit_log fw_upload fail "$(current_user)" "reason=verify_failed"
 		printf '{"ok":false,"error":"verification failed — wrong signature or corrupt file","detail":"%s"}' "$ERR"
 	fi
@@ -203,12 +254,44 @@ apply)
 	[ -f "$STAGED" ] || { printf '{"ok":false,"error":"no verified update staged — upload first"}'; exit 0; }
 	MISC=$(find_part misc) || { printf '{"ok":false,"error":"single-slot layout — this image cannot A/B update"}'; exit 0; }
 	TARGET=$(inactive_slot) || { printf '{"ok":false,"error":"cannot determine running slot"}'; exit 0; }
+
+	# The downgrade gate. Checked BEFORE the lock is taken: a refusal changes
+	# nothing on the device, so it must not make a concurrent install wait.
+	SV=$(sw_version_from_swu "$STAGED") || SV=""
+	ORD=$(sw_version_order "$RUNNING" "$SV")
+	DG=false
+	if sw_version_needs_confirm "$ORD"; then
+		DG=true
+		# Compared here, server-side, against the phrase the library defines.
+		# The console arms its button on the same string, but that is a
+		# convenience: this check is what a caller reaching the CGI directly
+		# with curl also has to satisfy — the distinction between a control
+		# and a screen (the same one the default-password gate turns on).
+		if [ "$(qs_get confirm)" != "$SW_DOWNGRADE_PHRASE" ]; then
+			audit_log fw_apply fail "$(current_user)" \
+				"target=$TARGET reason=downgrade_unconfirmed order=$ORD from=$RUNNING to=$SV"
+			printf '{"ok":false,"code":"confirm_required","order":"%s","running":"%s","staged":"%s","phrase":"%s",' \
+				"$ORD" "$RUNNING" "$SV" "$SW_DOWNGRADE_PHRASE"
+			if [ "$ORD" = older ]; then
+				printf '"error":"%s is older than the running %s — installing it reintroduces anything fixed since. Confirm to proceed."}' \
+					"$SV" "$RUNNING"
+			else
+				printf '"error":"cannot tell whether this package is newer or older than what this unit runs. Confirm to proceed."}'
+			fi
+			exit 0
+		fi
+	fi
+
 	# Exactly one installer, ever: two SWUpdate processes writing the same slot
 	# would corrupt it. The lock is NOT released here -- the worker inherits it.
 	op_lock || {
 		printf '{"ok":true,"started":true,"target":"%s","note":"an update operation is already in progress"}' "$TARGET"; exit 0
 	}
-	audit_log fw_apply started "$(current_user)" "target=$TARGET"
+	# The version transition is part of the record, not just the slot: an
+	# advisory names releases, so an audit trail that only says "slot b" cannot
+	# answer whether a unit was ever running an affected build.
+	audit_log fw_apply started "$(current_user)" \
+		"target=$TARGET from=$RUNNING to=$SV order=$ORD downgrade=$DG"
 	AUSER=$(current_user)
 	echo 0 > "$APPLY_PCT"
 	rm -f "$APPLY_STATE"

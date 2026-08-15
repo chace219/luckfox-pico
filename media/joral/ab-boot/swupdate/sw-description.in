@@ -1,5 +1,6 @@
 /*
- * sw-description template — filled by `./build.sh swu` (@VERSION@, @SHA256@).
+ * sw-description template — filled by `./build.sh swu`
+ * (@VERSION@, @BUILD@, @SHA256@).
  *
  * One .swu carries the rootfs image once, deliverable to EITHER slot: the
  * two `stable` modes select the target partition, and the console CGI picks
@@ -12,20 +13,35 @@
  * hashes, the hashes cover the payload, so nothing installs unless the
  * whole chain verifies (fw-sign.sh / policy A.4).
  *
- * The version is the release identity (git describe). swupdate records it
- * in /etc/sw-versions on the target slot; the console shows both slots'
- * versions from there.
+ * VERSION is the release identity, YYYY.MM.PATCH (media/joral/RELEASE_VERSION).
+ * `./build.sh swu` does not read that file to fill this in — it reads
+ * /etc/sw-versions back OUT of the rootfs image being packed, so the version
+ * declared here is by construction the version the unit will report once the
+ * image is installed. BUILD is git provenance for support cases and carries no
+ * ordering; nothing compares it.
  *
- * DOWNGRADE POLICY IS NOT IMPLEMENTED (corrected 2026-08-14 — an earlier
- * comment here claimed the console warned and required confirmation; it
- * never did). It cannot be, while @VERSION@ is `git describe` on an untagged
- * tree: a commit hash has no order, so nothing can tell older from newer.
- * Fixing this needs a monotonic version scheme — one-way door #4, decide it
- * before first shipment (swupdate-implementation-plan.md, "Item 5").
+ * DOWNGRADE POLICY (implemented 2026-08-15, one-way door #4 closed): the
+ * console orders this version against the running one and refuses an install
+ * that is not an upgrade unless the operator types DOWNGRADE, auditing the
+ * attempt either way. The gate lives in api-update.sh + swu-version.sh rather
+ * than here, deliberately:
+ *
+ *   - SWUpdate's own `install-if-higher` would make a rollback IMPOSSIBLE, and
+ *     rolling back to a known-good release is a legitimate recovery action —
+ *     one an operator may need precisely when a unit is misbehaving in the
+ *     field and the automatic A/B rollback has already been consumed;
+ *   - the gate belongs where the operator and the audit log are. A refusal
+ *     from the installer would be an opaque failure; a refusal from the
+ *     console names both versions and records who overrode it.
+ *
+ * What it is NOT: protection against an attacker who already holds console
+ * credentials — they can type the phrase. It converts a SILENT signed rollback
+ * into a warned, explicitly confirmed and audited one. The signature check is
+ * orthogonal and cannot help here: CMS attests who built an image, never when.
  */
 software = {
 	version = "@VERSION@";
-	description = "Joral edge platform rootfs (media-gateway + satisense-edge)";
+	description = "Joral edge platform rootfs (media-gateway + satisense-edge), build @BUILD@";
 
 	stable = {
 		a = {
