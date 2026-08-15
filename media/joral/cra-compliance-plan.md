@@ -1362,12 +1362,25 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   `StrictModes no` is removed from `sshd_config`, with the comment rewritten to
   say that a future "Server refused our key" means the packing regressed and
   should be diagnosed with `debugfs`, not hidden by re-disabling the check.
-  **Bench-pending, and this is the real acceptance test:** key authentication
-  on a flashed unit with StrictModes back at its default. The modes on the key
-  path are already 0755/0644 with nothing group- or world-writable, so
-  ownership was the only missing half. Recovery if wrong: serial console. Also
-  pending: a build-and-boot pass on the other board configs, since
-  `mkfs_ext4.sh` is shared SDK tooling.
+  **CONFIRMED ON HARDWARE 2026-08-16 — the real acceptance test passed.** A
+  unit updated to 2026.08.2 through the A/B updater (not reflashed, so the
+  change travelled the way a customer's would) reports uid 0 / gid 0 on `/`,
+  `/etc` and `/etc/ssh`, and accepts a fresh key-authenticated SSH session with
+  `StrictModes` at its default. Ownership was indeed the only missing half; the
+  modes on the key path were already 0755/0644.
+
+  Two things about this one are worth keeping, because both would have shipped
+  a defect that looked fixed. The `fakeroot` approach the plan proposed does
+  nothing against a statically linked `mkfs.ext4` — it would have passed its own
+  `command -v fakeroot` check silently. And the first real build after the fix
+  packed the defect anyway, exit 0, because the build runs a COPY of the
+  tracked tool that only `pctools` refreshes; `build_firmware` now warns when
+  the file that will execute is not the file in git. In both cases the failure
+  mode was a check that could not fail rather than a check that failed.
+
+  Still owed by this change: a build-and-boot pass on the other board configs,
+  since `mkfs_ext4.sh` is shared SDK tooling that packs rootfs, oem and
+  userdata for every board (measured this build: 2552 + 217 + 1 inodes).
 
 
 ## Remaining work (verified against both trees 2026-08-07, refreshed 2026-08-10)
@@ -1400,11 +1413,15 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    services verified through the filter — see the dated entry above), and the
    `wifi_app` binaries are dropped from the build and confirmed absent from
    the flashed image the same day (5e). **The uid-1000 image ownership problem
-   is fixed 2026-08-15, build-verified and bench-pending** (see the dated entry
+   is fixed 2026-08-15 and bench-confirmed 2026-08-16** (see the dated entry
    below): every packed ext4 image now carries root-owned inodes, the build
    fails rather than ship one that does not, and `StrictModes no` is out of
-   `sshd_config`. What is left on this row: root CGIs, and the root password
-   *value* (unreachable but unchanged).
+   `sshd_config`. **Confirmed on hardware 2026-08-16** — uid 0 / gid 0 on a
+   unit, and key auth working with StrictModes at its default. What is left on
+   this row: root CGIs, and the root password *value* (unreachable but
+   unchanged, and a product decision: leaving it, locking it — which costs the
+   documented serial-console recovery — or minting a per-unit password the
+   console can surface).
 3. **Secure defaults (row #1)** — **closed on both products** *(text reconciled
    2026-08-12 — this item had gone stale against action-plan items 4g/4h)*:
    SatiSense ships `signencrypt` + `web.tls: true` (2026-08-08), the

@@ -34,7 +34,11 @@ Confirm, because everything below assumes it:
 ```sh
 # on the unit (serial or SSH)
 cat /etc/sw-versions          # -> rootfs 2026.08.1
-misc_ab status                # -> last_boot=b, slot_b successful_boot=1
+# misc_ab needs the misc PARTITION, discovered by PARTNAME the same way the
+# initramfs, S99ab-health and the update CGI all do it:
+MISC=$(for u in /sys/block/mmcblk*/mmcblk*/uevent; do \
+         grep -q '^PARTNAME=misc$' "$u" && echo "/dev/$(sed -n 's/^DEVNAME=//p' "$u")"; done)
+misc_ab status "$MISC"        # -> last_boot=b, slot_b successful_boot=1
 ```
 
 If the unit is on some other release, §3 and §6 still work — substitute the two
@@ -87,7 +91,7 @@ Reboot to switch. Then:
 
 ```sh
 cat /etc/sw-versions     # -> rootfs 2026.08.2
-misc_ab status           # -> last_boot=a, slot_a successful_boot=1
+misc_ab status "$MISC"   # -> last_boot=a, slot_a successful_boot=1
 ```
 
 ---
