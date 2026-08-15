@@ -255,8 +255,33 @@ apply)
 	MISC=$(find_part misc) || { printf '{"ok":false,"error":"single-slot layout — this image cannot A/B update"}'; exit 0; }
 	TARGET=$(inactive_slot) || { printf '{"ok":false,"error":"cannot determine running slot"}'; exit 0; }
 
-	# The downgrade gate. Checked BEFORE the lock is taken: a refusal changes
-	# nothing on the device, so it must not make a concurrent install wait.
+	# Exactly one installer, ever: two SWUpdate processes writing the same slot
+	# would corrupt it. The lock is NOT released here -- the worker inherits it.
+	#
+	# The lock is taken BEFORE the staged package is classified below, and the
+	# order is load-bearing. $STAGED is a shared, mutable path: `upload` renames
+	# a freshly verified package onto it, and the install worker opens it BY
+	# NAME minutes later. Classifying first and locking second leaves a
+	# time-of-check/time-of-use window in which a concurrent authenticated
+	# upload replaces the package between the decision and the install -- so a
+	# signed OLDER release could be installed under a confirmation granted for a
+	# newer one, with the audit record naming the wrong transition. Since upload
+	# also takes this lock, holding it across classify -> decide -> launch (and
+	# for the whole life of the worker, which inherits the descriptor) is what
+	# makes the bytes that were checked the bytes that get installed.
+	#
+	# The earlier arrangement checked first, reasoning that "a refusal changes
+	# nothing on the device, so it must not make a concurrent install wait".
+	# That optimised the refusal path and opened the race; found in review
+	# (Greptile) on satisense-edge#54 / t1s-media-gateway#30. A refusal now
+	# costs a non-blocking flock attempt, which is the correct answer anyway --
+	# a gate decision computed while another operation is mutating the package
+	# is not a decision about the package that will be installed.
+	op_lock || {
+		printf '{"ok":true,"started":true,"target":"%s","note":"an update operation is already in progress"}' "$TARGET"; exit 0
+	}
+
+	# The downgrade gate, now over bytes that cannot change under us.
 	SV=$(sw_version_from_swu "$STAGED") || SV=""
 	ORD=$(sw_version_order "$RUNNING" "$SV")
 	DG=false
@@ -278,15 +303,12 @@ apply)
 			else
 				printf '"error":"cannot tell whether this package is newer or older than what this unit runs. Confirm to proceed."}'
 			fi
+			# No explicit unlock: the flock lives on fd 9 and the kernel drops
+			# it when this process exits, however it exits. That is the whole
+			# reason the lock is an flock and not a file we manage.
 			exit 0
 		fi
 	fi
-
-	# Exactly one installer, ever: two SWUpdate processes writing the same slot
-	# would corrupt it. The lock is NOT released here -- the worker inherits it.
-	op_lock || {
-		printf '{"ok":true,"started":true,"target":"%s","note":"an update operation is already in progress"}' "$TARGET"; exit 0
-	}
 	# The version transition is part of the record, not just the slot: an
 	# advisory names releases, so an audit trail that only says "slot b" cannot
 	# answer whether a unit was ever running an affected build.
