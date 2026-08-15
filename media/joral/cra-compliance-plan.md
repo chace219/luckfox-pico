@@ -1265,12 +1265,31 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
     open is still bench evidence (`netstat -ltn`, 2026-08-12). The suite's job
     is to stop the code and the documents diverging *between* bench sessions.
 
-  **Carry to satisense-edge:** its `web/cgi-lib/webauth.sh` is a separate
-  vendored copy (175 lines differ) exposing the same primitives, and it has the
-  same guards — the charset checks and the anchored cookie match are all
-  present, so nothing is missing there. What it does not have is any of this
-  coverage: it ships `test_force_password.sh` and `test_audit_log.sh` and no
-  equivalent of the four suites above.
+  **Carry to satisense-edge — done the same day** (satisense-edge #56): its
+  `web/cgi-lib/webauth.sh` is a separate vendored copy (175 lines differ, in
+  paths, the cookie name and the audit tag) exposing the same primitives, and
+  the survey found the same guards all **present** — the charset checks and the
+  anchored cookie match. Nothing was missing there; the coverage was. It now
+  carries `test_webauth.sh` and `test_auth_endpoints.sh` (~140 checks, in
+  `make test`, 18 suites green) and `IE_CGI_PREFIX` across its fifteen console
+  endpoints, so the shipped CGIs are the ones executed.
+
+  Verified against that tree's own code rather than assumed from the port: 19
+  mutations, each required to make its suite fail. The port itself produced the
+  defect worth recording — the symlink standing in for the installed library
+  was rewritten to the new path while the `mkdir` above it was not, so the
+  endpoint suite briefly ran against CGIs that could not source the library at
+  all. It reported failures rather than passing vacuously, but only because the
+  assertions say what each endpoint must return rather than merely that it
+  answered.
+
+  Not carried across, deliberately: the config-writer and listener suites.
+  satisense's configuration is JSON validated in C (`config_validate.c`,
+  `test_config_validate.c`) rather than an INI file interpolated through shell,
+  so the defect above has no analogue there — and its one arithmetic site
+  (`api-update.sh:193-194`, on `CONTENT_LENGTH`) already carries exactly the
+  `case … *[!0-9]*` guard that media-gateway's `config.sh` was missing. That
+  idiom is the house style; the gap was older code that predated it.
 
 ## Remaining work (verified against both trees 2026-08-07, refreshed 2026-08-10)
 
