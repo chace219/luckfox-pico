@@ -1291,6 +1291,85 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   `case … *[!0-9]*` guard that media-gateway's `config.sh` was missing. That
   idiom is the house style; the gap was older code that predated it.
 
+- **2026-08-15 — platform (both products), Annex I #3/#5: the image no longer
+  ships with every inode owned by the build user. `StrictModes no` is gone.**
+
+  Recorded as a known caveat on 2026-08-08 and planned in
+  [`image-ownership-and-ssh-key-plan.md`](image-ownership-and-ssh-key-plan.md):
+  `mkfs.ext4 -d` copies the staging tree preserving build-host ownership, and
+  the build runs unprivileged, so **every inode in the packed image was uid
+  1000** — `/`, `/etc`, `/etc/shadow`, `/etc/ssh`, every init script, both
+  product binaries and the OPC UA private key. Measured on the shipped
+  `rootfs.img` before the fix: `/` was 0:0 (mkfs creates it) and all 2551
+  copied entries were 1000:1000.
+
+  Two consequences, the second much larger than the first: `sshd` had to ship
+  `StrictModes no`, a weakened setting we would have had to explain in the
+  technical file; and it was a latent privilege escalation — a service account
+  added with an automatic UID lands at 1000 and would then own the entire root
+  filesystem. Inert only because no such account exists, and CRA hardening
+  pushes directly toward creating one by unprivileging daemons.
+
+  **The planned fix was wrong, and how it fails is the point.** The plan
+  proposed wrapping `chown -R 0:0` and `mkfs.ext4` in one `fakeroot` session.
+  `mkfs_ext4.sh` puts its own directory on `PATH`, and the `mkfs.ext4` there is
+  **statically linked** — `fakeroot` works by `LD_PRELOAD`, which a static
+  binary never consults. Measured both ways on the real staging tree: SDK
+  binary under fakeroot → uid 1000; host's dynamic binary under fakeroot →
+  uid 0. So the planned change would have run, passed its own
+  `command -v fakeroot` check, printed no warning, and shipped **the identical
+  defect** — while the plan and the `sshd_config` comment both said it was
+  fixed. The check it proposed ("is fakeroot installed?") is not the question
+  that matters.
+
+  Switching to the host's `mkfs.ext4` was rejected as the remedy: this script
+  pins the SDK's e2fsprogs to control the on-disk feature set (hence the
+  explicit `-O ^64bit,^huge_file`), and a newer host `mke2fs` enables features
+  the target kernel may refuse to mount. Trading a silent ownership bug for a
+  possible silent mount bug is not an improvement.
+
+  **What shipped instead:** the ownership is corrected in the *packed image*
+  with `debugfs` — already a required build tool, since `build.sh` reads the
+  release identity back out of the rootfs the same way. The path list is
+  generated from the tree just packed, so it cannot drift from the image's
+  contents. Three properties matter, and the first is the lesson:
+
+  - **It verifies the image, not the tooling.** Every inode is `stat`ed back
+    out of the image afterwards and the build FAILS if any is non-root. A build
+    that merely ran the right command proves nothing — that is precisely how
+    the fakeroot approach would have passed.
+  - **It fails loudly in both directions.** No `debugfs` → hard error naming
+    the consequence. Ownership that did not land → hard error with the count.
+    `MKFS_EXT4_KEEP_BUILD_OWNERSHIP=1` is the documented deliberate opt-out.
+  - **It loses no intent.** The staging tree is uniformly 1000:1000 (2551 of
+    2551), because an unprivileged build cannot express any other ownership.
+
+  Verified on the build host by running the real script against the real
+  assembled tree: 2552 inodes set, `/`, `/etc/shadow`, `/etc/ssh/authorized_keys`,
+  the init scripts and both product binaries all uid 0 / gid 0, image
+  `e2fsck -fn` clean, ~1.1 s added. Both failure paths were exercised
+  deliberately — a stub `debugfs` that accepts the write and does nothing (the
+  fakeroot failure mode exactly) makes the build refuse the image rather than
+  ship it, and a `PATH` without `debugfs` fails with the reason and the opt-out.
+
+  One defect found in the fix while testing it, worth recording because it is
+  the same shape as the `config.sh` one earlier the same day: `grep -c` exits 1
+  when the count is zero — the success case — which tripped the script's `ERR`
+  trap and aborted the build *after* the ownership pass but *before*
+  `resize2fs`, silently emitting an unshrunk image. Caught only because the run
+  was checked end to end rather than by its ownership output.
+
+  `StrictModes no` is removed from `sshd_config`, with the comment rewritten to
+  say that a future "Server refused our key" means the packing regressed and
+  should be diagnosed with `debugfs`, not hidden by re-disabling the check.
+  **Bench-pending, and this is the real acceptance test:** key authentication
+  on a flashed unit with StrictModes back at its default. The modes on the key
+  path are already 0755/0644 with nothing group- or world-writable, so
+  ownership was the only missing half. Recovery if wrong: serial console. Also
+  pending: a build-and-boot pass on the other board configs, since
+  `mkfs_ext4.sh` is shared SDK tooling.
+
+
 ## Remaining work (verified against both trees 2026-08-07, refreshed 2026-08-10)
 
 The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) and
@@ -1320,9 +1399,12 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    rulesets in the board overlay; rules loaded, blocked-port probe refused,
    services verified through the filter — see the dated entry above), and the
    `wifi_app` binaries are dropped from the build and confirmed absent from
-   the flashed image the same day (5e). What is left on this row: the uid-1000
-   image ownership problem, root CGIs, and the root password *value*
-   (unreachable but unchanged).
+   the flashed image the same day (5e). **The uid-1000 image ownership problem
+   is fixed 2026-08-15, build-verified and bench-pending** (see the dated entry
+   below): every packed ext4 image now carries root-owned inodes, the build
+   fails rather than ship one that does not, and `StrictModes no` is out of
+   `sshd_config`. What is left on this row: root CGIs, and the root password
+   *value* (unreachable but unchanged).
 3. **Secure defaults (row #1)** — **closed on both products** *(text reconciled
    2026-08-12 — this item had gone stale against action-plan items 4g/4h)*:
    SatiSense ships `signencrypt` + `web.tls: true` (2026-08-08), the

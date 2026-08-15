@@ -35,22 +35,26 @@
 # auth for it. That is what makes the BR2_TARGET_GENERIC_ROOT_PASSWD default
 # unreachable over the network. Recovery if the key is lost: serial console.
 PermitRootLogin prohibit-password
-# StrictModes must be off on this image, or the key above is silently ignored
-# and every login fails with "Server refused our key".
+# StrictModes is left at its default (on) as of 2026-08-15.
 #
-# The SDK builds rootfs.img with `mkfs.ext4 -d <staging-dir>` (see
-# output/out/sysdrv_out/pc/mkfs_ext4.sh) - no fakeroot, no device table - so
-# every inode keeps the build user's ownership. On a normal build host that is
-# uid 1000, and NOTHING in the image is root-owned, including /, /etc and
-# /etc/ssh. StrictModes checks the owner of the key file AND every directory on
-# its path, so it can never pass here.
+# It used to be forced off here, and the comment that did so named the reason
+# and the real fix: `mkfs.ext4 -d <staging-dir>` copies the staging tree
+# preserving build-host ownership, so every inode in the image - including /,
+# /etc and /etc/ssh - was owned by the build user (uid 1000). StrictModes
+# checks the owner of the key file AND every directory on its path, so it could
+# never pass, and the key was silently ignored with "Server refused our key".
 #
-# Turning it off is low-risk on this specific image: root is the only
-# login-capable account, and no process runs as uid 1000 because no such user
-# exists in /etc/passwd - so there is no principal that could tamper with the
-# key file that is not already root. The real fix is to make the image build
-# emit root-owned inodes; until then this is the honest setting.
-StrictModes no
+# That fix is now in: sysdrv/tools/pc/e2fsprogs/mkfs_ext4.sh gives every packed
+# ext4 image root-owned inodes and FAILS THE BUILD if it cannot, verifying the
+# ownership by reading it back out of the image rather than trusting the tool
+# that set it. So an image that built at all has /, /etc and /etc/ssh owned by
+# root, and the modes on that path are already 0755/0644 - nothing group- or
+# world-writable - which is the other half of what StrictModes requires.
+#
+# If key auth ever fails with "Server refused our key" again, check the image
+# ownership first (`debugfs -R "stat /etc/ssh/authorized_keys" rootfs.img`)
+# rather than re-disabling this: a StrictModes failure is a symptom of the
+# packing regression, and turning it off hides that.
 #MaxAuthTries 6
 #MaxSessions 10
 
