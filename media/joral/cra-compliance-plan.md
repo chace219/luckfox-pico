@@ -1102,6 +1102,98 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   restores `mqtt.enabled: false` with an empty host, so a reset cannot leave a
   unit talking to a public broker.
 
+- **2026-08-15 — both products, Annex I #7 / Annex II §2: the update mechanism
+  can tell an upgrade from a rollback. One-way door #4 is closed.**
+
+  The A/B updater shipped and bench-passed on 2026-08-14 with one hole left
+  open in its own plan: `build_swu()` took the release identity from
+  `git describe` on an untagged tree, which yields a bare commit hash. **A hash
+  has no order**, so nothing on the device could compare a package against what
+  it was running, and the downgrade policy the `sw-description` comment
+  advertised was never implemented. The consequence is specific and it is not
+  theoretical: **a properly signed older release — one a published advisory
+  already covers — installed over a fixed one in complete silence.** No
+  signature check can catch that, because CMS attests *who* built an image and
+  never *when*, so this is not a gap the signing ceremony would have closed.
+
+  Releases now carry `YYYY.MM.PATCH` (`media/joral/RELEASE_VERSION`, currently
+  `2026.08.1`). Date-ordered rather than semantic, because one `.swu` carries a
+  rootfs shared by both products — there is no single API whose compatibility a
+  major number could describe — while what the field actually has to support is
+  *order*, and a date gives that without a release database while staying
+  readable as an age to whoever is holding the unit.
+
+  Four things are worth recording, none of them visible from the plan line
+  ("decide a monotonic version scheme"):
+
+  - **The manifest version is read back OUT of the packed rootfs**
+    (`debugfs -R "cat /etc/sw-versions"`), never asserted from
+    `RELEASE_VERSION` a second time. A unit believes the rootfs it boots, so a
+    version declared *beside* the payload can disagree with it — and that
+    disagreement is invisible until an operator installs, when it shows up as
+    a downgrade prompt for an upgrade or as silence for a genuine rollback.
+    This was not hypothetical: the first revision of the change had a
+    "helpful" fallback to the staging tree, and the first real run of it
+    **packed a manifest claiming 2026.08.1 over a rootfs carrying no version
+    at all**. The fallback is gone; the build now refuses an image with no
+    identity, one whose identity is unorderable, and one where the staging
+    tree names a different release than the packed image.
+  - **The gate is warn-and-confirm in the console, not SWUpdate's
+    `install-if-higher`.** A hard installer gate would make rollback
+    *impossible*, and rolling back to a known-good release is a legitimate
+    recovery action — one an operator may need precisely when the automatic
+    A/B rollback has already been consumed. So it lives where the operator and
+    the audit log are: anything not ordered `newer` or `same` needs the typed
+    phrase `DOWNGRADE`, re-checked **server-side** so it also covers `curl`,
+    and the attempt is audited either way with `from=`/`to=`/`order=`. State
+    plainly what this buys: it does **not** stop an attacker holding console
+    credentials, who can type the phrase. It converts a silent signed rollback
+    into a warned, explicitly confirmed and recorded one — and the audit record
+    is what lets an incident review answer "was this unit ever running an
+    affected build", which the previous trail (`target=b`) could not.
+  - **`unknown` is refused by default.** Every image built before this scheme
+    reports no version, so the unorderable case is not an edge case — it is the
+    state of the whole existing fleet-of-none. A gate that defaults open there
+    is a gate that does nothing on exactly the units that have it.
+  - **The comparison is numeric per field, never a string compare.**
+    `2026.08.10` is newer than `2026.08.9`, and every lexicographic shortcut
+    inverts it. That is not an exotic input: the tenth patch of a month is the
+    release that has seen the most fixes, so the inverted gate would nag on
+    routine upgrades and stay quiet on the rollback that mattered.
+
+  One comparator serves all three callers — `./build.sh swu`, the console CGI
+  and `make install` — so the build and the device cannot disagree about which
+  release is newer. Pinned by `ab-boot/tests/test_swu_version.sh` (68 checks)
+  and `ab-boot/tests/test_update_gate.sh` (47), the latter driving the **real
+  CGI** through the gate against a scratch tree via a new `SWU_PREFIX` path
+  root — the factory reset's `MG_RESET_PREFIX` idiom, so the shipped script is
+  the tested script. It also fails when either product's instantiated copy of
+  the CGI drifts from the template, which is the failure mode a hand-copied
+  file invites: a stale copy is silently a console without the gate. Every
+  behavioural check was confirmed to FAIL against the code mutated back to a
+  lexicographic compare, a permissive `unknown`, a case-insensitive phrase, a
+  gate applied to upgrades, and an audit line without the version transition.
+
+  Verified end to end on this tree: `./build.sh media && ./build.sh firmware`
+  stamps `/etc/sw-versions` into the packed rootfs, `./build.sh swu` reads
+  `2026.08.1` back out of that image and signs a matching artifact, and both
+  product suites stay green. Both user manuals gained a *Release numbers* and
+  an *Installing an older release* section (markdown, on-device Help HTML and
+  the customer PDFs regenerated), so the operator-facing description matches
+  what the console does — the previous `sw-description` text claimed a
+  confirmation that did not exist.
+
+  **Bench 2026-08-15 — half confirmed.** A flashed unit reports
+  `release 2026.08.1` in the SatiSense topbar and the Firmware update panel,
+  read from `/etc/sw-versions` on the slot it booted, so Annex II §2's
+  "identifying element readable on the device" now covers the *release*, not
+  only the build hash. **The refusal has not run on hardware**: that session
+  staged `2026.08.1` over a running `2026.08.1`, which orders `same` and is
+  correctly offered without a prompt. Proving the gate needs a `.swu` built
+  from an older `RELEASE_VERSION`, and the evidence to cite is the CGI driven
+  directly with `curl` — a disabled button demonstrates a screen, not a
+  control, which is the same distinction the default-password row rests on.
+
 ## Remaining work (verified against both trees 2026-08-07, refreshed 2026-08-10)
 
 The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) and

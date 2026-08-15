@@ -24,7 +24,11 @@ the `-AB` profile and `output/image/` carries the complete A/B image set
 | `scripts/init.d/S99ab-health` | First-good-boot health check: daemons alive → `misc_ab mark-successful`. Deliberately NOT a port check — operator config choices must never trigger rollback. |
 | `swupdate/swupdate.cfg` | Runtime config shipped to `/etc/swupdate.cfg` — pins the trust store; SWUpdate is invoked per-update by the console CGI, never a daemon (stock S80swupdate is overridden inert in the board overlay). |
 | `swupdate/sw-description.in` | Template for `./build.sh swu` — one payload, `stable,a`/`stable,b` modes; the CGI targets the inactive slot. |
-| `web/api-update.sh.in` | Console CGI template (status/upload/apply), instantiated into BOTH product trees — edit here, regenerate there. |
+| `web/api-update.sh.in` | Console CGI template (status/upload/apply/progress/reboot), instantiated into BOTH product trees — edit here, regenerate there (`tests/test_update_gate.sh` fails when a copy goes stale). Paths root under `SWU_PREFIX` so the shipped script is the tested one. |
+| `web/swu-version.sh` | Release-identity rules: validate `YYYY.MM.PATCH`, order two releases, read the running version from `/etc/sw-versions`, read a `.swu`'s version, stamp an image. Sourced by `./build.sh swu`, by `api-update.sh` and by `make install` — one comparator, so the build and the device can never disagree about which release is newer. |
+| `tests/test_swu_version.sh` | Contract test for the above (`make test`), including the double-digit-patch case every string sort gets backwards. |
+| `tests/test_update_gate.sh` | Drives the real CGI through the downgrade gate against a scratch tree (`make test`): refusal without the typed phrase, upgrades unimpeded, `unknown` refused by default, audit records on both paths, and product copies in sync. |
+| `../RELEASE_VERSION` | The platform release identity, one line. Stamped into `/etc/sw-versions` by `make install`; a malformed value fails the build. |
 | `keys-dev/` (generated) | Per-checkout DEV signing keypair, auto-created by `make install` while `scripts/compliance/keys/` (ceremony output) does not exist. Gitignored. NOT FOR SHIPMENT. |
 | `../../project/cfg/BoardConfig_IPC/BoardConfig-EMMC-Buildroot-RV1106_Luckfox_Pico_Ultra-IPC-AB.mk` | A/B partition layout board profile (p4 `misc`, p9/p10 `rootfs_a/_b`, `boot_b` reserved). |
 

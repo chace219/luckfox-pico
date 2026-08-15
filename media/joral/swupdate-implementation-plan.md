@@ -540,13 +540,93 @@ long updates are promised and therefore how much this is worth.
 
 | 9 | Factory reset works from both slots | **pass** (operator-confirmed) |
 | 10 | Firewall, console HTTPS, OPC UA Sign&Encrypt, CAN, MQTT TLS after an update | **pass** (operator-confirmed) |
-| 5 | Downgrade attempt behaves as specified | **NOT TESTABLE — see below** |
+| 5 | Downgrade attempt behaves as specified | **now testable, bench-pending** — the version field became orderable 2026-08-15 (below); host-verified by 47 checks driving the real CGI. The bench leg is: upload an older `.swu`, expect the console to refuse it until `DOWNGRADE` is typed, and both audit records to name the two releases |
 
 Round trip closed: updates verified in BOTH directions (a→b and b→a), both
 slots healthy and `successful_boot=1` at the end. **9 of 10 items pass on
 hardware; item 5 is blocked by a design gap, not by a test.**
 
-### Item 5 / one-way door #4 — the version field is not orderable
+### Item 5 / one-way door #4 — CLOSED 2026-08-15
+
+*The section below is the 2026-08-14 finding, kept as written. What changed:*
+
+**The release identity is now `YYYY.MM.PATCH` and the console gates
+downgrades.** `media/joral/RELEASE_VERSION` (currently `2026.08.1`) is the one
+tracked source; ab-boot's `make install` stamps it into the image as
+`/etc/sw-versions` in SWUpdate's own format, per slot, and **fails the build**
+if the value is not a well-formed identity. Ordering, validation and the
+confirmation phrase live in one place, `ab-boot/web/swu-version.sh`, sourced by
+all three callers — `./build.sh swu`, the console CGI and `make install` — so
+the build and the device cannot disagree about which of two releases is newer.
+
+Three design points worth keeping:
+
+- **The manifest version is read back OUT of the packed rootfs** (`debugfs -R
+  "cat /etc/sw-versions"`), never from `RELEASE_VERSION` a second time. A unit
+  believes the rootfs it boots, so a version asserted beside the payload rather
+  than derived from it can disagree with it — and the failure is invisible
+  until an operator installs. There is deliberately **no fallback**: an early
+  revision of `build_swu()` fell back to the staging tree "helpfully" and
+  packed `2026.08.1` over a rootfs carrying no version at all, which is exactly
+  the defect the door exists to close. `./build.sh swu` now refuses to pack an
+  image with no identity, refuses one whose identity is unorderable, and
+  refuses when the staging tree names a *different* release than the packed
+  image (that means the image predates the last media build).
+- **The gate is warn-and-confirm, not `install-if-higher`.** SWUpdate's own
+  version gate would make a rollback impossible, and rolling back to a
+  known-good release is a legitimate recovery action — one an operator may need
+  precisely when the automatic A/B rollback has already been consumed. So the
+  gate lives in the console, where the operator and the audit log are: anything
+  not ordered `newer` or `same` needs the typed phrase `DOWNGRADE`, re-checked
+  server-side, and the attempt is audited either way with `from=`/`to=`.
+  Be honest about what this buys: it does **not** stop an attacker who already
+  holds console credentials — they can type the phrase. It converts a *silent*
+  signed rollback into a warned, explicitly confirmed and recorded one.
+- **`unknown` is refused by default.** A unit whose own version cannot be read
+  — every image built before this scheme — must ask rather than assume. A gate
+  that defaults open in that state is a gate that does nothing on exactly the
+  units that have it.
+
+Comparison is field-by-field **numeric**, never a string compare: `2026.08.10`
+is newer than `2026.08.9`, and every lexicographic shortcut inverts that. The
+tenth patch of a month is not an exotic case — it is where a release has seen
+the most fixes, so an inverted gate would nag on routine upgrades and stay
+quiet on the rollback that mattered.
+
+Tests: `ab-boot/tests/test_swu_version.sh` (68 checks) pins the comparator and
+the stamp; `ab-boot/tests/test_update_gate.sh` (47) drives the **real CGI**
+through the gate against a scratch tree via a new `SWU_PREFIX` path root — the
+same idiom as the factory reset's `MG_RESET_PREFIX`, so the shipped script is
+the tested script — and also fails if either product's instantiated copy of the
+CGI has gone stale against the template. Both suites were confirmed to FAIL
+against the code mutated back to a lexicographic compare, to a permissive
+`unknown`, to a case-insensitive phrase check, to a gate applied to upgrades,
+and to an audit line without the version transition.
+
+**Bench 2026-08-15 — the identity half is CONFIRMED on hardware, the gate half
+is not.** A unit flashed with the new image reports `release 2026.08.1` in the
+SatiSense topbar and in the Firmware update panel, read from `/etc/sw-versions`
+on the slot it booted (`last_boot=b`), so the chain `RELEASE_VERSION` → stamp →
+packed rootfs → console holds end to end on a device.
+
+What that run did **not** prove, and the reason is worth stating: the staged
+package was `2026.08.1` against a running `2026.08.1`, which orders `same`, so
+Install was correctly offered with no confirmation. That is the
+*no-friction-on-the-normal-path* half. **The refusal has still never run on
+hardware** — it needs a `.swu` built from an older `RELEASE_VERSION` (see the
+bench leg in the verification table), and the check that actually matters is
+the CGI driven directly with `curl`, not the disabled button: a control, not a
+screen.
+
+*A caution learned the same day, from an hour spent chasing a phantom:* a
+console upload that fails verification is not evidence about the package until
+the bytes on the device are hashed. `swupdate`'s "Image invalid or corrupted"
+was traced through signature, trust store, manifest limits and slot selection —
+all sound — before `ls -l` showed a **614 KB fragment** of a 114.5 MB package
+left on `/userdata` by an incomplete transfer. Hash the staged file first; every
+other hypothesis is downstream of that.
+
+### The original finding (2026-08-14)
 
 `build_swu()` sets the release identity from
 `git describe --always --dirty`, which on this untagged tree yields a bare
@@ -602,7 +682,11 @@ both invisible in a read and only surfaced on hardware. Minimum set:
 3. **Tampered `.swu` is rejected before any write** — flip a byte in the
    payload and in `sw-description.sig` separately.
 4. **Wrong-key `.swu` is rejected.**
-5. **Downgrade attempt** behaves as specified.
+5. **Downgrade attempt** behaves as specified: an older `.swu` is refused with
+   the two releases named until `DOWNGRADE` is typed, then installs; the
+   refusal and the confirmed install both appear in the security event log with
+   `from=`/`to=`. Repeat with a package the unit cannot order (built before
+   release numbering) — it must ask, not assume.
 6. **Power cut mid-write** to the inactive slot → unit still boots the old
    slot, cleanly.
 7. **Deliberately broken slot B** (rootfs that mounts but whose services never
