@@ -185,10 +185,10 @@ While signed in, the `config.sh` fix is worth one direct call — the console
 never sends such a value, so only a direct call reaches it:
 
 ```sh
-curl -sk -X POST https://<unit>/cgi-bin/config.sh -b "mg_sid=<session>" \
+curl -sk -X POST https://<unit>/cgi-bin/config.sh -b "$COOKIE=<session>" \
      -d 'can_gw_comm_port=abc&can_gw_proto=udp&can_gw_dest_ip=10.0.0.5'
 # -> {"ok":false,"error":"can_gw_comm_port must be a whole number"}
-curl -sk https://<unit>/cgi-bin/config.sh -b "mg_sid=<session>" | head -3
+curl -sk https://<unit>/cgi-bin/config.sh -b "$COOKIE=<session>" | head -3
 # -> still returns a full JSON body (before the fix this was empty, permanently)
 ```
 
@@ -199,6 +199,17 @@ curl -sk https://<unit>/cgi-bin/config.sh -b "mg_sid=<session>" | head -3
 **The refusal has never run on hardware.** The 2026-08-15 session staged
 2026.08.1 over a running 2026.08.1, which orders `same` and was correctly
 offered without a prompt — that proved the no-friction half only.
+
+**Product-specific, and getting this wrong wastes bench time:** the session
+cookie and console port differ between the two products.
+
+| | media-gateway | SatiSense Edge |
+|---|---|---|
+| cookie | `mg_sid` | `ie_sid` |
+| console | `https://<unit>` (443) | `https://<unit>:8080` |
+| audit log | `/userdata/media-gateway/audit.log` | `/userdata/satisense/audit.log` |
+
+Both serve the update CGI at `cgi-bin/api-update.sh`. Substitute throughout.
 
 Upload `output/image/downgrade-test/joral-platform-2026.08.1.swu` to a unit now
 running 2026.08.2.
@@ -213,16 +224,16 @@ the control is server-side, and the evidence is the CGI driven directly:
 ```sh
 # no phrase -> refused
 curl -sk -X POST 'https://<unit>/cgi-bin/api-update.sh?action=apply' \
-     -b "mg_sid=<session>"
+     -b "$COOKIE=<session>"
 # -> {"ok":false,...} naming the downgrade and the required phrase
 
 # wrong case -> still refused (the check is case-sensitive, deliberately)
 curl -sk -X POST 'https://<unit>/cgi-bin/api-update.sh?action=apply&confirm=downgrade' \
-     -b "mg_sid=<session>"
+     -b "$COOKIE=<session>"
 
 # correct phrase -> proceeds
 curl -sk -X POST 'https://<unit>/cgi-bin/api-update.sh?action=apply&confirm=DOWNGRADE' \
-     -b "mg_sid=<session>"
+     -b "$COOKIE=<session>"
 ```
 
 Both outcomes must be audited, and both records must name **the two releases** —
