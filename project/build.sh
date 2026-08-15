@@ -921,6 +921,7 @@ function build_swu() {
 	local SIGN="$SDK_ROOT_DIR/scripts/compliance/fw-sign.sh"
 	local PROD_CERTS="$SDK_ROOT_DIR/scripts/compliance/keys/trusted-certs.pem"
 	local STAGED_CERTS="$SDK_ROOT_DIR/media/out/root/etc/swupdate/trusted-certs.pem"
+	local STAGED_SWVER="$SDK_ROOT_DIR/media/out/root/etc/sw-versions"
 	local SWDESC="$OUTDIR/sw-description"
 	local SIGFILE=""
 
@@ -931,11 +932,68 @@ function build_swu() {
 	[ -f "$ROOTFS_IMG" ] || { msg_error "no $ROOTFS_IMG — run ./build.sh firmware first"; exit 1; }
 	[ -f "$ABDIR/swupdate/sw-description.in" ] || { msg_error "missing $ABDIR/swupdate/sw-description.in"; exit 1; }
 
-	local FW_VERSION FW_SHA
-	FW_VERSION=$(git -C "$SDK_ROOT_DIR" describe --always --dirty 2>/dev/null || echo unknown)
+	# Release identity and its ordering rules — the same file the device's
+	# console gates downgrades with, so the build and the unit can never
+	# disagree about which of two releases is newer (one-way door #4).
+	. "$ABDIR/web/swu-version.sh"
+
+	# The version is READ OUT OF THE PAYLOAD, and ONLY out of the payload.
+	# Taking it from media/joral/RELEASE_VERSION or from the staging tree would
+	# let the manifest declare one release while the rootfs it carries reports
+	# another — and a unit believes the rootfs it boots, so the mismatch would
+	# surface as a downgrade prompt for an upgrade, or as silence for a genuine
+	# rollback. There is deliberately NO fallback: a source that can disagree
+	# with the payload is the defect this door exists to close, and an early
+	# revision of this function shipped a "helpful" staged-tree fallback that
+	# happily packed 2026.08.1 over a rootfs carrying no version at all.
+	# debugfs reads the file out of the packed ext4 without mounting it or
+	# being root.
+	local FW_VERSION="" FW_BUILD FW_SHA
+	command -v debugfs >/dev/null 2>&1 || {
+		msg_error "debugfs (e2fsprogs) is required to read the release identity out of"
+		msg_error "$ROOTFS_IMG. Install e2fsprogs; do NOT substitute the staged tree —"
+		msg_error "a version not read from the payload can disagree with it."
+		exit 1
+	}
+	FW_VERSION=$(debugfs -R "cat /etc/sw-versions" "$ROOTFS_IMG" 2>/dev/null |
+		awk '$1 == "rootfs" { print $2; exit }') || FW_VERSION=""
+	if [ -z "$FW_VERSION" ]; then
+		msg_error "the packed rootfs carries no release identity (/etc/sw-versions)"
+		msg_error "rebuild it so ab-boot stamps media/joral/RELEASE_VERSION into the image:"
+		msg_error "  ./build.sh media && ./build.sh firmware"
+		exit 1
+	fi
+	if ! sw_version_valid "$FW_VERSION"; then
+		# Refusing to pack is the door itself. A .swu whose version cannot be
+		# ordered installs over anything without a warning, and no signature
+		# can catch that: CMS attests WHO built an image, never WHEN.
+		msg_error "release identity '$FW_VERSION' is not orderable (want YYYY.MM.PATCH)"
+		msg_error "fix media/joral/RELEASE_VERSION and rebuild the rootfs"
+		exit 1
+	fi
+	# The staging tree is not a source, but it IS a second opinion: if it names
+	# a different release than the packed image, the image was packed before the
+	# last media build and the whole artifact set is inconsistent.
+	if [ -f "$STAGED_SWVER" ]; then
+		local STAGED_VERSION
+		STAGED_VERSION=$(awk '$1 == "rootfs" { print $2; exit }' "$STAGED_SWVER")
+		if [ -n "$STAGED_VERSION" ] && [ "$STAGED_VERSION" != "$FW_VERSION" ]; then
+			msg_error "packed rootfs says $FW_VERSION but the staging tree says $STAGED_VERSION"
+			msg_error "the image predates the last media build — re-run ./build.sh firmware"
+			exit 1
+		fi
+	fi
+
+	# Build provenance travels ALONGSIDE the release identity, never in place
+	# of it: the identity answers "is this newer than what I am running", the
+	# git description answers "exactly which tree built it" for a support case.
+	FW_BUILD=$(git -C "$SDK_ROOT_DIR" describe --always --dirty 2>/dev/null || echo unknown)
 	FW_SHA=$(sha256sum "$ROOTFS_IMG" | cut -d' ' -f1)
 
-	sed -e "s/@VERSION@/$FW_VERSION/" -e "s/@SHA256@/$FW_SHA/" \
+	# @BUILD@ uses | as the delimiter: a git description is the one substitution
+	# here not constrained to [0-9a-f.], so a tag containing a slash would
+	# otherwise break the expression rather than the build.
+	sed -e "s/@VERSION@/$FW_VERSION/" -e "s|@BUILD@|$FW_BUILD|" -e "s/@SHA256@/$FW_SHA/" \
 		"$ABDIR/swupdate/sw-description.in" > "$SWDESC"
 
 	if [ -n "$SIGFILE" ]; then
@@ -967,7 +1025,8 @@ function build_swu() {
 		echo "$f"; done | cpio -o -H crc --quiet > "$SWU" )
 
 	msg_info ".swu: $SWU"
-	msg_info "  version:  $FW_VERSION"
+	msg_info "  version:  $FW_VERSION  (release identity, read out of the packed rootfs)"
+	msg_info "  build:    $FW_BUILD"
 	msg_info "  sha256:   $(sha256sum "$SWU" | cut -d' ' -f1)"
 	msg_info "  trust:    $TRUST"
 	msg_info "Append the release line to docs/compliance/signing-log.md (policy A.4)."
