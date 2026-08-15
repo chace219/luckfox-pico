@@ -1194,6 +1194,103 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   directly with `curl` — a disabled button demonstrates a screen, not a
   control, which is the same distinction the default-password row rests on.
 
+- **2026-08-15 — media-gateway, Annex I #5/#6 and Annex II §2: the console's
+  auth layer, endpoints, write path and port facts now have tests. One defect
+  found and fixed; three stale source citations corrected.**
+
+  Remaining-work item 7 recorded "no test coverage of the auth layer, CGIs,
+  config writer or listeners" on the product where `require_auth` is the
+  enforcement point three Annex I rows now cite. The gate itself was covered
+  (`test_force_password.sh`); nothing covered the machinery it is built from.
+  Four suites, 200+ checks, all in `make test`:
+
+  - `test_webauth.sh` — sessions, cookie parsing, credential storage, audit
+    sanitisation.
+  - `test_auth_endpoints.sh` — the four `auth-*.sh` endpoints EXECUTED, not
+    grepped.
+  - `test_config_writer.sh` — the one authenticated write path, round trip,
+    validation, and what a refusal leaves on disk.
+  - `test_listeners.sh` — the port facts, and whether the compliance documents
+    still cite live lines.
+
+  To execute the shipped CGIs rather than rewritten copies, all eight console
+  endpoints gained `MG_CGI_PREFIX` — the idiom `factory-reset.sh`
+  (`MG_RESET_PREFIX`) and `api-update.sh` (`SWU_PREFIX`) already use, empty on
+  a device. The shipped script is the tested script.
+
+  Four things worth recording:
+
+  - **A defect the tests found in `config.sh`, now fixed.** A non-numeric value
+    in any numeric field passed validation and was written to disk, because
+    `[ abc -lt 1024 ]` is an ERROR rather than a false — so both halves of the
+    range test failed open. For `can_gw_comm_port` the consequence was not a
+    bad setting: the NEXT GET aborted at `$((CAN_COMM + 1))` (the shell treats
+    arithmetic on a non-numeric string as fatal), so the configuration endpoint
+    answered with headers and an **empty body, permanently, across reboots**.
+    The ways back were SSH or a factory reset. Reachable by any signed-in
+    operator with `curl`, so it is a self-inflicted denial of the management
+    interface rather than a privilege boundary — but it is exactly the kind of
+    thing a UI-only validator hides, since the console never sends such a
+    value. Fixed on both sides: the writer refuses non-numeric fields with a
+    named error, and the reader falls back to the documented default so a unit
+    already in that state still renders and can be repaired **from the
+    console** instead of over SSH.
+  - **Three stale source citations in the Annex II fact sheet**, repeated in the
+    Annex I matrix and in this plan: `src/main.c:125`,
+    `include/media_gateway.h:126-127` and `src/can_gateway/can_gw.c:519` had all
+    slid with the code (now 137, 224-225 and 563). They were accurate when
+    written on 2026-08-06/07. The claim they support — that **:8000 is never
+    bound** — is still true, and the correction is load-bearing because the
+    original audit row and the quick-start table both overstated it. A citation
+    that has slid to unrelated code is worse than none, because it still looks
+    like evidence to whoever follows it. `test_listeners.sh` now finds where the
+    code actually is and requires the documents to name that line, so it needs
+    no hardcoded line numbers of its own and cannot go stale the same way —
+    confirmed by re-introducing the old citation and watching it fail.
+  - **Every suite was mutation-checked.** 47 mutations of the shipped code —
+    dropping the session token's charset guard, un-anchoring the cookie match,
+    fixing the salt, storing the plaintext, issuing a cookie on a FAILED login,
+    removing `require_auth`, reverting the numeric repair, re-introducing the
+    `web_port=80` regression — each had to make its suite fail. Two did not, at
+    first, and both were tests that passed for the wrong reason: the traversal
+    tokens pointed at paths that did not exist at the depth `$SESSDIR`
+    resolves to, and the factory-password refusal was really the
+    minimum-length rule firing, since `joral` is five characters. Both were
+    rewritten until the mutation was caught. A suite that has never been seen
+    to fail is a suite nobody has checked.
+  - **What `test_listeners.sh` is NOT.** It is a contract test over the source
+    and the compliance documents, not a runtime bind test — `open_udp()`,
+    `open_tcp()` and `config_load()` are static, and linking `main.c` natively
+    would drag in OpenSSL and the CAN headers. What a running unit actually has
+    open is still bench evidence (`netstat -ltn`, 2026-08-12). The suite's job
+    is to stop the code and the documents diverging *between* bench sessions.
+
+  **Carry to satisense-edge — done the same day** (satisense-edge #56): its
+  `web/cgi-lib/webauth.sh` is a separate vendored copy (175 lines differ, in
+  paths, the cookie name and the audit tag) exposing the same primitives, and
+  the survey found the same guards all **present** — the charset checks and the
+  anchored cookie match. Nothing was missing there; the coverage was. It now
+  carries `test_webauth.sh` and `test_auth_endpoints.sh` (~140 checks, in
+  `make test`, 18 suites green) and `IE_CGI_PREFIX` across its fifteen console
+  endpoints, so the shipped CGIs are the ones executed.
+
+  Verified against that tree's own code rather than assumed from the port: 19
+  mutations, each required to make its suite fail. The port itself produced the
+  defect worth recording — the symlink standing in for the installed library
+  was rewritten to the new path while the `mkdir` above it was not, so the
+  endpoint suite briefly ran against CGIs that could not source the library at
+  all. It reported failures rather than passing vacuously, but only because the
+  assertions say what each endpoint must return rather than merely that it
+  answered.
+
+  Not carried across, deliberately: the config-writer and listener suites.
+  satisense's configuration is JSON validated in C (`config_validate.c`,
+  `test_config_validate.c`) rather than an INI file interpolated through shell,
+  so the defect above has no analogue there — and its one arithmetic site
+  (`api-update.sh:193-194`, on `CONTENT_LENGTH`) already carries exactly the
+  `case … *[!0-9]*` guard that media-gateway's `config.sh` was missing. That
+  idiom is the house style; the gap was older code that predated it.
+
 ## Remaining work (verified against both trees 2026-08-07, refreshed 2026-08-10)
 
 The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) and
@@ -1277,8 +1374,13 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    plan item 5).
 7. **Media-gateway loose ends from the matrix work** — no LICENSE file / SPDX
    headers (needs an outbound-license decision; our own components show as
-   UNDECLARED in the SBOM), and no test coverage of the auth layer, CGIs, config
-   writer or listeners.
+   UNDECLARED in the SBOM). ~~and no test coverage of the auth layer, CGIs,
+   config writer or listeners~~ — **the coverage half is done 2026-08-15** (see
+   the dated entry above): four suites, 200+ checks, mutation-verified, in
+   `make test`; one console-denial defect in `config.sh` found and fixed, and
+   three stale source citations in the Annex II fact sheet corrected. What is
+   left on this row is the outbound-license decision, which is Carl's, plus the
+   same coverage for satisense-edge's own copy of the auth layer.
 8. **Hardware bench session** — **partially done 2026-08-12** (see the dated
    entry above): the trimmed image boots and console HTTPS, OPC UA Sign&Encrypt,
    mDNS, CAN and the bench scripts are confirmed on hardware, so nothing
@@ -1335,7 +1437,7 @@ here as the cross-product summary.*
   hardware: rules listed, blocked port refused, services reachable, DHCP lease
   acquired. **Units flashed before 2026-08-12 still run unfiltered.**
 - Media Gateway, **updated 2026-08-12** *(the ":80 HTTP-only, no TLS option" wording here had gone stale against 4h)*: **:443** web console (HTTPS by default via stunnel since 2026-08-09, per-unit cert, plain-HTTP fallback on the same port; backend on 127.0.0.1:18081 only), **:8001** CAN↔Ethernet UDP-or-TCP (unauthenticated), br0 L2 bridge (T1S↔100BASE-TX) so both are reachable from either medium.
-  **Correction (2026-08-06): :8000 is NOT bound.** `can_gw_comm_port` defaults to 8000 but the socket binds `comm_port + 1` only (`src/can_gateway/can_gw.c:519`, `include/media_gateway.h:126-127`). The audit row above and `docs/manual/quick-start.md:83` both overstated the exposure.
+  **Correction (2026-08-06): :8000 is NOT bound.** `can_gw_comm_port` defaults to 8000 but the socket binds `comm_port + 1` only (`src/can_gateway/can_gw.c:563`, `include/media_gateway.h:224-225`). The audit row above and `docs/manual/quick-start.md:83` both overstated the exposure.
 - SatiSense Edge, **updated 2026-08-08**: :8080 web console (**https by default** via
   stunnel, per-unit self-signed cert minted on first boot), :4840 OPC UA
   (**`signencrypt` by default**, per-unit server cert minted on first boot; anonymous
