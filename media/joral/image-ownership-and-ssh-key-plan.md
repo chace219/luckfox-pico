@@ -104,7 +104,39 @@ Three properties make this safe to rely on:
   ownership. There is no deliberate non-root ownership to preserve.
 
 Cost: ~1.1 s added to a rootfs pack (2552 inodes), and the resulting image is
-`e2fsck -fn` clean.
+`e2fsck -fn` clean. It runs for **every ext4 partition**, so `oem` (217 inodes)
+and `userdata` (1) get the same treatment.
+
+#### The fix was not complete without a second change
+
+The first full build after the edit **silently did not apply it**.
+`./build.sh media && ./build.sh firmware && ./build.sh swu` — the exact release
+sequence this plan and `swupdate-implementation-plan.md` both document —
+finished clean, exit 0, and produced an image whose `/etc` and `/etc/shadow`
+were still uid 1000.
+
+The cause is the SDK's tracked-master pattern, the same one that bit the
+SWUpdate work twice with defconfigs. `sysdrv/tools/pc/` holds the **tracked**
+packing tools; the build executes **copies** under
+`output/out/sysdrv_out/pc/`, refreshed only by the `pctools` target — which
+`media`, `firmware` and `swu` never trigger. So the build packed with the old
+script, which had no ownership pass to run.
+
+That is worse than an ordinary stale-copy bug, because the whole design of this
+fix is "fail loudly if the ownership did not land" — and **a pass that never
+runs cannot fail**. The verification and the thing being verified were in the
+same file, so losing the file lost both.
+
+`build_firmware` therefore now resolves each configured packing tool **through
+`PATH`, exactly as the build will invoke it**, compares it to its tracked
+master, and warns by name when they differ. Resolving through `PATH` rather
+than comparing the two directories by filename matters: the question is not
+"do these directories match", it is "is the file that will actually execute the
+one in git". Verified in both directions — silent on a fresh tree, and naming
+`sysdrv/tools/pc/e2fsprogs/mkfs_ext4.sh` when the pre-fix copy is put back.
+
+A warning, not a hard failure: this is shared tooling and a checkout may
+legitimately carry local edits mid-work. But it is never silent again.
 
 <details>
 <summary>Original proposal (does not work — kept for the record)</summary>

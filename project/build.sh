@@ -2775,10 +2775,59 @@ function __RUN_POST_BUILD_USERDATA_SCRIPT() {
 	fi
 }
 
+# The PC-side packing tools are TRACKED under sysdrv/tools/pc/, but the build
+# runs COPIES under output/out/sysdrv_out/pc/ that are refreshed only by the
+# `pctools` target — which `media`, `firmware` and `swu` do not trigger. So
+# editing a tracked packing tool and then running the documented release
+# sequence silently packs with the OLD one.
+#
+# Not hypothetical, and not cosmetic: it hid the 2026-08-15 root-ownership fix
+# on its first real build. `./build.sh media && ./build.sh firmware &&
+# ./build.sh swu` completed cleanly, exit 0, and produced an image whose /etc
+# and /etc/shadow were still uid 1000 — because the stale mkfs_ext4.sh had no
+# ownership pass to run, and a pass that never runs cannot fail loudly. Same
+# shape as the tracked-defconfig gotcha that bit the SWUpdate work twice.
+#
+# A warning rather than a hard failure: this is shared SDK tooling and a
+# checkout may legitimately carry local edits mid-work. But it must not be
+# silent.
+function __CHECK_PC_TOOLS_FRESH() {
+	local src_dir="$SDK_ROOT_DIR/sysdrv/tools/pc"
+	local stale="" var tool used master
+
+	[ -d "$src_dir" ] || return 0
+
+	# Resolve each packing tool the SAME way the build will — through PATH,
+	# which build.sh prepends with $RK_PROJECT_PATH_PC_TOOLS — and compare THAT
+	# against its tracked master. Checking what will actually execute is the
+	# only comparison that means anything; scanning the two directories by
+	# filename is a guess about which copy wins.
+	for var in RK_PROJECT_TOOLS_MKFS_EXT4 RK_PROJECT_TOOLS_MKFS_SQUASHFS \
+	           RK_PROJECT_TOOLS_MKFS_UBIFS RK_PROJECT_TOOLS_MKFS_JFFS2 \
+	           RK_PROJECT_TOOLS_MKFS_EROFS; do
+		tool="${!var:-}"
+		[ -n "$tool" ] || continue
+		used=$(command -v "$tool" 2>/dev/null) || continue
+		[ -n "$used" ] || continue
+		master=$(find "$src_dir" -name "$tool" -type f 2>/dev/null | head -n1)
+		[ -n "$master" ] || continue
+		cmp -s "$master" "$used" || stale="$stale ${master#$SDK_ROOT_DIR/}"
+	done
+
+	if [ -n "$stale" ]; then
+		msg_warn "PC packing tools under $out_dir are STALE against sysdrv/tools/pc:"
+		msg_warn "  $stale"
+		msg_warn "This build will pack with the OLD copies. Refresh them with:"
+		msg_warn "  make -C sysdrv pctools"
+	fi
+}
+
 function build_firmware() {
 	check_config RK_PARTITION_CMD_IN_ENV || return 0
 
 	build_env
+
+	__CHECK_PC_TOOLS_FRESH
 
 	if [ "$RK_ENABLE_FASTBOOT" = "y" ]; then
 		build_meta
