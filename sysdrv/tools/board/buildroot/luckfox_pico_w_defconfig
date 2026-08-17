@@ -178,7 +178,14 @@ BR2_PACKAGE_PPPD_RADIUS=y
 # as root. Nothing in the product depends on smbd/nmbd.
 # BR2_PACKAGE_SAMBA4 is not set
 BR2_PACKAGE_SOCAT=y
-BR2_PACKAGE_WGET=y
+# GNU wget removed 2026-08-16: nothing in either product tree invokes it
+# (verified for the 2026-08-12 CVE triage — busybox's own wget applet,
+# CONFIG_WGET=y, serves any script use), and it carried the one EXPIRING
+# accepted-risk in cve-triage.csv (CVE-2024-38428, review by 2026-11) whose
+# recorded resolution was exactly this removal. Buildroot never uninstalls:
+# this is only real after a clean-output rebuild, verified against the
+# packed rootfs (/usr/bin/wget must be the busybox symlink, not an ELF).
+# BR2_PACKAGE_WGET is not set
 BR2_PACKAGE_BASH=y
 BR2_PACKAGE_DIALOG=y
 BR2_PACKAGE_TIME=y
