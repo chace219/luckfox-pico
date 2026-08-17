@@ -23,12 +23,13 @@ identifier the daemons report via `--version` and the consoles show.
 
 ## Release procedure
 
-Two source-level gates first — they read git and the tree, not the image, so
+Three source-level gates first — they read git and the tree, not the image, so
 they need no build and should fail before you spend eight minutes on one:
 
 ```sh
-./build.sh cited                        # do the documents describe what ships?
+./build.sh cited                             # do the documents describe what ships?
 scripts/compliance/test-root-credential.sh   # is the shipped root credential still ours?
+scripts/compliance/test-security-txt.sh      # can a reporter still reach us?
 ```
 
 Then, **after** the image is built and **before** it is shipped or tagged:

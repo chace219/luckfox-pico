@@ -34,7 +34,7 @@ httpd + CGIs run as root (accepted in `project-context.md:78`). No firewall rule
 No LICENSE file in media-gateway. SatiSense config import has no schema validation
 (`web/cgi/api-config.sh:15-19`).
 
-## Status at a glance (2026-08-16)
+## Status at a glance (2026-08-18)
 
 *The table above is the 2026-07-26 audit and stays frozen. This one is the
 current position, and it is what to read first. "met" means a path in the tree
@@ -50,7 +50,7 @@ was found by executing, not by reading. Per-product detail lives in each tree's
 | 3 Confidentiality / integrity | **met** for the console path | **met** — secrets in a 0600 sidecar, **encrypted at rest and bound to the board since 08-16**, never served to the browser; MQTT TLS verification proven enforced | ✅ 08-12/13, ⚠️ sealing not yet on a unit | the sealing protects the stored file, **not** a running unit against root (no secure element); MQTT mutual TLS unexercised |
 | 4 Minimise attack surface | **met** — BSP daemons and 118 packages gone, default-deny IPv4+IPv6 firewall, `wifi_app` dropped, image inodes root-owned | same (shared rootfs) | ✅ 08-12/08-16 | httpd + CGIs run as root; root password is off the **published** vendor default since 08-16 (`$6$`, undocumented to customers) but is still one short shared value — unreachable over the network, serial-console login unverified |
 | 5 Access control | **met** for the console | **met** for the console | ✅ 08-09 | CAN :8001 unauthenticated by protocol design; OPC UA anonymous permitted |
-| 6 Security-event logging | **partial** — console trail complete; CAN peer identity on **UDP, the factory default, is not recorded** (see the 2026-08-16 correction) | **met** | ✅ 08-12 (IE) | media-gateway UDP peer record is on an unmerged commit; no off-device forwarding on either |
+| 6 Security-event logging | **met** — console trail complete, and CAN peer identity is recorded on **both** transports since the 08-18 recovery (`50ec9b9`) | **met** | ✅ 08-12 (IE) | the UDP peer record has not been exercised on a unit (`logread` for `can_udp_peer_seen` after sending from two hosts); no off-device forwarding on either |
 | 7 Update mechanism | **met** — signed A/B SWUpdate, ordered releases, downgrade gate | same | ⚠️ partial | DEV signing key only; partition layout not frozen; downgrade **refusal** never run on hardware |
 | 8 Factory reset | **met** | **met** | ✅ 08-12 | — |
 
@@ -384,7 +384,7 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   for `can_udp_peer_seen` after sending from two hosts.
 
   **Correction, 2026-08-16 — this never landed, and the entry above was wrong
-  for four days.** The work exists as exactly one commit, `1a7bd8e`
+  for four days.** The work exists as exactly one commit, 1a7bd8e
   (*feat(can): recorded who reaches the bus over UDP…*), pushed on 2026-08-12
   to the branch `docs/manual-audit-src-and-console-troubleshooting` — **after
   that branch's PR (#27) had already merged**. No later PR picked it up, so
@@ -404,7 +404,7 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
 
   **And it happened twice on the same day, in both repositories.** Sweeping
   every branch in both trees for commits that are not ancestors of the release
-  branch turned up a sibling: satisense-edge `d4cfaa2`
+  branch turned up a sibling: satisense-edge d4cfaa2
   (*docs(manual): documented the on-device firewall for operators*), pushed
   2026-08-12 at 08:07 — 30 seconds before the media-gateway one — to the
   identically-named branch, also after its PR had merged. So the **operator
@@ -1741,9 +1741,10 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
 2. ~~**Attack surface (4a)**~~ — **done 2026-08-08 and 2026-08-10.** telnetd, adbd
    and Samba are out of the image and root SSH login is key-only (08-08);
    `S40bluetoothd`, `S30dbus`, `S99hciinit`, the `S99python` root-execution boot
-   hook and 118 unused packages are out (08-10). The root password itself is
-   *unchanged* — still `luckfox` from `BR2_TARGET_GENERIC_ROOT_PASSWD` — but it is
-   no longer reachable over the network. **The firewall gap closed 2026-08-12
+   hook and 118 unused packages are out (08-10). *(This sentence read "the root
+   password itself is unchanged — still `luckfox`" until 2026-08-18, four
+   paragraphs above the text recording that it changed on 08-16. Corrected: the
+   value changed, see below.)* **The firewall gap closed 2026-08-12
    and is bench-confirmed on a flashed unit** (default-deny IPv4 + IPv6
    rulesets in the board overlay; rules loaded, blocked-port probe refused,
    services verified through the filter — see the dated entry above), and the
@@ -1896,24 +1897,43 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    *scope*: it protects the file once it leaves the device, **not** a running
    unit against root — this platform has no secure element and no design here
    can change that. **Owed: a flashed unit reporting `encrypted`** (item 8e).
-10. **Recover two orphaned commits from 2026-08-12** — both pushed to a branch
-    whose PR had already merged, 30 seconds apart, one per repository (see the
-    2026-08-16 correction above):
-    - **media-gateway `1a7bd8e`** — UDP peer attribution on the CAN path, the
-      last gap on Annex I #6 for that product. Until it lands, a
-      factory-configured unit (`can_gw_proto=udp`) records nothing about who
-      reaches the write path equivalent to bus access. The 17 tests come with
-      the commit.
-    - **satisense-edge `d4cfaa2`** — the operator documentation for the
-      firewall (user manual §12.3 + a §13.1 troubleshooting row), so the
-      shipped manual, on-device Help and customer PDFs still describe a network
-      behaviour the product no longer has. Annex II accuracy; regenerate the
-      HTML and PDFs with it.
+10. ~~**Recover two orphaned commits from 2026-08-12**~~ — **both recovered
+    2026-08-18**, and the gate that would have caught them now exists.
+    - **media-gateway** `50ec9b9` (was 1a7bd8e) — UDP peer attribution on the
+      CAN path, the last gap on Annex I #6 for that product, with its 17 tests.
+      **Row #6 is met on both products on both transports** — this time the
+      claim is checkable, which is the whole difference from the 08-12 version
+      of this sentence. Cherry-picking it shifted `can_gw.c` by 93 lines and
+      `test_listeners.sh` failed on the two compliance citations of `:565`,
+      now `:658` — the second time in three days that suite has caught a stale
+      citation that review did not.
+    - **satisense-edge** `dde13e3` (was d4cfaa2) — the operator documentation
+      for the firewall (user manual §12.3 + a §13.1 troubleshooting row),
+      regenerated into the on-device Help and the customer PDFs. The manual
+      described a network behaviour the product no longer had for six days.
+      Resolving it against the current tree kept HEAD's Annex rows, which have
+      advanced since 08-12, and took only the §12.3 → §12.4 renumbering the
+      commit itself causes.
 
-    **Add the ancestry check to the release routine** — `git merge-base
-    --is-ancestor <commit> <release-branch>` for every commit a compliance
-    document cites as closed. Nothing today would have caught either, because
-    the documents cite behaviour and the behaviour was real on a branch.
+    **The ancestry check is now a release gate**, not a habit:
+    `scripts/compliance/check-cited-commits.sh`, wired as **`./build.sh
+    cited`** and first in the release procedure because it needs no build. It
+    asks three questions, and the middle one is the one a habit would have
+    missed: did the cited commit **land** (ancestor of its repo's default
+    branch), does it **ship** (ancestor of the submodule revision this tree
+    pins), and is the **pin itself** on a default branch. A commit can be
+    merged and still not be in the release because nobody bumped the pointer —
+    which is the ordinary last step of every submodule PR, and therefore the
+    one most likely to be skipped. Validated by running it against the tree as
+    it stood before this item: it reported exactly the two orphans and nothing
+    else.
+
+    It also establishes a convention worth keeping: **in a compliance document
+    a backticked SHA is a claim that the commit ships.** A SHA mentioned as
+    history goes in plain prose — which is why the two orphan SHAs above are
+    unbackticked, and why the 2026-08-16 correction entry was rewritten the
+    same way. Backticks are the assertion; the gate is what makes the assertion
+    cost something.
 11. **Update-mechanism residuals (row #7, 4b).** Three, in order: **freeze the
     partition layout** (one-way door once a customer unit ships), hold the
     **key ceremony** so builds stop signing with the per-checkout DEV key — no
