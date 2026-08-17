@@ -1,7 +1,7 @@
 # Bench runbook — the accumulated backlog (one session)
 
-*Prepared 2026-08-15. Six verification legs have accumulated since 2026-08-12,
-across three plans. Individually each is short; what has made them slip is that
+*Prepared 2026-08-15, updated 2026-08-16. Seven verification legs have
+accumulated since 2026-08-12, across three plans; three passed on 2026-08-16. Individually each is short; what has made them slip is that
 each needed a bench and none needed it for long. This sequences all of them into
 one session, in an order where the legs feed each other.*
 
@@ -12,33 +12,45 @@ one exists it is named and the section says which part of it to run.
 
 ## 0. What this session closes
 
-| # | Leg | Recorded in | Owner doc |
-|---|-----|-------------|-----------|
-| 1 | Upgrade installs with no confirmation | `swupdate-implementation-plan.md` item 5 | this doc §3 |
-| 2 | **Downgrade is refused** until `DOWNGRADE` is typed | `swupdate-implementation-plan.md` item 5 | this doc §6 |
-| 3 | **SSH key auth with `StrictModes` at its default** | `image-ownership-and-ssh-key-plan.md` AC 1–2 | this doc §4 |
-| 4 | Image inodes are root-owned on a flashed unit | same, AC 1 | this doc §4 |
-| 5 | MQTT **mutual TLS** + credentials-in-channel | `cra-compliance-plan.md` item 8 | `satisense-edge/docs/implementation-artifacts/mqtt-tls-bench-runbook.md` §2–§5 |
-| 6 | Media-gateway **durable-audit** spot-check, and a failed login correlated against stunnel's peer line | `cra-compliance-plan.md` item 8 | this doc §5 |
+| # | Leg | Status | Recorded in | Owner doc |
+|---|-----|--------|-------------|-----------|
+| 1 | Upgrade installs with no confirmation | **PASSED 2026-08-16** — a unit went to 2026.08.2 through the updater | `swupdate-implementation-plan.md` item 5 | this doc §3 |
+| 2 | **Downgrade is refused** until `DOWNGRADE` is typed | **open** — never run on hardware | `swupdate-implementation-plan.md` item 5 | this doc §6 |
+| 3 | **SSH key auth with `StrictModes` at its default** | **PASSED 2026-08-16** | `image-ownership-and-ssh-key-plan.md` AC 1–2 | this doc §4 |
+| 4 | Image inodes are root-owned on a flashed unit | **PASSED 2026-08-16** — uid 0 / gid 0 on `/`, `/etc`, `/etc/ssh` | same, AC 1 | this doc §4 |
+| 5 | MQTT **mutual TLS** + credentials-in-channel | **open** — needs a broker we control | `cra-compliance-plan.md` item 8 | `satisense-edge/docs/implementation-artifacts/mqtt-tls-bench-runbook.md` §2–§5 |
+| 6 | Media-gateway **durable-audit** spot-check, and a failed login correlated against stunnel's peer line | **open** | `cra-compliance-plan.md` item 8 | this doc §5 |
+| 7 | **SWUpdate negative + fault paths** — tampered payload, tampered signature, wrong key, power-cut mid-write, broken standby slot, factory reset from both slots | **open** — negative artifacts are host-verified only | `swupdate-implementation-plan.md` verification items 3–4, 6–7, 9 | that doc |
+| 8 | The 2026-08-16 product-decision changes: **`$6$` root login on the serial console**, and **stored secrets sealed to the board** (`secrets_at_rest.mode = encrypted`) | **open** — never run; the host suite fakes both binding sources | `cra-compliance-plan.md` item 8e | this doc §7a |
 
-Legs 3 and 4 are the ones that carry risk, and §4 says what the recovery is
-before it asks you to take it.
+Legs 3 and 4 were the ones that carried risk, and §4 says what the recovery is
+before it asks you to take it. **They passed on 2026-08-16** — on a unit updated
+through the A/B updater rather than reflashed, which is the stronger result: the
+change travelled the way a customer's would. Ownership was the only missing
+half; the modes on the key path were already `0755`/`0644`.
+
+**What is left is legs 2, 5, 6 and 7.** Leg 2 is the cheapest and the most
+overdue — the artifact is already built and the gate has never been exercised on
+hardware.
 
 ---
 
 ## 1. Starting state (confirm before anything else)
 
-The 2026-08-15 session left a unit running **release 2026.08.1** on **slot b**.
-Confirm, because everything below assumes it:
+*Updated 2026-08-16.* The 08-15 session left a unit on **2026.08.1 / slot b**;
+the 08-16 session took it to **2026.08.2** through the updater (§3, leg 1), so a
+unit that has been through that session is on **slot a**. That is the state leg
+2 wants — the downgrade artifact is the retained 2026.08.1, and the unit must be
+running the newer release for it to order `older`. Confirm before anything else:
 
 ```sh
 # on the unit (serial or SSH)
-cat /etc/sw-versions          # -> rootfs 2026.08.1
+cat /etc/sw-versions          # -> rootfs 2026.08.2 after the 08-16 session
 # misc_ab needs the misc PARTITION, discovered by PARTNAME the same way the
 # initramfs, S99ab-health and the update CGI all do it:
 MISC=$(for u in /sys/block/mmcblk*/mmcblk*/uevent; do \
          grep -q '^PARTNAME=misc$' "$u" && echo "/dev/$(sed -n 's/^DEVNAME=//p' "$u")"; done)
-misc_ab status "$MISC"        # -> last_boot=b, slot_b successful_boot=1
+misc_ab status "$MISC"        # -> last_boot=a, slot_a successful_boot=1
 ```
 
 If the unit is on some other release, §3 and §6 still work — substitute the two
@@ -68,7 +80,7 @@ inodes with `StrictModes` back at its default.
 
 ---
 
-## 3. Leg 1 — the upgrade path stays frictionless
+## 3. Leg 1 — the upgrade path stays frictionless — **PASSED 2026-08-16**
 
 Console → **Firmware update** → upload `joral-platform-2026.08.2.swu`.
 
@@ -96,18 +108,26 @@ misc_ab status "$MISC"   # -> last_boot=a, slot_a successful_boot=1
 
 ---
 
-## 4. Legs 3 and 4 — SSH key auth with `StrictModes` on
+## 4. Legs 3 and 4 — SSH key auth with `StrictModes` on — **PASSED 2026-08-16**
 
 **This is the real acceptance test for the image-ownership change, and it is the
 one leg that can cost you access. Read the recovery first.**
 
+> **Result 2026-08-16 — both passed**, on a unit updated to 2026.08.2 through
+> the A/B updater rather than reflashed. `ls -ldn / /etc /etc/ssh` reported
+> uid 0 / gid 0 on all three, and a fresh key-authenticated session succeeded
+> with `StrictModes` at its default. Ownership was the only missing half — the
+> modes on the key path were already `0755`/`0644`. Kept below because it is
+> the procedure to re-run at every release that repacks the image.
+
 Until 2026-08-15 every inode in the image was owned by the build user (uid 1000),
 which is why `sshd` shipped `StrictModes no`. `mkfs_ext4.sh` now gives every
 packed ext4 image root-owned inodes and fails the build if it cannot, so the
-directive is gone. Verified on the build host; never yet on a unit.
+directive is gone. Verified on the build host 2026-08-15 and **on a unit
+2026-08-16**.
 
-**Recovery, if key auth breaks:** slot **b** still holds 2026.08.1, which still
-has `StrictModes no`. You are not locked out — the console and the serial
+**Recovery, if key auth breaks:** the standby slot still holds 2026.08.1, which
+still has `StrictModes no`. You are not locked out — the console and the serial
 console are both unaffected, and §6 is itself the documented way back. Do not
 reflash; roll back.
 
@@ -211,6 +231,13 @@ cookie and console port differ between the two products.
 
 Both serve the update CGI at `cgi-bin/api-update.sh`. Substitute throughout.
 
+**Two device facts that cost time on 2026-08-16.** The image ships **no
+`logread` applet** — read syslog as `/var/log/messages`; a `logread | grep -c`
+pipeline reports `0` when the command is simply missing, which reads exactly
+like a clean result. And from a Windows bench PC, PowerShell aliases `curl` to
+`Invoke-WebRequest`: every command below must be typed as **`curl.exe`**, and
+any URL containing `&` must be quoted.
+
 Upload `output/image/downgrade-test/joral-platform-2026.08.1.swu` to a unit now
 running 2026.08.2.
 
@@ -265,6 +292,64 @@ ride inside the encrypted channel.
 
 It needs a broker on the bench, which is the reason this one kept slipping. That
 runbook stands one up; nothing here replaces it.
+
+---
+
+## 7a. Leg 7 — the 2026-08-16 product-decision changes
+
+Three changes landed in the tree on 2026-08-16 that no flashed unit has yet
+run. All three are one command each, and all three need the release built from
+the current tree (`2026.08.3` or later) installed the customer way, through the
+updater.
+
+**a. The root password is off the published vendor default.** The value is
+Joral-chosen and deliberately not written down in any customer document — take
+it from `project/cfg/BoardConfig_IPC/overlay/overlay-luckfox-buildroot-shadow/etc/shadow`
+via the build host, or from whoever holds it. What is unproven is not the value
+but the **hash format**: the overlay now ships `$6$` (SHA-512) where it shipped
+`$1$` (MD5-crypt), and busybox `login` has never been asked to verify a `$6$`
+on this image.
+
+```sh
+# on the SERIAL console (not SSH — SSH is key-only and will not exercise this)
+# log out, then log in as root with the new password
+grep -o '^root:\$[0-9]*' /etc/shadow      # -> root:$6
+```
+
+If the login fails, the fallback is the key-authenticated SSH session you
+already have; do not reboot until you have one open. That is the only lockout
+risk in this leg, and it is why it is done with a shell already up.
+
+**b. Stored secrets are encrypted at rest and bound to the board.** The binding
+reads the SoC OTP and the eMMC CID. Both are in the kernel config; neither has
+ever been *read* on a unit, and the host tests fake them — so this check is the
+whole evidence for the row.
+
+```sh
+# both binding sources readable?
+head -c 32 /sys/bus/nvmem/devices/*otp*/nvmem | xxd | head -2
+cat /sys/block/mmcblk0/device/cid
+
+# what the daemon actually achieved (store a secret from the console first,
+# e.g. an MQTT password, or this reads none-stored):
+grep -o '"secrets_at_rest":{[^}]*}' /var/run/intelligence-edge/diagnostics.json
+#   -> "mode":"encrypted","binding":"soc-otp+emmc-cid"
+
+# and the file itself must not contain what you typed:
+grep -c '<the password you just stored>' /userdata/satisense/state/gateway.json.secrets   # -> 0
+head -c 120 /userdata/satisense/state/gateway.json.secrets                                # -> {"v":1,"cipher":"aes-256-gcm",...
+```
+
+`"mode":"plaintext"` is a **failing** result, not a variant: it means the unit
+could not read its own hardware identity, and the reason is in the daemon's
+startup log (`/var/log/intelligence-edge.log`). Quote it — the fallback path is
+the one the design most needs field evidence for.
+
+**c. The cross-board claim, if a second unit is on the bench.** Copy
+`gateway.json.secrets` from unit A to unit B, restart B's daemon: B must come up
+with **no** stored secrets and report `"mode":"unreadable"`. Copy it back and A
+must still read it. That pair is the actual security claim; either half alone
+proves nothing (an empty store also reports no secrets).
 
 ---
 

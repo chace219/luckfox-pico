@@ -34,6 +34,36 @@ httpd + CGIs run as root (accepted in `project-context.md:78`). No firewall rule
 No LICENSE file in media-gateway. SatiSense config import has no schema validation
 (`web/cgi/api-config.sh:15-19`).
 
+## Status at a glance (2026-08-16)
+
+*The table above is the 2026-07-26 audit and stays frozen. This one is the
+current position, and it is what to read first. "met" means a path in the tree
+demonstrates it; "bench" means a flashed unit demonstrates it. Where the two
+disagree, the bench column wins — every defect that mattered in this programme
+was found by executing, not by reading. Per-product detail lives in each tree's
+`docs/compliance/cra-annex1-matrix.md`; this is the cross-product roll-up.*
+
+| Annex I | Media Gateway | SatiSense Edge | Bench | Residual |
+|---|---|---|---|---|
+| 1 Secure by default | **met** — HTTPS on 443 by default, per-unit cert, factory credential buys only a password change | **met** — `signencrypt` + `web.tls` by default, same credential gate | ✅ 08-09/08-12 | first-use trust is a self-signed fingerprint; anonymous OPC UA sessions still permitted (product decision) |
+| 2 No known CVEs at shipment | **met at the gate** — `./build.sh cve` **0 blocking**, OpenSSL 3.5.7 LTS | same (shared rootfs) | ✅ 08-12 | kernel (5155) + U-Boot (41) are report-only. the GNU wget accepted-risk was **resolved 08-16 by dropping the package**, leaving **python3 ×5 (review 2026-11-09)** as the only accepted-risk and dhcpcd `fixed-pending-release` (2026-11-12) |
+| 3 Confidentiality / integrity | **met** for the console path | **met** — secrets in a 0600 sidecar, **encrypted at rest and bound to the board since 08-16**, never served to the browser; MQTT TLS verification proven enforced | ✅ 08-12/13, ⚠️ sealing not yet on a unit | the sealing protects the stored file, **not** a running unit against root (no secure element); MQTT mutual TLS unexercised |
+| 4 Minimise attack surface | **met** — BSP daemons and 118 packages gone, default-deny IPv4+IPv6 firewall, `wifi_app` dropped, image inodes root-owned | same (shared rootfs) | ✅ 08-12/08-16 | httpd + CGIs run as root; root password is off the **published** vendor default since 08-16 (`$6$`, undocumented to customers) but is still one short shared value — unreachable over the network, serial-console login unverified |
+| 5 Access control | **met** for the console | **met** for the console | ✅ 08-09 | CAN :8001 unauthenticated by protocol design; OPC UA anonymous permitted |
+| 6 Security-event logging | **partial** — console trail complete; CAN peer identity on **UDP, the factory default, is not recorded** (see the 2026-08-16 correction) | **met** | ✅ 08-12 (IE) | media-gateway UDP peer record is on an unmerged commit; no off-device forwarding on either |
+| 7 Update mechanism | **met** — signed A/B SWUpdate, ordered releases, downgrade gate | same | ⚠️ partial | DEV signing key only; partition layout not frozen; downgrade **refusal** never run on hardware |
+| 8 Factory reset | **met** | **met** | ✅ 08-12 | — |
+
+| Annex I Part II | Status |
+|---|---|
+| §1 SBOM per release | **met** — `./build.sh sbom`, Buildroot legal-info + hand-declared app layer |
+| §2 Address vulnerabilities without delay | **met at the gate** — triage rows carry an owner and a `REVIEW_BY` date; first expiries 2026-11 |
+| §3 Periodic security testing | **partial** — hardware bench is the loop that finds the real defects; four legs outstanding |
+| §4–6 Coordinated disclosure | **partial — the only deadline-bound row.** Engineering half shipped 2026-08-09; the **mailbox does not exist yet** |
+
+**The one date that binds: 11 Sep 2026**, ~4 weeks out. Nothing on the
+engineering list is required by it; the mailbox is.
+
 ## Closed since the audit
 
 *Appended as items land. The table above stays a snapshot of the 2026-07-26 audit.*
@@ -349,9 +379,57 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   is recorded too. 17 checks in `tests/test_udp_peers.c` (time injected, so the
   shipped logic is the tested logic), each confirmed to fail against the code
   mutated back to per-datagram logging, address+port keying and no rate limit.
-  **Row #6 is met on both products again — this time on both transports.**
+  ~~**Row #6 is met on both products again — this time on both transports.**~~
   Bench-unverified: the daemon change needs a flash, and the check is a `logread`
   for `can_udp_peer_seen` after sending from two hosts.
+
+  **Correction, 2026-08-16 — this never landed, and the entry above was wrong
+  for four days.** The work exists as exactly one commit, `1a7bd8e`
+  (*feat(can): recorded who reaches the bus over UDP…*), pushed on 2026-08-12
+  to the branch `docs/manual-audit-src-and-console-troubleshooting` — **after
+  that branch's PR (#27) had already merged**. No later PR picked it up, so
+  the commit sits on the branch and on `origin/`, and is **not an ancestor of
+  `main`**: `grep -r udp_peer` over the checked-out product tree returns
+  nothing, there is no `tests/test_udp_peers.c`, and no image ever built from
+  `main` contains it. The gap the entry claimed to close is therefore **still
+  open in shipped code**: on a factory-configured unit (`can_gw_proto=udp`)
+  the write path equivalent to CAN bus access has no accountability at all.
+  **Row #6 is met for SatiSense and PARTIAL for media-gateway.**
+
+  The product's own Annex I matrix never repeated the error — it still
+  records the UDP row as *"NOT recorded — open gap, found 2026-08-12"* with
+  the interim `can_gw_proto=tcp` mitigation. The tree was right and this plan
+  was wrong, which is the opposite of the usual direction and worth stating
+  plainly: this entry was written from the commit, not from `main`.
+
+  **And it happened twice on the same day, in both repositories.** Sweeping
+  every branch in both trees for commits that are not ancestors of the release
+  branch turned up a sibling: satisense-edge `d4cfaa2`
+  (*docs(manual): documented the on-device firewall for operators*), pushed
+  2026-08-12 at 08:07 — 30 seconds before the media-gateway one — to the
+  identically-named branch, also after its PR had merged. So the **operator
+  documentation for the firewall never reached the SatiSense user manual**,
+  the on-device Help or the customer PDFs: `grep -i firewall docs/manual/`
+  on `master` finds only an unrelated Modbus troubleshooting line. That is an
+  Annex II accuracy item in its own right — the manual describes a network
+  behaviour the product no longer has, and the commit specifically covers the
+  two effects a customer sees from outside the box (IPv6 serves nothing, and
+  "I cannot reach the unit" has a new cause). Nothing else in either tree is
+  orphaned: every other branch tip that is not an ancestor is a bare merge
+  commit with no content.
+
+  *The process lesson, and it is a new one:* every earlier correction in this
+  document came from a claim that was wrong about **behaviour**. These two were
+  right about the behaviour of code and documentation that are not in the
+  product. Merging is part of the evidence — a fix is only shipped once it is
+  an ancestor of the branch the build takes, and that is a one-command check
+  (`git merge-base --is-ancestor <commit> main`) which nothing in the release
+  path currently runs. Recovering both is a small PR off each commit, not a
+  reimplementation; the code, its 17 tests and the manual sections are intact
+  on the branches. The generalisation worth keeping: **a claim in this plan
+  cites a commit, and a commit is not evidence until it is an ancestor of the
+  release branch.** Everything else in this document was written from what a
+  tree does; these two were written from what a diff did.
 
 - **2026-08-07 — both products, Annex I #6 hardened and made usable: console viewer,
   bigger history, no silent loss.** Three things came out of working out what the
@@ -1383,7 +1461,265 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   userdata for every board (measured this build: 2552 + 217 + 1 inodes).
 
 
-## Remaining work (verified against both trees 2026-08-07, refreshed 2026-08-10)
+- **2026-08-16 — documentation reconciliation: the compliance artifacts were
+  re-read against the code rather than against each other, and three of them
+  had gone stale in the direction that flatters the product.** The Annex I
+  matrices were re-verified on 2026-08-15 and were accurate; the **Annex II
+  fact sheets were not fully carried with them**, and a fact sheet is the
+  document that gets copied verbatim into the technical file.
+  - **media-gateway `cra-annex2-facts.md` contradicted itself.** §3 (ports)
+    had been corrected on 2026-08-15 to say the console is **HTTPS on 443 by
+    default**, while §4 still listed *"Console TLS — not available at all,
+    `tls_on()` is hard-coded false"* and *"Session cookie `Secure` — never set
+    (no TLS to set it for)"*, and §7 told the customer the console is
+    *"HTTP-only and cannot be encrypted"* and called that *"the largest
+    remaining gap for this product"*. All three have been untrue since
+    2026-08-09 (PR #25). §7 also still said *"no packet filtering ships"*,
+    untrue since 2026-08-12. The §4 logging row still quoted the **256 KB**
+    cap raised on 2026-08-07 and claimed the CAN data path is unlogged
+    *"(peer address discarded on accept)"* — wrong for TCP, where
+    `can_client_*` carries `peer=ip:port`, and right for UDP for a different
+    reason (see the correction above). Corrected against the code.
+  - **satisense-edge `cra-annex2-facts.md`** still carried `sshd runs with
+    StrictModes no` as a caveat *"that must be stated accurately in the
+    technical file"*, with the uid-1000 explanation and *"a fix is planned"*.
+    Fixed 2026-08-15 and hardware-confirmed 2026-08-16. Corrected, keeping the
+    honest half: units flashed from an image built before 2026-08-15 still
+    carry build-user ownership.
+  - **satisense-edge `cra-annex1-matrix.md`** §4's *to close* line listed the
+    uid-1000 problem as outstanding. Now root CGIs and the root password value
+    only.
+
+  *Worth recording, because it is the same shape as the CVE work:* a stale
+  document is not a documentation problem, it is an **evidence** problem — a
+  fact sheet that understates a control will be believed exactly as readily as
+  one that overstates it, and here the same file did both at once in different
+  sections. The per-release re-verification has to cover the fact sheets and
+  the matrices in one pass, not the matrices alone.
+
+- **2026-08-16 — the diagnosability items filed from the 2026-08-12/13 MQTT
+  bench session are fixed in the tree (build-verified, not yet flashed), and
+  the wget respin promise is kept.**
+
+  *SatiSense daemon log (remaining-work item 12, first bullet).* The daemon
+  now routes its own stdio to `/var/log/intelligence-edge.log`
+  (`core/logfile.c`, called at the top of daemon mode only — every CLI mode
+  keeps its stderr on the caller's terminal). The init script never could:
+  busybox `start-stop-daemon -b` reopens the child's stdio on `/dev/null`,
+  so the script's `>> $LOG` only ever redirected `start-stop-daemon`'s own
+  silenced output — the same reason the ENIP scanner already wrote its own
+  file (`ENIP_LOG_FILE`), which is the pattern followed. Three design points
+  worth keeping:
+  - **`dup2`, not `freopen`** — a failed `freopen` *closes* the stream, so
+    the failure mode of the fix would have been the defect, permanently; a
+    failed `open` here leaves stdio exactly as it was. Best-effort by the
+    same contract as `audit_log`: a log that cannot open must not cost the
+    gateway.
+  - **Capped, because `/var/log` is tmpfs** — an unbounded reconnect loop is
+    RAM exhaustion in slow motion on a 256 MB device. 1 MB with one `.old`
+    generation; the runtime cap is copy-then-truncate from a watchdog thread
+    so the live `O_APPEND` writers are never touched (no cross-thread stdio
+    surgery).
+  - **The mutation the suite missed first.** `tests/test_logfile.c` (in
+    `make test`) was mutation-checked five ways; four failed as required,
+    but dropping `O_APPEND` **survived** — nothing asserted that a restart
+    appends rather than clobbers, and the boot after a crash is exactly the
+    log that matters. The test now seeds the file as a previous run and
+    requires the seed to survive. Same lesson as the config-page suite on
+    2026-08-15: a test that has never been seen to fail is a test nobody
+    has checked.
+
+  One cross-build finding: uclibc does not declare `truncate()` under
+  `_POSIX_C_SOURCE 200809L` (implicit declaration on the RV1106 build — a
+  real hazard on a 32-bit target), so the cap uses `ftruncate` on an
+  explicit fd. Full satisense suite green including the new checks; the
+  cross build links clean and warning-free. The manual's §13 claim about
+  this file is now true and documents the rotation (markdown + Help HTML +
+  PDFs regenerated); `docs/project-context.md` no longer claims the init
+  script captures the log. **media-gateway checked for the same pattern:
+  not affected** — its daemon has used `syslog(LOG_DAEMON, …)` throughout;
+  its only stderr writes are CLI usage text.
+
+  *dhcpcd vs can0 (item 12, second bullet).* `denyinterfaces can*` added to
+  the board overlay `dhcpcd.conf` beside `ipv4only` — dhcpcd claims every
+  interface by default, AF_CAN included. The glob also covers a second
+  controller or a vcan test interface.
+
+  *GNU wget dropped (the one expiring accepted-risk, CVE-2024-38428).*
+  `BR2_PACKAGE_WGET` deselected in the tracked defconfig master **and** the
+  live buildroot `.config` (the tracked-masters gotcha), and the stale GNU
+  ELF + `/etc/wgetrc` purged from **both** staging trees (`output/target`
+  and `output/out/rootfs_uclibc_rv1106`) with the busybox applet symlink
+  restored in each, so a repack cannot resurrect the binary — the wifi_app
+  lesson applied. Both wget triage rows are retired: the gate itself flagged
+  them stale once the component left the list, which is the CSV working as
+  designed. Offline gate re-run: **0 blocking, 45/45 compliance checks
+  green.** Verification owed at the next packed image: `/usr/bin/wget` must
+  be the busybox symlink, not an ELF.
+
+  **Bench-confirmed the same day, on hardware, delivered the customer way.**
+  Release bumped to `2026.08.3`, built (`media` → `firmware` → `swu`) and
+  installed on the unit through the A/B updater; the audit trail carries the
+  full transition (`fw_upload version=2026.08.3 running=2026.08.2
+  order=newer` → `fw_apply … from=2026.08.2 to=2026.08.3 order=newer
+  downgrade=false` → `ab_slot_marked_successful slot=b`), which is also the
+  §9 evidence the bench runbook asks to be quoted. Observed on the unit:
+  - `/var/log/intelligence-edge.log` is **745 bytes where it was always 0**,
+    opening with the version line (`intelligence_edge_opcua: version
+    8ba0e45-dirty`), the config summary and the OPC UA security-policy
+    setup — a support bundle now names the build and says what the daemon
+    did at boot.
+  - `/usr/bin/wget` is the **busybox symlink** on the running rootfs and
+    invoking it prints the BusyBox banner — the triage rows' owed check,
+    closed on-device rather than only in the packed image.
+  - **dhcpcd no longer touches the CAN bus.** `/var/log/messages` carries
+    **zero** `can0` lines this boot — no `if_setmtu: Device or resource
+    busy`, no privilege-separation loop — where the pre-fix unit logged them
+    continuously. Confirmed by a *pair*, not by the silence alone, because an
+    absent error is also what a dead daemon looks like: dhcpcd is
+    demonstrably alive and working in the same log (`usb0: carrier
+    acquired` → `soliciting a DHCP lease` → lease), and `ip link show can0`
+    reports the interface still `UP` with `mtu 16`, i.e. denied to dhcpcd but
+    untouched as a CAN device. The one-line-only startup complaint (`no
+    valid interfaces found`, before any carrier exists) is the expected
+    consequence of the deny rule, not a regression.
+    *Method note for the runbook:* the check as first written used
+    `logread`, which **this image does not ship** — the command failed and
+    the `grep -c` in the pipeline reported `0`, which reads exactly like a
+    pass. A check that cannot fail is not a check; the syslog file is the
+    right target here.
+  Incidental but worth keeping: the 2026-08-15 19:46 audit line already
+  shows `fw_upload version=2026.08.1 running=2026.08.2 order=older` — the
+  **upload half of bench leg 2 has therefore already executed and ordered
+  correctly**; what remains for the downgrade refusal is only the `fw_apply`
+  attempt without the typed phrase, one `curl` against the CGI.
+
+- **2026-08-16 (second pass) — four product decisions were taken and
+  implemented: the root password leaves the published vendor default, the
+  secrets sidecar is encrypted at rest, and both products now declare an
+  outbound licence. Build-verified; three of the four are bench-unverified.**
+
+  *Root password (remaining-work item 2).* The image shipped `luckfox` — the
+  value **Luckfox publishes in their own documentation**, so it was a secret on
+  no unit that carried it. It is now a Joral-chosen value, deliberately absent
+  from every customer-facing document (manuals, quick-start, on-device Help),
+  and the guard `scripts/compliance/test-root-credential.sh` (12 checks) keeps
+  it that way. Three things came out of doing it that the plan line ("the root
+  password value") did not anticipate:
+
+  - **The defconfig was never the effective source.** The board overlay
+    (`overlay-luckfox-buildroot-shadow/etc/shadow`) is rsynced over the rootfs
+    *after* buildroot's target-finalize, so `BR2_TARGET_GENERIC_ROOT_PASSWD`
+    only ever supplied a value that was then overwritten. Every prior document
+    — this plan, both Annex II fact sheets, both matrices — cited the
+    defconfig. The value they named was right; the mechanism was not, and a
+    change made only there would have shipped nothing while reading as fixed.
+  - **The two disagreed in strength as well as origin.** Buildroot was
+    generating `$5$` (SHA-256) while the overlay shipped `$1$` — **MD5-crypt**,
+    which is the weakest hash the platform still accepts. Now `$6$` (SHA-512)
+    in both, safe because busybox 1.36.1 is built `CONFIG_USE_BB_CRYPT_SHA=y`
+    and resolves `$5$`/`$6$` with **its own** implementation
+    (`libbb/pw_encrypt.c:113-118`), not uClibc's — the check that mattered,
+    since login and `su` are busybox applets and a hash format the binary
+    cannot parse would have locked the serial console.
+  - **The guard has to recompute, not compare.** Re-hashing the *same vendor
+    word* under a fresh salt looks like a change in a diff, so the test derives
+    `luckfox` against each file's own salt and fails if it matches. Confirmed
+    against three mutations (the original `$1$` hash, `luckfox` re-hashed as
+    `$6$` with a new salt, and the defconfig reverted); each was caught.
+
+  Stated plainly, because the technical file has to: this is **one shared value
+  across units**, short, and offline-recoverable from an image. It is not a
+  strength improvement — it removes a *published* default. What makes it
+  acceptable is unchanged: it is unreachable over the network (key-only SSH, no
+  telnet/adbd, default-deny firewall) and is a physical-access recovery
+  credential, on a platform where physical access is already equivalent to full
+  control. Per-unit passwords remain the open option. **Owed: a serial-console
+  login on a flashed unit** — the `$6$` path has not run on hardware.
+
+  *Secrets encrypted at rest (item 9).* The 0600 sidecar is now sealed with
+  **AES-256-GCM**, key = HKDF-SHA256 over this board's **SoC OTP** and **eMMC
+  CID** — hardware identity, present in no filesystem. `core/secretbox.c`,
+  wired into the two functions that already owned the sidecar's bytes.
+  The claim is deliberately narrow and the documents state it that way:
+  **confidentiality of the stored bytes once they leave the device** — a pulled
+  eMMC, a copied `/userdata`, an RMA return, a support bundle. It is **not**
+  protection against root on a running unit, and on a platform with no secure
+  element nothing can be. Four design points worth keeping:
+
+  - **An unprogrammed identity is refused rather than used.** A provider
+    reading all-`00`/all-`ff` yields *no* binding, because a key derived from
+    it would be byte-identical on every unit off the line — the CWE-321 shape
+    that got image-embedded certificates rejected on 2026-07-31. A fleet-wide
+    key that *looks* encrypted is worse than plaintext that admits what it is.
+  - **The fallback is reported, not silent.** No readable identity → the file
+    is written as before (0600, clear) and the daemon says so in its startup
+    log and in `diagnostics.json` → *Diagnostics → Stored secrets at rest*.
+    Same rule as the OPC UA security row: publish what was **achieved**, never
+    what was configured.
+  - **A sidecar from another board is not a boot failure.** It opens as "no
+    secrets stored", is reported `unreadable` with a reason, and the operator
+    re-enters the three values. The alternative — refusing to start — would
+    turn a cloned image into a brick.
+  - **The header is authenticated.** `binding`, `v`, `cipher` and `kdf` travel
+    in the clear (a reader needs them before it has a key) and are fed to GCM
+    as AAD, so rewriting `binding` to name a weaker provider set breaks the tag
+    instead of steering the next read.
+
+  Pinned by `tests/test_secretbox.c` (33 checks — including *a file sealed on
+  board A cannot be opened on board B*, with fake boards under
+  `IE_BINDING_ROOT`) and 12 integration checks in `tests/test_config_json.c`.
+  Five mutations of the shipped module were each confirmed to fail the suite:
+  accepting a blank identity, ignoring the recorded binding, dropping the AAD,
+  a fixed salt/IV, and skipping a named-but-missing provider. The integration
+  checks exist because **the build host has neither binding source**, so every
+  pre-existing test in that file exercises the plaintext fallback — a
+  regression that quietly stopped encrypting would have passed all of them.
+  **Owed: the binding has never been READ on a unit.** `CONFIG_ROCKCHIP_OTP=y`,
+  `CONFIG_NVMEM_SYSFS=y` and `CONFIG_MMC_BLOCK=y` are confirmed in the built
+  kernel config, but until a flashed unit reports
+  `secrets_at_rest.mode = encrypted` this rests on source-level evidence.
+
+  *Outbound licence (item 7) — and a contradiction it exposed.* The decision is
+  **MPL-2.0**, which is what Joral already publishes: satisense-edge has
+  carried an MPL-2.0 `LICENSE` since its initial commit and declares MPL-2.0 in
+  its SBOM application layer. media-gateway now has the same `LICENSE`
+  (byte-identical), a README licence section, and `SPDX-License-Identifier:
+  MPL-2.0` + a copyright line on all 42 first-party files; its
+  `app-manifest.csv` moves from `UNDECLARED (no LICENSE file in tree, no SPDX
+  headers)` to `MPL-2.0`, so the SBOM stops describing our own components as
+  unlicensed.
+
+  Doing it surfaced a defect nobody had noticed: **87 satisense-edge files
+  carried `SPDX-License-Identifier: GPL-2.0+`**, contradicting both that tree's
+  own LICENSE file and its own SBOM entry *for the same files*. The tags were
+  boilerplate — nothing GPL is linked (open62541 MPL-2.0, EIPScanner MIT,
+  libcurl MIT-like, OpenSSL 3 Apache-2.0) — and every one now reads `MPL-2.0`,
+  with a copyright line the tree previously had **nowhere**. This is a legal
+  determination made from the evidence in the tree, not a licence change on
+  someone's instruction: **Carl should confirm it**, and reversing it is one
+  substitution in `scripts/compliance/apply-license-headers.sh`. MPL-2.0 is
+  file-level weak copyleft — it obliges us to offer the source of *these* files
+  to whoever receives a binary — so if that is not the intent, now is the
+  moment to say so, before the first customer shipment.
+
+  *Caught by the tests, and worth recording:* inserting two header lines into
+  every source file shifted every line number in both trees, and
+  `test_listeners.sh` — written on 2026-08-15 specifically to stop compliance
+  citations going stale — **failed on five checks** naming `src/main.c:137`,
+  `media_gateway.h:224-225` and `can_gw.c:563`. The documents were corrected to
+  139 / 226-227 / 565. A licence-header pass is exactly the kind of change
+  nobody would think to re-verify citations after; the suite did it instead.
+
+  Also in this pass: the **`dhcpcd` vs `can0`** and **SatiSense daemon log**
+  items were already fixed and bench-confirmed earlier the same day (see the
+  entry above), and both product suites are green — media-gateway all suites,
+  satisense **19 suites** including the new `test_secretbox.c`. Clean
+  cross-build of both daemons; SPA rebuilt; the SatiSense user manual §12.1
+  gained a *Where stored passwords live* subsection (markdown + on-device Help
+  + all three PDFs regenerated).
+
+## Remaining work (refreshed 2026-08-16 against both trees and `main` on each)
 
 The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) and
 gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
@@ -1417,11 +1753,18 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    below): every packed ext4 image now carries root-owned inodes, the build
    fails rather than ship one that does not, and `StrictModes no` is out of
    `sshd_config`. **Confirmed on hardware 2026-08-16** — uid 0 / gid 0 on a
-   unit, and key auth working with StrictModes at its default. What is left on
-   this row: root CGIs, and the root password *value* (unreachable but
-   unchanged, and a product decision: leaving it, locking it — which costs the
-   documented serial-console recovery — or minting a per-unit password the
-   console can surface).
+   unit, and key auth working with StrictModes at its default. **The root
+   password value changed 2026-08-16** (see the dated entry above): off the
+   *published* Luckfox default, `$1$` MD5-crypt → `$6$` SHA-512, absent from
+   every customer-facing document, and guarded by
+   `scripts/compliance/test-root-credential.sh` — which also fixed the
+   documents' long-standing mis-citation of the defconfig as the effective
+   source (the board overlay's `/etc/shadow` is). What is left on this row:
+   **root CGIs**; a **serial-console login on hardware** to prove the `$6$`
+   path; and the standing product decision between one shared value, locking
+   the account (which costs the documented serial-console recovery) and minting
+   a per-unit password the console can surface — the change made removes a
+   published default, it does not make a short shared password strong.
 3. **Secure defaults (row #1)** — **closed on both products** *(text reconciled
    2026-08-12 — this item had gone stale against action-plan items 4g/4h)*:
    SatiSense ships `signencrypt` + `web.tls: true` (2026-08-08), the
@@ -1451,9 +1794,10 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       blocking)**, see the dated entry above. Both quick wins predicted here
       survived the source check (minizip not built; zlib 1.2.13 vs the
       ≤ 1.2.0.3 the curl finding needs); busybox and the second wget finding
-      fell to version/build facts; wget CVE-2024-38428 is the one *expiring*
-      accepted-risk (drop GNU wget at the next respin); dhcpcd is
-      `fixed-pending-release` via `ipv4only`. 20 triage rows total, first
+      fell to version/build facts; wget CVE-2024-38428 was the one *expiring*
+      accepted-risk — **resolved 2026-08-16 by dropping GNU wget from the
+      build** (see the dated entry above; both wget triage rows retired);
+      dhcpcd is `fixed-pending-release` via `ipv4only`. First remaining
       expiries 2026-11.
    c. ~~**Close the coverage gap**~~ — **done 2026-08-12**: all 19 remaining
       unmapped components resolved against the NVD CPE dictionary (one real
@@ -1471,15 +1815,28 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
 6. **Audit-log off-device forwarding** — the one item left on Annex I #6; designed
    in `audit-log-forwarding-plan.md`, deferred pending a product decision (action
    plan item 5).
-7. **Media-gateway loose ends from the matrix work** — no LICENSE file / SPDX
-   headers (needs an outbound-license decision; our own components show as
-   UNDECLARED in the SBOM). ~~and no test coverage of the auth layer, CGIs,
+7. ~~**Media-gateway loose ends from the matrix work**~~ — **both halves closed.**
+   ~~no LICENSE file / SPDX headers~~ — **done 2026-08-16**: **MPL-2.0**, the
+   licence Joral already publishes for satisense-edge, with the same `LICENSE`
+   text, SPDX + copyright headers on all 42 first-party files, and
+   `app-manifest.csv` moving from UNDECLARED to MPL-2.0 — the SBOM no longer
+   describes our own components as unlicensed (verified in the 2026-08-16
+   regeneration: 52 platform + 8 application components, zero UNDECLARED). The
+   same pass found and corrected **87 satisense-edge files tagged `GPL-2.0+`**
+   against that tree's own MPL-2.0 LICENSE and SBOM entry. **What is left is
+   Carl's confirmation of the determination**, not the work: MPL-2.0 is
+   file-level weak copyleft, and reversing it is one substitution in
+   `scripts/compliance/apply-license-headers.sh` — cheap now, expensive after
+   the first customer shipment.
+   ~~and no test coverage of the auth layer, CGIs,
    config writer or listeners~~ — **the coverage half is done 2026-08-15** (see
    the dated entry above): four suites, 200+ checks, mutation-verified, in
    `make test`; one console-denial defect in `config.sh` found and fixed, and
-   three stale source citations in the Annex II fact sheet corrected. What is
-   left on this row is the outbound-license decision, which is Carl's, plus the
-   same coverage for satisense-edge's own copy of the auth layer.
+   three stale source citations in the Annex II fact sheet corrected.
+   ~~plus the same coverage for satisense-edge's own copy of the auth layer~~ —
+   **carried across the same day** (satisense-edge #56, ~140 checks,
+   19 mutations): its vendored `webauth.sh` had all the same guards already
+   present, so nothing was missing there except the coverage.
 8. **Hardware bench session** — **partially done 2026-08-12** (see the dated
    entry above): the trimmed image boots and console HTTPS, OPC UA Sign&Encrypt,
    mDNS, CAN and the bench scripts are confirmed on hardware, so nothing
@@ -1499,16 +1856,85 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    **TC-S3 leg c (MQTT TLS) was executed 2026-08-12/13** — see the dated entry
    above: TLS 1.3 confirmed, certificate verification proven enforced on both
    trust paths, and a pre-existing keepalive defect found, fixed, guarded by a
-   test that fails against the old code, and bench-confirmed. **Still open:**
-   the mutual-TLS and credentials-in-channel halves of that leg (they need a
-   local broker, runbook §2–§5), the media-gateway durable-audit spot-check,
-   and a failed-login record correlated against stunnel's peer line — the peer
-   line itself is now confirmed present on a running unit. With those, the
-   bench backlog that accumulated since 2026-08-05 is cleared.
-9. **Secrets at rest** — restricted (0600 sidecar) but not encrypted; accepted
-   for now. The named revisit trigger — the OpenSSL 3 migration — fired
-   2026-08-12, so an encrypted sidecar is now implementable; pending a product
-   decision.
+   test that fails against the old code, and bench-confirmed.
+   **2026-08-16 closed two more legs** (`bench-backlog-runbook.md` legs 3 and 4,
+   and leg 1 in passing): a unit taken to **2026.08.2 through the A/B updater**
+   — not a reflash, so the change travelled the way a customer's would —
+   reports uid 0 / gid 0 on `/`, `/etc` and `/etc/ssh` and accepts a fresh
+   key-authenticated SSH session with `StrictModes` at its **default**. That is
+   the whole of `image-ownership-and-ssh-key-plan.md` Part 1.
+   **Still open, four legs:**
+   a. **the downgrade refusal** (runbook §6) — the gate has never run on
+      hardware; the 08-15 session staged `same`, which is correctly frictionless
+      and proves only the other half. Evidence to cite is the CGI driven with
+      `curl`, plus the `fw_apply refused … from=/to=/order=` audit line;
+   b. **MQTT mutual TLS and credentials-in-channel** (mqtt-tls-bench-runbook
+      §2–§5) — needs a broker whose authentication we control;
+   c. **media-gateway durable-audit spot-check** and a failed-login record
+      correlated against stunnel's peer line (the peer line itself is confirmed
+      present on a running unit);
+   d. **SWUpdate negative and fault paths** — tampered payload, tampered
+      signature and wrong key are built and *host*-verified only
+      (`output/image/negative-tests/`); power-cut mid-write, a deliberately
+      broken standby slot exhausting its tries, and factory reset from both
+      slots have not been run at all. These are items 3–4 and 6–7, 9 of the
+      swupdate plan's verification list — the ones that decide whether row #7
+      survives contact with a bad update rather than a good one.
+   e. **The 2026-08-16 product-decision changes, none of them yet on a unit:**
+      a serial-console login with the new root password (the `$6$` hash path
+      through busybox `login`, never exercised on hardware), and
+      `secrets_at_rest.mode = encrypted` in `diagnostics.json` on a flashed
+      unit — the binding sources are in the kernel config but have never been
+      **read** on a board, and the host suite fakes them. Both are one-line
+      checks on the next flash; both are the difference between a control and a
+      claim.
+9. ~~**Secrets at rest**~~ — **implemented 2026-08-16** (see the dated entry
+   above): AES-256-GCM over the 0600 sidecar, keyed by HKDF-SHA256 over this
+   board's SoC OTP + eMMC CID, so the stored bytes are inert on any other unit.
+   45 checks across two suites, five mutations of the shipped module each
+   confirmed to fail it. What the row now says, and must keep saying, is the
+   *scope*: it protects the file once it leaves the device, **not** a running
+   unit against root — this platform has no secure element and no design here
+   can change that. **Owed: a flashed unit reporting `encrypted`** (item 8e).
+10. **Recover two orphaned commits from 2026-08-12** — both pushed to a branch
+    whose PR had already merged, 30 seconds apart, one per repository (see the
+    2026-08-16 correction above):
+    - **media-gateway `1a7bd8e`** — UDP peer attribution on the CAN path, the
+      last gap on Annex I #6 for that product. Until it lands, a
+      factory-configured unit (`can_gw_proto=udp`) records nothing about who
+      reaches the write path equivalent to bus access. The 17 tests come with
+      the commit.
+    - **satisense-edge `d4cfaa2`** — the operator documentation for the
+      firewall (user manual §12.3 + a §13.1 troubleshooting row), so the
+      shipped manual, on-device Help and customer PDFs still describe a network
+      behaviour the product no longer has. Annex II accuracy; regenerate the
+      HTML and PDFs with it.
+
+    **Add the ancestry check to the release routine** — `git merge-base
+    --is-ancestor <commit> <release-branch>` for every commit a compliance
+    document cites as closed. Nothing today would have caught either, because
+    the documents cite behaviour and the behaviour was real on a branch.
+11. **Update-mechanism residuals (row #7, 4b).** Three, in order: **freeze the
+    partition layout** (one-way door once a customer unit ships), hold the
+    **key ceremony** so builds stop signing with the per-checkout DEV key — no
+    customer shipment on a DEV-keyed trust store — and run the negative/fault
+    legs in item 8d. The first is engineering, the second is Carl's hour, the
+    third is a bench session.
+12. ~~**Diagnosability defects filed but not fixed**~~ — **both fixed
+    2026-08-16** (see the dated entry above): the SatiSense daemon now writes
+    `/var/log/intelligence-edge.log` itself (`core/logfile.c`, 1 MB cap + one
+    `.old`, `tests/test_logfile.c` in `make test`; media-gateway checked —
+    not affected, its daemon syslogs), and the board overlay's `dhcpcd.conf`
+    carries `denyinterfaces can*`. **All three bench-confirmed 2026-08-16 on
+    release 2026.08.3 delivered through the A/B updater** (see the dated
+    entry): the daemon log shows startup lines where 0 bytes used to be, GNU
+    wget is gone from the running rootfs, and `/var/log/messages` carries no
+    `can0` line while dhcpcd is demonstrably alive on `usb0` and `can0`
+    stays `UP mtu 16`. Nothing owed on this item.
+13. **Owed by the image-ownership change:** a build-and-boot pass on the
+    **other board configs**. `mkfs_ext4.sh` is shared SDK tooling and packs
+    `rootfs`, `oem` and `userdata` for every board in the tree (2552 + 217 + 1
+    inodes on this build); only the Pico Ultra profile has been exercised.
 
 ## Default network exposure (Annex II facts, current truth)
 
@@ -1536,7 +1962,7 @@ here as the cross-product summary.*
   hardware: rules listed, blocked port refused, services reachable, DHCP lease
   acquired. **Units flashed before 2026-08-12 still run unfiltered.**
 - Media Gateway, **updated 2026-08-12** *(the ":80 HTTP-only, no TLS option" wording here had gone stale against 4h)*: **:443** web console (HTTPS by default via stunnel since 2026-08-09, per-unit cert, plain-HTTP fallback on the same port; backend on 127.0.0.1:18081 only), **:8001** CAN↔Ethernet UDP-or-TCP (unauthenticated), br0 L2 bridge (T1S↔100BASE-TX) so both are reachable from either medium.
-  **Correction (2026-08-06): :8000 is NOT bound.** `can_gw_comm_port` defaults to 8000 but the socket binds `comm_port + 1` only (`src/can_gateway/can_gw.c:563`, `include/media_gateway.h:224-225`). The audit row above and `docs/manual/quick-start.md:83` both overstated the exposure.
+  **Correction (2026-08-06): :8000 is NOT bound.** `can_gw_comm_port` defaults to 8000 but the socket binds `comm_port + 1` only (`src/can_gateway/can_gw.c:565`, `include/media_gateway.h:226-227`). The audit row above and `docs/manual/quick-start.md:83` both overstated the exposure.
 - SatiSense Edge, **updated 2026-08-08**: :8080 web console (**https by default** via
   stunnel, per-unit self-signed cert minted on first boot), :4840 OPC UA
   (**`signencrypt` by default**, per-unit server cert minted on first boot; anonymous
