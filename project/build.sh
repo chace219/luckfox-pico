@@ -472,6 +472,7 @@ function usage() {
 	echo "info               -see the current board building information"
 	echo "sbom               -generate the CRA software bill of materials (add --reuse to skip legal-info)"
 	echo "cve                -check image components against NVD; fails on unaccepted findings (add --offline for cache only)"
+	echo "cited              -check every commit the compliance documents cite as closed actually ships (add --ref <rev> to audit a tag)"
 	echo "swu                -pack + sign the A/B firmware update package from rootfs.img (--sig <file> to resume the offline-signing flow)"
 	echo ""
 	echo "buildrootconfig    -config b	# EMMCuildroot and save defconfig"
@@ -831,6 +832,33 @@ function build_cve() {
 		echo "============CVE check FAILED (exit $rc)============"
 		echo "See output/compliance/cve-report-*.md. Fix the component, or record"
 		echo "a dated decision in scripts/compliance/cve-triage.csv."
+		exit $rc
+	fi
+
+	finish_build
+}
+
+function build_cited() {
+	echo "============Start cited-commit check (CRA Annex I Part II §1)============"
+
+	# Does the technical file describe what we are about to ship? Every commit
+	# a compliance document cites as closed must be an ancestor of its repo's
+	# default branch AND of the submodule revision this tree pins.
+	#
+	# Source-level: it reads git, not the image, so unlike sbom/cve it needs no
+	# build and can run on a clean checkout — which is the point, since the
+	# failure it catches (a commit stranded on a merged branch) is invisible in
+	# a built image. Same gate discipline as build_cve: the exit status IS the
+	# result, so it must reach the caller rather than be swallowed by
+	# finish_build's success path.
+	local rc=0
+	"$SDK_ROOT_DIR/scripts/compliance/check-cited-commits.sh" "$@" || rc=$?
+
+	if [ $rc -ne 0 ]; then
+		echo "============Cited-commit check FAILED (exit $rc)============"
+		echo "A document claims something that is not in the release. Either land"
+		echo "the commit and bump the submodule, or correct the document — do not"
+		echo "delete the citation to make this pass."
 		exit $rc
 	fi
 
@@ -3159,6 +3187,10 @@ while [ $# -ne 0 ]; do
 		;;
 	cve)
 		option="build_cve ${@:2}"
+		break
+		;;
+	cited)
+		option="build_cited ${@:2}"
 		break
 		;;
 	swu)
