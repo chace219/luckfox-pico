@@ -59,10 +59,12 @@ was found by executing, not by reading. Per-product detail lives in each tree's
 | §1 SBOM per release | **met** — `./build.sh sbom`, Buildroot legal-info + hand-declared app layer |
 | §2 Address vulnerabilities without delay | **met at the gate** — triage rows carry an owner and a `REVIEW_BY` date; first expiries 2026-11 |
 | §3 Periodic security testing | **partial** — hardware bench is the loop that finds the real defects; four legs outstanding |
-| §4–6 Coordinated disclosure | **partial — the only deadline-bound row.** Engineering half shipped 2026-08-09; the **mailbox does not exist yet** |
+| §4–6 Coordinated disclosure | **partial — the only deadline-bound row, and nothing on it is engineering's.** Policy, address and the publishable `security.txt` + policy page are all done (08-09, 08-18, `disclosure/`); the **mailbox does not exist yet**, and until mail is received the row is not met |
 
-**The one date that binds: 11 Sep 2026**, ~4 weeks out. Nothing on the
-engineering list is required by it; the mailbox is.
+**The one date that binds: 11 Sep 2026**, ~3.5 weeks out. Nothing on the
+engineering list is required by it; the mailbox is — and as of 2026-08-18 the
+files that go with it are written, validated and waiting in `disclosure/`, so
+what remains is a Workspace group and a web upload, in that order.
 
 ## Closed since the audit
 
@@ -1725,19 +1727,46 @@ The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) 
 gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
 
 1. **Disclosure channel** — *deadline-bound: reporting obligations start 11 Sep 2026,
-   ~4.5 weeks out, and apply to already-shipped units.* **Engineering half done
+   **~3.5 weeks out**, and apply to already-shipped units.* **Engineering half done
    2026-08-09** (see the dated entry above): `security@joralllc.com` is documented
    in both manuals, the on-device Help, the customer PDFs and each tree's
-   `SECURITY.md`. What is left sits with Carl: **create the
-   `security@joralllc.com` Workspace group** (product management + at least one
-   engineer; alias `psirt@` to it), and publish the policy on joralllc.com
-   (`/.well-known/security.txt`). The two firmware-update decisions (4b) —
-   **signing-key custody** and the **declared support period** — are now a
-   ready-to-sign memo: `firmware-signing-and-support-policy.md` (2026-08-14;
-   offline two-key ceremony + compromise runbook, 5-year support period with
-   published end date). What Carl owes is a signature and one hour for the
-   key ceremony — raise it in the same conversation as the mailbox. The docs
-   must not ship to customers before the mailbox is live.
+   `SECURITY.md`.
+
+   **2026-08-18 — the publishable artifacts now exist too**, so nothing on this
+   row is waiting on engineering. [`disclosure/`](disclosure/) holds a
+   ready-to-upload RFC 9116 `security.txt` and the public, product-neutral
+   `security-policy.md` the `Policy:` field names, plus a four-step publication
+   runbook. `scripts/compliance/test-security-txt.sh` validates them (16 checks,
+   six mutations each confirmed to fail it: a lapsed expiry, an expiry inside the
+   renewal margin, an address that drifts from what the devices ship, a typo'd
+   field name, an `Encryption:` line promising a key nobody holds, and a
+   plaintext `http://` URI).
+
+   Two things that guard the long term rather than the deadline. RFC 9116 makes
+   `Expires` mandatory and a lapsed file **invalid**, with nothing to announce
+   it — so the check fails **60 days early**, while re-issuing is a chore rather
+   than an incident. And it fails if the address in `security.txt` ever stops
+   matching all six shipped surfaces (both `SECURITY.md`, both manuals, both
+   on-device Helps), which is the realistic decay here: a unit in the field
+   carries whichever address it was built with, forever.
+
+   **What is left is not ours, and the order matters:** create the
+   `security@joralllc.com` Workspace group first (product management + at least
+   one engineer; `psirt@` aliased in), *then* publish the two files, *then*
+   verify from outside with `--live`. Publishing before the mailbox exists is
+   worse than publishing nothing — a researcher who mails a dead address
+   concludes we do not answer, and what they do next is publish. The row stays
+   **partial** until mail to the address is actually received; a row that read
+   "met" on the strength of a written policy would be the same failure this
+   programme keeps finding. The docs must not ship to customers before then.
+
+   The two firmware-update decisions (4b) — **signing-key custody** and the
+   **declared support period** — are a ready-to-sign memo:
+   `firmware-signing-and-support-policy.md` (2026-08-14; offline two-key
+   ceremony with a compromise runbook, 5-year support period with a published
+   end date). What
+   Carl owes is a signature and one hour for the key ceremony — raise it in the
+   same conversation as the mailbox. It is one meeting, not three.
 2. ~~**Attack surface (4a)**~~ — **done 2026-08-08 and 2026-08-10.** telnetd, adbd
    and Samba are out of the image and root SSH login is key-only (08-08);
    `S40bluetoothd`, `S30dbus`, `S99hciinit`, the `S99python` root-execution boot
