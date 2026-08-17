@@ -1,17 +1,21 @@
 # Compliance tooling
 
-Two generators, one release procedure. Both describe **the image this tree
-builds**, and both derive their component list from the same Buildroot
-`.config`, so they cannot describe different images.
+Two generators and a gate, one release procedure. The generators describe **the
+image this tree builds** and derive their component list from the same Buildroot
+`.config`, so they cannot describe different images. The gate asks the question
+neither of them can: whether the documents an assessor reads are talking about
+that image at all.
 
 | | What it answers | Command |
 |---|---|---|
 | [`gen-sbom.sh`](gen-sbom.sh) | What is *in* the image? | `./build.sh sbom` |
 | [`cve-check.py`](cve-check.py) | What is *known to be wrong* with what is in it? | `./build.sh cve` |
+| [`check-cited-commits.sh`](check-cited-commits.sh) | Does the paperwork describe what actually ships? | `./build.sh cited` |
 
 Regulation (EU) 2024/2847 (Cyber Resilience Act): Annex I Part II §1 (SBOM),
 Annex I Part I §2 ("without known exploitable vulnerabilities"), Annex I Part II
-§2 (address vulnerabilities in components without delay).
+§2 (address vulnerabilities in components without delay), and Annex II
+(accuracy of the information supplied with the product).
 
 Outputs land in `output/compliance/`, stamped with the SDK build ID
 (`git describe`) so a report can be matched to a deployed unit — the same
@@ -19,7 +23,16 @@ identifier the daemons report via `--version` and the consoles show.
 
 ## Release procedure
 
-Run both **after** the image is built and **before** it is shipped or tagged:
+Three source-level gates first — they read git and the tree, not the image, so
+they need no build and should fail before you spend eight minutes on one:
+
+```sh
+./build.sh cited                             # do the documents describe what ships?
+scripts/compliance/test-root-credential.sh   # is the shipped root credential still ours?
+scripts/compliance/test-security-txt.sh      # can a reporter still reach us?
+```
+
+Then, **after** the image is built and **before** it is shipped or tagged:
 
 ```sh
 ./build.sh sbom --reuse      # --reuse skips legal-info's slow source re-verify
