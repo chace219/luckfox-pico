@@ -1,12 +1,18 @@
 # Image file ownership and SSH key policy — plan
 
-***Status 2026-08-15 — Part 1 is IMPLEMENTED, bench-pending. Part 2 still needs
-a product decision.** The fix is in `sysdrv/tools/pc/e2fsprogs/mkfs_ext4.sh` and
-`StrictModes no` is removed from `sshd_config`. **The approach below was wrong
-and has been rewritten** — see "Approach", kept with the original proposal
-struck through, because the way it fails is the interesting part: wrapping
-`mkfs.ext4` in `fakeroot` does NOTHING on this SDK, silently, while passing its
-own `command -v fakeroot` check.*
+***Status 2026-08-16 — Part 1 is DONE and CONFIRMED ON HARDWARE. Part 2 still
+needs a product decision.** A unit running 2026.08.2, delivered through the A/B
+updater, reports `/`, `/etc` and `/etc/ssh` as uid 0 / gid 0 and accepts a
+key-authenticated SSH session with `StrictModes` at its default — acceptance
+criteria 1 and 2, which are the whole of Part 1. The fix is in
+`sysdrv/tools/pc/e2fsprogs/mkfs_ext4.sh`, with a staleness guard in
+`build_firmware`, and `StrictModes no` is out of `sshd_config`.*
+
+***Two wrong turns are recorded below rather than deleted, because both looked
+right:** wrapping `mkfs.ext4` in `fakeroot` does NOTHING on this SDK — silently,
+while passing its own `command -v fakeroot` check — and the tracked script is
+not the one the build runs, so the first real build produced an image with the
+defect intact and exit 0.*
 
 *Written 2026-08-08, after the BSP hardening pass landed (adbd, telnetd and
 samba removed; the stray buildroot stunnel dropped; root SSH login made
@@ -184,17 +190,30 @@ the image, which is what the implemented version asks.*
 ### Acceptance criteria
 
 1. ~~On a flashed unit, `ls -ln /etc/ssh/authorized_keys` and `ls -ldn / /etc`
-   report uid 0 / gid 0.~~ — **verified on the packed image 2026-08-15**
-   (`debugfs -R "stat …"` on `/`, `/etc`, `/etc/shadow`,
+   report uid 0 / gid 0.~~ — **PASSED ON HARDWARE 2026-08-16.** Verified on the
+   packed image first (`debugfs -R "stat …"` on `/`, `/etc`, `/etc/shadow`,
    `/etc/ssh/authorized_keys`, the init scripts and both product binaries: all
-   uid 0 / gid 0, `e2fsck -fn` clean). **On a flashed unit: pending** — it goes
-   in the same bench session as the downgrade-gate leg.
-2. `StrictModes no` is **removed** from `sshd_config` — done 2026-08-15 — and
-   key authentication still succeeds. **This is the real test and it is
-   bench-pending.** The modes on the key path are already `0755`/`0644` with
-   nothing group- or world-writable, which is StrictModes' other requirement,
-   so ownership was the only thing missing. Recovery if it is wrong: serial
-   console.
+   uid 0 / gid 0, `e2fsck -fn` clean), then on a unit running 2026.08.2
+   delivered through the A/B updater:
+
+   ```
+   drwxr-xr-x   21 0        0             4096 Aug 15 19:14 /
+   drwxr-xr-x   15 0        0             4096 Aug 15 19:15 /etc
+   drwxr-xr-x    2 0        0             4096 Aug 15 19:14 /etc/ssh
+   ```
+
+2. ~~`StrictModes no` is **removed** from `sshd_config` and key authentication
+   still succeeds.~~ — **PASSED ON HARDWARE 2026-08-16, and this was the real
+   test.** A fresh SSH session authenticated by key against a unit running with
+   `StrictModes` at its default. Ownership was indeed the only missing half —
+   the modes on the key path were already `0755`/`0644` with nothing group- or
+   world-writable.
+
+   **Part 1 is therefore complete**, six days after it was written and eight
+   after the caveat that prompted it. What made it take that long was not the
+   change — it is a few lines — but that the first two attempts at it were
+   wrong in ways that looked right: `fakeroot` cannot touch a statically linked
+   `mkfs.ext4`, and the tracked script is not the one the build runs.
 3. Every board config that ships builds and boots — **pending**; the change is
    in shared SDK tooling.
 4. ~~A build host without `fakeroot` emits the warning and does not fail

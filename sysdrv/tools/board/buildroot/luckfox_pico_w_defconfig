@@ -13,7 +13,20 @@ BR2_PRIMARY_SITE="http://sources.buildroot.net"
 BR2_OPTIMIZE_3=y
 BR2_TARGET_GENERIC_HOSTNAME="satisense"
 BR2_TARGET_GENERIC_ISSUE="Welcome to Joral SATISense"
-BR2_TARGET_GENERIC_ROOT_PASSWD="luckfox"
+# Root password. Changed from the Luckfox BSP's "luckfox" 2026-08-16: that value
+# is published in the vendor's own public documentation, so it is not a secret on
+# any unit that ships with it. NOT customer-facing — it is not printed in any
+# manual, quick-start or on-device Help, and it exists only for physical recovery
+# on the serial console (SSH is key-only, telnet is gone, the firewall is
+# default-deny). Note this is belt-and-braces: the EFFECTIVE hash ships in the
+# board overlay's /etc/shadow, which is rsynced over the rootfs after buildroot's
+# target-finalize. Both are kept in step so a build without the overlay cannot
+# resurrect the vendor default. See cra-compliance-plan.md, remaining-work item 2.
+BR2_TARGET_GENERIC_ROOT_PASSWD="joral"
+# The overlay ships a $6$ (SHA-512) hash; match the method here so the fallback
+# path is not weaker than the shipped one. Buildroot's default is sha-256 and the
+# overlay it replaces carried $1$ (MD5-crypt).
+BR2_TARGET_GENERIC_PASSWD_METHOD="sha-512"
 BR2_SYSTEM_ENABLE_NLS=y
 BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y
 
@@ -165,7 +178,14 @@ BR2_PACKAGE_PPPD_RADIUS=y
 # as root. Nothing in the product depends on smbd/nmbd.
 # BR2_PACKAGE_SAMBA4 is not set
 BR2_PACKAGE_SOCAT=y
-BR2_PACKAGE_WGET=y
+# GNU wget removed 2026-08-16: nothing in either product tree invokes it
+# (verified for the 2026-08-12 CVE triage — busybox's own wget applet,
+# CONFIG_WGET=y, serves any script use), and it carried the one EXPIRING
+# accepted-risk in cve-triage.csv (CVE-2024-38428, review by 2026-11) whose
+# recorded resolution was exactly this removal. Buildroot never uninstalls:
+# this is only real after a clean-output rebuild, verified against the
+# packed rootfs (/usr/bin/wget must be the busybox symlink, not an ELF).
+# BR2_PACKAGE_WGET is not set
 BR2_PACKAGE_BASH=y
 BR2_PACKAGE_DIALOG=y
 BR2_PACKAGE_TIME=y
