@@ -1,0 +1,43 @@
+# Joral LLC — security contact
+#
+# Publish at:  https://joralllc.com/.well-known/security.txt
+# Format:      RFC 9116. Serve over HTTPS as text/plain; charset=utf-8.
+#
+# Fields are deliberately few. Every line here points at something that must
+# already exist and be monitored when this file goes live — a security.txt
+# naming a mailbox nobody reads, or a policy URL that 404s, is worse than no
+# file at all, because a researcher who tries it and gets nothing concludes
+# there is no way to reach us.
+#
+# CHANGES TO THIS FILE ARE A COMPLIANCE EVENT. It is the public half of CRA
+# Annex I Part II §5 (coordinated vulnerability disclosure policy) and §6
+# (contact address). Keep it in step with each product's SECURITY.md and the
+# "Reporting a security vulnerability" entry in each user manual —
+# scripts/compliance/test-security-txt.sh checks they agree.
+
+Contact: mailto:security@joralllc.com
+
+# RFC 9116 requires exactly one Expires, and a lapsed file is treated as
+# invalid — so this date is a maintenance commitment, not decoration. Re-issue
+# annually; the compliance suite starts failing 60 days out so the renewal is
+# noticed before a researcher does.
+Expires: 2027-08-18T00:00:00.000Z
+
+Policy: https://joralllc.com/security-policy
+
+Preferred-Languages: en
+
+Canonical: https://joralllc.com/.well-known/security.txt
+
+# Deliberately omitted, and why — each is a promise we cannot yet keep:
+#
+#   Encryption:       no OpenPGP key is published. The policy instead says to
+#                     flag sensitive material in the first mail so a channel
+#                     can be agreed. Add this line the day a key exists, not
+#                     before: a stale or unattended key is a silent black hole
+#                     for exactly the reports that matter most.
+#   Acknowledgments:  no credits page exists yet. The policy commits to
+#                     crediting reporters in fix notes; add the line when
+#                     there is a page to point at.
+#   CSAF:             no machine-readable advisory feed. Revisit when the
+#                     first advisory is issued.
