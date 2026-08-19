@@ -1,4 +1,21 @@
+# NOT INSTALLED BY THIS SDK'S BUILD. Nothing in sysdrv/Makefile or
+# project/build.sh copies this file into a rootfs — the shipped /etc/fstab is
+# buildroot's skeleton default, and /oem and /userdata are mounted by
+# /etc/init.d/S20linkmount, which build.sh GENERATES from
+# RK_PARTITION_CMD_IN_ENV and so cannot disagree with the partition table.
+#
+# It is kept, and kept correct, only so the tree holds no second copy of the
+# layout that contradicts the frozen one. Until 2026-08-19 it did: it still
+# carried the single-slot indices (/oem on p5), which under the frozen A/B
+# table is `boot` — a FIT image, not a filesystem. The authoritative table is
+# the -IPC-AB board profile; scripts/compliance/check-partition-layout.sh
+# (`./build.sh partitions`) is what keeps its consumers honest.
+#
+# Indices below are the FROZEN A/B layout:
+#   p1 env  p2 idblock  p3 uboot  p4 misc  p5 boot  p6 boot_b
+#   p7 oem  p8 userdata  p9 rootfs_a  p10 rootfs_b
+#
 # UNCONFIGURED FSTAB FOR BASE SYSTEM
-/dev/mmcblk0p7  /         ext4    rw      0       0
-/dev/mmcblk0p5  /oem      ext4    defaults        0       0
+/dev/mmcblk0p9  /         ext4    rw      0       0
+/dev/mmcblk0p7  /oem      ext4    defaults        0       0
 /dev/mmcblk0p8  /userdata ext4    defaults        0       0
