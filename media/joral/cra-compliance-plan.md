@@ -1710,6 +1710,9 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   file-level weak copyleft — it obliges us to offer the source of *these* files
   to whoever receives a binary — so if that is not the intent, now is the
   moment to say so, before the first customer shipment.
+  **It was not the intent — superseded 2026-08-19, see the entry below.** The
+  sentence above is left standing because it is the one that got the decision
+  asked, and because the window it names is exactly the one the reversal used.
 
   *Caught by the tests, and worth recording:* inserting two header lines into
   every source file shifted every line number in both trees, and
@@ -1726,6 +1729,100 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   cross-build of both daemons; SPA rebuilt; the SatiSense user manual §12.1
   gained a *Where stored passwords live* subsection (markdown + on-device Help
   + all three PDFs regenerated).
+
+- **2026-08-19 — both products, outbound licence: MPL-2.0 → proprietary
+  (`LicenseRef-Joral-Proprietary`).** Carl's determination, taken on the
+  question the 2026-08-16 entry above put to him. Nothing here is a CRA
+  requirement in either direction, and it is worth writing that down because
+  the question arrived as "must we publish our code to be CRA compliant?":
+  **no.** Annex I Part II §1 and Art. 13 ask for an **SBOM in the technical
+  documentation** — component metadata, supplied to market-surveillance
+  authorities on request. Nothing in the Regulation asks anyone to publish
+  source. Open-sourcing would also not have bought relief: the open-source
+  steward provisions (Art. 24) and the non-commercial FOSS carve-out do not
+  reach a manufacturer selling hardware with the software on it.
+
+  What MPL-2.0 *was* costing us is the reason it went. MPL obligations trigger
+  on distribution, and shipping firmware to a customer is distribution of
+  Executable Form (§3.2): every file carrying the tag — 43 in media-gateway,
+  148 in satisense-edge, including both daemons, both consoles, the auth path
+  and the secrets sidecar — obliged us to tell each recipient how to obtain its
+  Source Code Form at no charge, while both repositories stayed **private**.
+  That is the obligation without the benefit. **Nothing in the dependency stack
+  ever required it**: open62541 is MPL-2.0, but MPL is *file-level* copyleft and
+  §1.10/§3.3 expressly permit combining it into a Larger Work under terms of our
+  choosing — static linking does not change that, and only open62541's own files
+  (and our modifications to them, if any) stay MPL. EIPScanner is MIT, libcurl
+  MIT-like, OpenSSL 3 Apache-2.0, uClibc-ng LGPL. The GPL/LGPL platform layer
+  carries source obligations that were always ours and are unaffected by this
+  change; the written offer for them is now `EULA.md` §7, valid three years from
+  receipt of the unit.
+
+  **The timing was the whole point.** MPL §2.1 grants are irrevocable for
+  whatever has already been distributed, so this was reversible only while no
+  customer unit had shipped. That window closes at first shipment, and it is
+  the same window as the partition-layout freeze (item 11) — two one-way doors
+  that both shut on the first customer delivery.
+
+  Shipped in this pass:
+  - `scripts/compliance/apply-license-headers.sh` — the tag is now
+    `LicenseRef-Joral-Proprietary` (the SPDX convention for a licence not on
+    the SPDX list) and the copyright line carries "All rights reserved."; the
+    script also **normalises an existing** Joral copyright line, since without
+    that the tag would have read proprietary beside wording written for an open
+    licence. 43 + 148 files rewritten, **line counts unchanged**, so no
+    compliance citation moved this time.
+  - **A vendored-file defect the 08-16 pass introduced and this one caught:**
+    `satisense-edge/core/ai/rknn_api.h` had been stamped
+    `SPDX-License-Identifier: MPL-2.0` + a Joral copyright line — on top of
+    Rockchip's own trade-secret notice, and contradicting the tree's own SBOM
+    row, which correctly reads "proprietary (Rockchip)". Declaring another
+    party's confidential header under our outbound licence is a
+    misdeclaration, not a formality. The Joral lines are removed and the path
+    is excluded in `is_excluded()` so no future pass re-stamps it. The general
+    rule now in the script's header: **a vendored file carries somebody else's
+    notice.**
+  - `LICENSE` (repository notice) and **`EULA.md`** (customer terms) in both
+    trees. The EULA's load-bearing clauses for this programme are §5 (signed
+    updates + declared support period, pointing at
+    `firmware-signing-and-support-policy.md`), §6 (reporting a vulnerability —
+    and an explicit statement that the reverse-engineering restriction does
+    **not** bar good-faith security research or vulnerability reporting, which
+    would otherwise sit badly beside `SECURITY.md`), §7 (third-party software +
+    the written source offer), and §12 (mandatory law, including CRA rights,
+    prevails over the agreement).
+  - Both `docs/compliance/app-manifest.csv` first-party rows, both READMEs, and
+    a new **Outbound licensing** section in *both* Annex I matrices — satisense
+    had no statement of its outbound licence anywhere in its matrix, so nothing
+    there would have caught the tag and the manifest drifting apart again, which
+    is exactly what happened in the GPL-2.0+ episode.
+  - **Two stale claims corrected in media-gateway's Annex I matrix**, both
+    found while editing around them: it still said "**no LICENSE file**" and
+    "no `LICENSE` file and no SPDX headers anywhere in this tree" (untrue since
+    08-16), and its summary blockquote still said CAN connections "are logged
+    on the **TCP path only**" — which contradicted §6 of the *same document*
+    from the moment the UDP peer record was recovered on 08-18.
+
+  Verified: both `make test` suites green (media-gateway including
+  `test_listeners.sh`, whose citation checks are the guard against exactly this
+  kind of sweeping edit), SBOM regenerated — **52 platform + 8 application
+  components, 5 first-party rows now `LicenseRef-Joral-Proprietary`, zero
+  UNDECLARED**, third-party rows untouched.
+
+  **Owed, and none of it engineering** — tracked with owners and acceptance
+  criteria in [`outbound-licence-plan.md`](outbound-licence-plan.md), because
+  a follow-up list that lives only inside a paragraph of this document is how
+  the stale-citation problem started: (1) **counsel review of `EULA.md`** —
+  it is drafted from the facts in these trees, not from a template a lawyer has
+  signed off; (2) **§12 governing law** is a literal
+  `[[JURISDICTION — to be confirmed by counsel]]` placeholder; (3)
+  **`support@joralllc.com`**, the address the §7 written source offer directs
+  requests to, has not been confirmed to exist — the same failure mode as
+  `security@joralllc.com`, which is printed in shipped documents and still has
+  no mailbox (item 1); (4) a decision on **how the EULA reaches the customer**
+  — no manual in either tree has a legal section today, so adding one means a
+  documentation pass and PDF/on-device-Help regeneration.
+
 
 - **2026-08-19 — platform, Annex I #7 / item 11: the partition layout is
   FROZEN, and freezing it turned up a document describing a product we do not
@@ -2512,11 +2609,23 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    describes our own components as unlicensed (verified in the 2026-08-16
    regeneration: 52 platform + 8 application components, zero UNDECLARED). The
    same pass found and corrected **87 satisense-edge files tagged `GPL-2.0+`**
-   against that tree's own MPL-2.0 LICENSE and SBOM entry. **What is left is
-   Carl's confirmation of the determination**, not the work: MPL-2.0 is
-   file-level weak copyleft, and reversing it is one substitution in
-   `scripts/compliance/apply-license-headers.sh` — cheap now, expensive after
-   the first customer shipment.
+   against that tree's own MPL-2.0 LICENSE and SBOM entry. **Carl's
+   confirmation came back on 2026-08-19 and reversed the determination** — the
+   outbound licence is now **proprietary (`LicenseRef-Joral-Proprietary`)**,
+   with `LICENSE` + `EULA.md` in both trees, and the reversal cost the one
+   substitution this row predicted. See the dated entry above for the reasoning
+   and for what it exposed: **no CRA requirement pointed either way** (the
+   Regulation asks for an SBOM in the technical file, never for published
+   source), MPL-2.0 would have obliged us to hand each customer the source of
+   both daemons and both consoles under §3.2, and open62541 never required it
+   because MPL is file-level. Nothing engineering-side is left on this row.
+   **What is owed is legal and administrative:** counsel review of `EULA.md`,
+   the `[[JURISDICTION]]` placeholder in its §12, and confirmation that
+   `support@joralllc.com` — the address its §7 written source offer sends
+   people to — actually exists. That last one is item 1's failure mode
+   repeating, and it should go in the same conversation as the mailbox. The
+   open list, with owners and acceptance criteria, is
+   [`outbound-licence-plan.md`](outbound-licence-plan.md).
    ~~and no test coverage of the auth layer, CGIs,
    config writer or listeners~~ — **the coverage half is done 2026-08-15** (see
    the dated entry above): four suites, 200+ checks, mutation-verified, in
