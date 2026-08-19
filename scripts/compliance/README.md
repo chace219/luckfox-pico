@@ -11,11 +11,26 @@ that image at all.
 | [`gen-sbom.sh`](gen-sbom.sh) | What is *in* the image? | `./build.sh sbom` |
 | [`cve-check.py`](cve-check.py) | What is *known to be wrong* with what is in it? | `./build.sh cve` |
 | [`check-cited-commits.sh`](check-cited-commits.sh) | Does the paperwork describe what actually ships? | `./build.sh cited` |
+| [`check-partition-layout.sh`](check-partition-layout.sh) | Does every consumer of the **frozen** flash layout still agree? | `./build.sh partitions` |
 
 Regulation (EU) 2024/2847 (Cyber Resilience Act): Annex I Part II §1 (SBOM),
 Annex I Part I §2 ("without known exploitable vulnerabilities"), Annex I Part II
-§2 (address vulnerabilities in components without delay), and Annex II
-(accuracy of the information supplied with the product).
+§2 (address vulnerabilities in components without delay), Annex I Part I §7
+(update mechanism), and Annex II (accuracy of the information supplied with the
+product).
+
+`check-partition-layout.sh` is the odd one out and worth a sentence. The other
+gates guard something that can be fixed in the next release; this one guards a
+**one-way door**. The A/B partition table was frozen 2026-08-19, and the
+updater delivers one payload to one of two rootfs slots — it cannot
+repartition, move `oem`, or grow a slot. The table is written once and consumed
+in six places, three of them hand-maintained, and none of the three fails a
+build: a stale `SocToolKit/ipc.json` offset makes the factory station write an
+image over the wrong partition, and a stale `sw-description.in` index makes an
+update install onto something that is not a rootfs slot. Both are silent until
+hardware. The gate holds its own copy of the frozen string rather than reading
+the board config, because a check that reads its expectation out of the file it
+is checking cannot fail.
 
 Outputs land in `output/compliance/`, stamped with the SDK build ID
 (`git describe`) so a report can be matched to a deployed unit — the same
@@ -28,6 +43,7 @@ they need no build and should fail before you spend eight minutes on one:
 
 ```sh
 ./build.sh cited                             # do the documents describe what ships?
+./build.sh partitions                        # does everything still agree on the frozen layout?
 scripts/compliance/test-root-credential.sh   # is the shipped root credential still ours?
 scripts/compliance/test-security-txt.sh      # can a reporter still reach us?
 ```

@@ -40,7 +40,9 @@ bench execution pending:** Phase 0 re-verified (both product suites + the 13
 from the buildroot dl cache), `ramdisk.cpio.gz` (736 K, all-static:
 busybox + `misc_ab` + `init`), and `boot-ab.img` (4.7 M FIT =
 kernel+fdt+resource+initramfs, via the vendor `mkimg` recipe). The tree is
-lunched on the `-AB` profile with `emmc_fstab` at `/dev/mmcblk0p8`;
+lunched on the `-AB` profile (and `emmc_fstab` edited to `/dev/mmcblk0p8` —
+which, as the 2026-08-19 freeze established, was a no-op: nothing installs
+that file);
 `./build.sh firmware` produced the full A/B image set — `.env.txt` carries
 the A/B `blkdevparts`, `boot.img` in `output/image/` IS the ramdisk FIT,
 `tftp_update.txt`/`sd_update.txt` offsets are derived from the A/B table
@@ -432,28 +434,103 @@ Fallback if (a) fails (unlikely — the templates are vendor-provided): the
 `CONFIG_ANDROID_AB` or `CONFIG_SPL_KERNEL_BOOT` bootloader routes surveyed
 earlier remain available; the partition layout below already reserves for them.
 
-## Partition layout (frozen at first customer shipment — one-way door #1)
+## Partition layout — **FROZEN 2026-08-19** (one-way door #1)
+
+**This is the shipped table.** It is the value of `RK_PARTITION_CMD_IN_ENV` in
+`project/cfg/BoardConfig_IPC/BoardConfig-EMMC-Buildroot-RV1106_Luckfox_Pico_Ultra-IPC-AB.mk`,
+and it is the layout every release since 2026.08.2 has been delivered onto:
 
 ```
-32K(env),512K@32K(idblock),256K(uboot_a),256K(uboot_b),
-4M(misc),32M(boot_a),32M(boot_b),
-512M(oem),512M(userdata),1536M(rootfs_a),1536M(rootfs_b)
+32K(env),512K@32K(idblock),256K(uboot),4M(misc),32M(boot),32M(boot_b),512M(oem),512M(userdata),1536M(rootfs_a),1536M(rootfs_b)
 ```
 
-≈ 4.1 G of the 8 G eMMC. Notes:
+| # | Partition | Offset | Size | Written by an update? |
+|---|---|---|---|---|
+| p1 | `env` | `0x00000000` | 32 K | no |
+| p2 | `idblock` | `0x00008000` | 512 K | no |
+| p3 | `uboot` | `0x00088000` | 256 K | no |
+| p4 | `misc` | `0x000C8000` | 4 M | slot record only (`misc_ab`) |
+| p5 | `boot` | `0x004C8000` | 32 M | no — kernel + selector initramfs, single copy in v1 |
+| p6 | `boot_b` | `0x024C8000` | 32 M | no — **reserved, empty in v1** |
+| p7 | `oem` | `0x044C8000` | 512 M | **no — reflash only** |
+| p8 | `userdata` | `0x244C8000` | 512 M | no — survives updates *and* factory reset |
+| p9 | `rootfs_a` | `0x444C8000` | 1536 M | yes — slot A |
+| p10 | `rootfs_b` | `0xA44C8000` | 1536 M | yes — slot B |
 
+4165 MiB of the nominal 8 G eMMC. Notes:
+
+- **The draft in this section until 2026-08-19 was wrong** and had been for the
+  whole implementation: it wrote `uboot_a`/`uboot_b` and `boot_a`, which the
+  board profile never carried and no unit was ever flashed with. Nothing was
+  built from it — the board config was always the real source — but it is the
+  reason the freeze now has a gate rather than a paragraph.
 - `misc` must **not** carry a slot suffix — `spl_ab_append_part_slot()`
   special-cases the name.
-- `boot_a`/`boot_b`: **v1 uses `boot_a` only** (the initramfs design leaves the
-  kernel single-copy). The second slot is reserved so kernel-slot protection
-  can be shipped later, via the updater, without repartitioning.
-- 1536 M per rootfs slot is ~10× the current 151 M image.
-- `userdata` doubled to 512 M because Phase 0 moves config, secrets and
-  certificates onto it alongside the audit log.
+- `uboot` and `boot` are **single-copy**. The A/B design puts slot selection in
+  an initramfs inside `boot`, so the kernel does not need a slot; `boot_b` is
+  reserved, and empty, purely so kernel-slot protection can ship later **through
+  the updater** without repartitioning. It is the escape hatch for the one
+  thing this layout does not protect.
+- 1536 M per rootfs slot against a **117 MiB** packed image (2026.08.5) — 13×
+  headroom. The slot is oversized on purpose: it is the one dimension that
+  cannot be widened after shipment.
+- `userdata` doubled to 512 M (from the stock 256 M) because Phase 0 moves
+  config, secrets and certificates onto it alongside the audit log. Measured
+  use is 18 MiB — 3%. Growing it further to 1024 M was considered and declined
+  on 2026-08-19: the audit log is bounded by rotation at 4 MiB per product
+  (`AUDIT_MAX_BYTES` × `AUDIT_KEEP`, rootfs variables that ship through the
+  updater), so on-device retention is not limited by the partition, and no
+  other claim on the space could be priced. Revisit only against a real
+  requirement, and before first shipment.
 - `oem` and `userdata` stay single-copy: they must **survive** a slot switch,
-  which is the entire point of Phase 0.
-- Partition **indices shift**, so `sys_bootargs`' `root=` index changes and
-  every doc quoting the layout needs updating.
+  which is the entire point of Phase 0. For `oem` that is also a liability, not
+  only a feature — see item 14 in the CRA plan.
+- ~3 G is left **unallocated at the tail**, and that is deliberate. Appending a
+  partition there shifts no existing index, so it is the only layout change a
+  fielded unit could survive. Nothing may be inserted before p10. It is also
+  where a later `userdata` increase would come from, if one is ever justified:
+  growing p8 moves the `rootfs_a`/`rootfs_b` byte offsets but **no index**, so
+  `sw-description.in` and the `PARTNAME`-based initramfs are unaffected.
+
+### What the freeze actually consists of
+
+The table is written once and consumed in five places. Two are generated from
+it and can never disagree; three are hand-maintained and can:
+
+| Consumer | Derived? | What a drift costs |
+|---|---|---|
+| `-IPC-AB.mk` `RK_PARTITION_CMD_IN_ENV` | source of truth | — |
+| `output/image/.env.txt` (kernel `blkdevparts`) | generated | — |
+| shipped `S20linkmount` (`/dev/block/by-name`) | generated | — |
+| `tools/{linux,windows}/SocToolKit/ipc.json` | **hand-maintained byte offsets** | the factory station flashes an image over the wrong partition |
+| `ab-boot/swupdate/sw-description.in` (`/dev/mmcblk0p9`, `p10`) | **hand-written indices** | an update installs onto something that is not a rootfs slot |
+| this document | **hand-written** | the technical file describes a product we do not ship — which is what happened above |
+
+Neither hand-maintained failure shows up in a build. Both are silent until
+hardware. So the freeze is enforced by
+**`scripts/compliance/check-partition-layout.sh`**, wired as **`./build.sh
+partitions`**: it holds the frozen string as its own constant — not read from
+the board config, or it could not fail — and asserts every consumer against it,
+plus the structural invariants (`misc` unsuffixed, slots equal, `oem`/`userdata`
+single-copy, contiguous from 0, fits the part) and image occupancy against each
+frozen size. It needs no build; with one present it also checks the generated
+artifacts and the packed images.
+
+### Known asymmetry, deliberately not fixed before the freeze
+
+`RK_PARTITION_FS_TYPE_CFG` lists `rootfs_a@IGNORE@ext4`, so the generated
+`S20linkmount` calls `mount_part rootfs_a`, and its `resize2fs` runs only when
+the running root *is* `rootfs_a`. **Slot A therefore grows its filesystem to
+1536 M on first boot and slot B never does** — a unit running on B has the
+117 MiB filesystem the image was packed at, with ~2.5 MB free.
+
+It is benign today: `/var/log`, `/var/tmp` and `/var/spool` are symlinks to the
+`/tmp` tmpfs, all mutable state lives on `/userdata` (Phase 0), and the rootfs
+is not written at runtime. It is recorded here rather than fixed because it is
+**not a one-way door** — `S20linkmount` is generated into the rootfs, which an
+update replaces wholesale, so adding `rootfs_b` to the FS-type list ships as an
+ordinary release. Changing resize behaviour on both slots days before freezing
+the layout would want its own bench pass to buy nothing.
 
 ### Timing: freeze before first shipment, not before the updater is finished
 

@@ -60,11 +60,13 @@ Prereqs: a unit you can reflash freely; serial console; a **static** busybox
      /init. (`root=` is untouched, so reflashing `boot` with the stock FIT
      restores normal boot.)
 2. **(b)+(c) Full A/B layout.**
-   - `./build.sh lunch` → the `-AB` board profile; update
-     `sysdrv/tools/board/emmc/emmc_fstab` (`/userdata` = p8) and SocToolKit
-     `ipc.json` (rootfs.img → rootfs_a, add misc) per the notes in the
-     profile; full build; flash everything; `misc` may stay blank
-     (self-init) or be `misc_ab init`-ed from the recovery shell.
+   - `./build.sh lunch` → the `-AB` board profile; full build; flash
+     everything; `misc` may stay blank (self-init) or be `misc_ab init`-ed
+     from the recovery shell. (This step used to say "update
+     `emmc_fstab`" — it never did anything: no build rule installs that
+     file, `/oem` and `/userdata` come from the GENERATED `S20linkmount`.
+     SocToolKit's `ipc.json` **is** hand-maintained and has since been
+     updated; `./build.sh partitions` now verifies it.)
    - Expect: `ab-boot: slot a -> /dev/mmcblk0p9`, normal system up.
    - `misc_ab status /dev/mmcblk0p4` → slot_a tries burned per boot until
      `mark-successful`; `dd` rootfs_a's first MB, reboot → lands on slot b
@@ -75,7 +77,12 @@ Prereqs: a unit you can reflash freely; serial console; a **static** busybox
      watch the SPL banner for `A/B-slot:` lines and any partition-lookup
      noise).
 3. Record results in the swupdate plan; that closes the spike and freezes the
-   layout (one-way door #1).
+   layout (one-way door #1). **Done: spike (a)/(b)/(c) closed on hardware
+   2026-08-14 (sixth pass), layout FROZEN 2026-08-19.** The freeze is enforced
+   by `./build.sh partitions`
+   (`scripts/compliance/check-partition-layout.sh`) — see "Partition layout"
+   in the swupdate plan for the table and what each consumer of it costs when
+   it drifts.
 
 ## Full .swu update test (after the spike phases above)
 
@@ -84,13 +91,13 @@ dl cache (`sysdrv/source/buildroot/.../dl/busybox/`); `make defconfig`, set
 `CONFIG_STATIC=y`, cross-make, `file` must say "statically linked". Then
 `make` here + `scripts/mkinitramfs.sh <busybox> ramdisk.cpio.gz`.
 
-1. **Flash the A/B image** (spike phase 2): lunch the `-AB` profile, set
-   `sysdrv/tools/board/emmc/emmc_fstab` to `/dev/mmcblk0p8`, full build,
-   boot.img rebuilt with the ramdisk (`BOOT_ITS=.../boot-ab.its`). Flash via
-   the GENERATED `output/image/tftp_update.txt` / `sd_update.txt` — they are
-   derived from the new partition table, so offsets are right by
-   construction. SocToolKit's `ipc.json` carries old-layout byte addresses:
-   do not use it for the AB image until updated. Blank `misc` self-inits.
+1. **Flash the A/B image** (spike phase 2): lunch the `-AB` profile, full
+   build, boot.img rebuilt with the ramdisk (`BOOT_ITS=.../boot-ab.its`).
+   Flash via the GENERATED `output/image/tftp_update.txt` / `sd_update.txt` —
+   they are derived from the partition table, so offsets are right by
+   construction. SocToolKit's `ipc.json` was carrying old-layout byte
+   addresses when this was written; it now matches the frozen table and
+   `./build.sh partitions` fails if it drifts again. Blank `misc` self-inits.
 2. **Baseline:** first sign-in done, some config saved, TLS fingerprint
    noted, `misc_ab status /dev/mmcblk0p4` shows slot a successful (via
    S99ab-health, ~30 s after boot).

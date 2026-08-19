@@ -40,8 +40,17 @@ export RK_UBOOT_DEFCONFIG_FRAGMENT="rk-emmc.config rv1106-luckfox-rgb-reset.conf
 # Note:
 #   If the first partition offset is not 0x0, it must be added. Otherwise, it needn't adding.
 # ── A/B update layout (swupdate-implementation-plan.md) ─────────────────────
-# One-way door #1: FROZEN at first customer shipment. Deltas vs the single-slot
-# layout:
+# ***FROZEN 2026-08-19 — one-way door #1.*** This line is the source of truth
+# for the flash layout of every shipped unit. Enforced by
+# scripts/compliance/check-partition-layout.sh (`./build.sh partitions`), which
+# holds its own copy of the string and asserts every consumer against it — the
+# two SocToolKit flashing maps, sw-description.in's install targets, the
+# generated blkdevparts and by-name links, and image occupancy per partition.
+# Editing the line below without editing the gate is caught; editing both is a
+# deliberate layout change, and after the first customer unit ships that is a
+# truck roll, not a release.
+#
+# Deltas vs the single-slot layout:
 #   misc      4M   AVB A/B slot metadata (record at LBA start+4; see
 #                  media/joral/ab-boot/src/misc_ab.c). Name must stay exactly
 #                  "misc" — spl_ab_append_part_slot() special-cases it.
@@ -50,14 +59,23 @@ export RK_UBOOT_DEFCONFIG_FRAGMENT="rk-emmc.config rv1106-luckfox-rgb-reset.conf
 #   boot_b    32M  RESERVED, empty in v1: lets kernel-slot A/B ship later via
 #                  the updater without repartitioning
 #   userdata  512M (was 256M) now also carries both products' state/
-#                  (Phase 0) beside the audit logs
+#                  (Phase 0) beside the audit logs. Measured use 18M; growing
+#                  it to 1024M was considered and declined 2026-08-19 (see the
+#                  swupdate plan) — the audit cap is a rootfs variable, not a
+#                  partition limit.
 #   rootfs_a/rootfs_b 1536M each (~10x the current 151M image)
 # Partition indices: p1 env, p2 idblock, p3 uboot, p4 misc, p5 boot,
 # p6 boot_b, p7 oem, p8 userdata, p9 rootfs_a, p10 rootfs_b.
-# INDICES SHIFTED vs single-slot — must change in the same commit:
-#   - sysdrv/tools/board/emmc/emmc_fstab: /userdata is p8 here (was p6)
-#   - tools/*/SocToolKit/ipc.json: image->partition map for flashing
+# INDICES SHIFTED vs single-slot — the hand-maintained consumers, all checked
+# by `./build.sh partitions`:
+#   - tools/*/SocToolKit/ipc.json: image->partition map + byte offsets, read by
+#     the factory flashing station
+#   - media/joral/ab-boot/swupdate/sw-description.in: /dev/mmcblk0p9 and p10,
+#     the partitions an update installs onto
 # build.sh handles the rootfs_a name (it strips `_a` when deriving root=).
+# NOT in that list, contrary to what this comment said until 2026-08-19:
+# sysdrv/tools/board/emmc/emmc_fstab. No build rule installs it — the shipped
+# mounts come from the GENERATED /etc/init.d/S20linkmount. See its header.
 export RK_PARTITION_CMD_IN_ENV="32K(env),512K@32K(idblock),256K(uboot),4M(misc),32M(boot),32M(boot_b),512M(oem),512M(userdata),1536M(rootfs_a),1536M(rootfs_b)"
 
 # config partition's filesystem type (squashfs is readonly)
