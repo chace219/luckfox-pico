@@ -63,6 +63,47 @@ function remove_oem_loader_path() {
 	rm -fv "$RK_PROJECT_PACKAGE_ROOTFS_DIR/etc/profile.d/RkEnv.sh"
 }
 
+function remove_serial_getty() {
+	# Buildroot's skeleton inittab puts a respawning login prompt on the
+	# serial console:
+	#
+	#     console::respawn:/sbin/getty -L  console 0 vt100 # GENERIC_SERIAL
+	#
+	# Product decision 2026-08-19: serial console access is NOT provided to
+	# customers or to developers on production images, so that prompt has no
+	# supported use and is pure attack surface — a login served on exposed
+	# board pads to anyone holding the hardware, guarded by one password
+	# shared across the whole fleet.
+	#
+	# Removing it is what makes locking the root account free. SSH is already
+	# PermitRootLogin prohibit-password, so the password had no network use;
+	# with no getty it has no local use either, and the overlay's /etc/shadow
+	# ships root as `*` in the same change. A getty left behind a locked
+	# account, or a locked account behind a live getty, is worse than either
+	# on its own — the two belong together.
+	#
+	# This removes the LOGIN prompt, not console output: the kernel still
+	# prints its boot log to the same device via the console= cmdline
+	# argument, so a bench operator keeps everything except the ability to
+	# authenticate.
+	#
+	# Fails the build rather than shipping a unit that still serves it — the
+	# same posture as the image-ownership check. A silently-skipped hardening
+	# step is indistinguishable from one that ran.
+	local inittab="$RK_PROJECT_PACKAGE_ROOTFS_DIR/etc/inittab"
+	if [ ! -f "$inittab" ]; then
+		echo "luckfox-hardening-post.sh: /etc/inittab missing, cannot remove getty" >&2
+		exit 1
+	fi
+	sed -i '/getty/d' "$inittab"
+	if grep -q getty "$inittab"; then
+		echo "luckfox-hardening-post.sh: FAILED to remove the serial getty from $inittab" >&2
+		exit 1
+	fi
+	echo "removed serial getty from /etc/inittab"
+}
+
 echo "luckfox-hardening-post.sh: applying image hardening"
 remove_stray_stunnel
 remove_oem_loader_path
+remove_serial_getty

@@ -24,12 +24,23 @@
 #   only if they exist, so this runs on a clean checkout as well as after a
 #   build.
 #
-# NOT a strength claim: "joral" is a short word and the hash is offline-
-# crackable in seconds by anyone holding the image. The control that matters is
-# that the value is unreachable over the network (SSH key-only, no telnet,
-# default-deny firewall); this password exists for serial-console recovery, and
-# a per-unit password is still the open product decision. See
-# media/joral/cra-compliance-plan.md remaining-work item 2.
+# SUPERSEDED 2026-08-19 by a product decision, and the file now guards the
+# stronger state: serial console access is not provided on production images,
+# so the getty is removed and the root account is LOCKED (`*` in the overlay's
+# /etc/shadow, the same value every other system account already carried).
+#
+# The password's only remaining use had been serial-console recovery — SSH has
+# been PermitRootLogin prohibit-password since 2026-08-08, so it was already
+# unreachable over the network. Withdrawing the console withdrew the last
+# reason to ship a shared secret at all, which retires the three-way product
+# decision (shared value / lock / per-unit) in favour of the strongest option
+# at no functional cost.
+#
+# The two halves must stay together, and that is why they are guarded in ONE
+# file: a live getty in front of a locked account is a prompt nobody can pass,
+# and a removed getty in front of a live shared password leaves a fleet secret
+# behind a door that is merely closed. The checks below fail if either half is
+# lost. See media/joral/cra-compliance-plan.md remaining-work item 2.
 set -u
 cd "$(dirname "$0")/../.." || exit 2
 
@@ -52,9 +63,28 @@ check_shadow() {
 	h=$(root_hash "$file")
 	[ -n "$h" ] || { bad "$what: no root entry in $file"; return; }
 
-	# Locked/absent credential is acceptable and needs no further checks.
+	# The two conventional "locked" values are NOT interchangeable on this
+	# image, and the difference is invisible in the file.
+	#
+	# openssh 9.3p2 auth.c: allowed_user() calls platform_locked_account()
+	# whenever UsePAM is off (it is), and a true answer denies EVERY
+	# authentication method — public keys included. platform.c decides that
+	# from three optional macros, and this build's config.h defines exactly
+	# one: LOCKED_PASSWD_PREFIX "!". LOCKED_PASSWD_STRING and
+	# LOCKED_PASSWD_SUBSTR are #undef.
+	#
+	# So `*` disables password login and leaves key-authenticated root SSH
+	# working, while `!` disables key auth too. Since 2026-08-19 the image
+	# ships no serial getty, which makes `!` an UNRECOVERABLE lockout: no
+	# console, no key, reflash only. Verified against
+	# output/build/openssh-9.3p2/{auth.c,platform.c,config.h} on 2026-08-19.
 	case "$h" in
-		'*'|'!'*) ok "$what: root login is locked ($h)"; return;;
+		'*')
+			ok "$what: root password disabled with '*' (key auth still permitted)"
+			return;;
+		'!'*)
+			bad "$what: root is '!'-locked — openssh platform_locked_account() would refuse PUBKEY auth too, and with no getty this unit would be reachable only by reflash. Use '*'."
+			return;;
 	esac
 
 	method=$(echo "$h" | cut -d'$' -f2)
@@ -118,6 +148,28 @@ else
 	bad "__HARDEN_SECRET_FILE_MODES runs before post_overlay, which would then undo it"
 fi
 
+echo "== The serial getty must be removed by the build"
+# Buildroot's skeleton inittab ships `console::respawn:/sbin/getty ...`, and
+# neither a defconfig nor an overlay can express its removal — the skeleton is
+# installed by buildroot itself, after both. The one place that can is the
+# post-build hook, so this checks the hook still does it AND that a packed tree
+# actually came out without it. Checking only the hook would pass on an image
+# repacked from a stale staging tree, which is the failure mode that kept mpv
+# and the wifi_app binaries alive after they were deselected.
+HOOK=project/cfg/BoardConfig_IPC/luckfox-hardening-post.sh
+if [ ! -f "$HOOK" ]; then
+	bad "post-build hardening hook $HOOK is missing"
+else
+	grep -q 'remove_serial_getty()' "$HOOK" \
+		&& ok "hook defines remove_serial_getty()" \
+		|| bad "hook no longer defines remove_serial_getty()"
+	# Defined but never called is the silent regression this catches: the
+	# function body can look perfect while nothing invokes it.
+	grep -qE '^remove_serial_getty$' "$HOOK" \
+		&& ok "hook invokes remove_serial_getty" \
+		|| bad "remove_serial_getty is defined but never invoked"
+fi
+
 echo "== Customer-facing documentation must not print it"
 # The value is deliberately not published: manuals, quick-starts and the
 # on-device Help are what a customer receives. The compliance fact sheets are
@@ -144,6 +196,23 @@ if [ $# -gt 0 ]; then
 				600|400|0600|0400) ok "$(basename "$tree"): /etc/shadow is $mode";;
 				*) bad "$(basename "$tree"): /etc/shadow is $mode — readable beyond root";;
 			esac
+		fi
+		# The getty half, read from what actually shipped. An inittab with
+		# no getty line is the whole assertion: the kernel still logs to the
+		# console via the cmdline, but nothing offers a login on it.
+		# An ACTIVE directive, not the word: the skeleton carries an
+		# explanatory comment ("# Put a getty on the serial port") beside the
+		# line, and matching that would report a finding against a file whose
+		# only trace of a getty is prose.
+		if [ -f "$tree/etc/inittab" ]; then
+			live=$(grep -vE '^[[:space:]]*#' "$tree/etc/inittab" | grep -m1 getty)
+			if [ -n "$live" ]; then
+				bad "$(basename "$tree"): /etc/inittab still serves a getty — $live"
+			else
+				ok "$(basename "$tree"): no active getty in /etc/inittab"
+			fi
+		else
+			bad "$(basename "$tree"): /etc/inittab missing"
 		fi
 		# The packed tree must agree with the overlay, since the overlay is
 		# what a firmware repack applies last.
