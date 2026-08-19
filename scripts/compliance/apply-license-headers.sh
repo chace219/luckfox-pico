@@ -1,18 +1,30 @@
 #!/bin/bash
 # Apply the Joral outbound licence notice to first-party sources.
 #
-#  - Files already carrying an SPDX tag have it REPLACED (satisense-edge's 83
-#    GPL-2.0+ tags contradict its own LICENSE file and its own SBOM entry).
+#  - Files already carrying an SPDX tag have it REPLACED. This has now happened
+#    twice: satisense-edge's 83 GPL-2.0+ tags (2026-08-16), which contradicted
+#    its own LICENSE file and its own SBOM entry, and the MPL-2.0 tags both
+#    trees then carried (2026-08-19), which were correct but obliged us to hand
+#    the source of those files to every customer who receives a binary.
 #  - Files with none get one inserted, after any shebang / "use strict" line.
 #  - Third-party, vendored, generated and binary trees are excluded by path.
+#    A vendored file carries SOMEBODY ELSE'S notice; stamping ours on top of it
+#    is a misdeclaration, not a formality (see rknn_api.h in is_excluded).
+#
+# The outbound licence is PROPRIETARY: LicenseRef-Joral-Proprietary, the SPDX
+# convention for a licence that is not on the SPDX list, resolved by the
+# LICENSE + EULA.md pair in each tree. Two invariants have to move together —
+# this tag and the LICENSE column of each tree's docs/compliance/app-manifest.csv
+# — or the SBOM misdescribes our own components, which is an Annex I Part II
+# §1 defect rather than a cosmetic one.
 #
 # Usage: apply-license-headers.sh <tree-root>
 set -u
 ROOT="${1:?usage: apply-license-headers.sh <tree>}"
 cd "$ROOT" || exit 2
 
-SPDX="MPL-2.0"
-COPY="Copyright (c) 2026 Joral LLC"
+SPDX="LicenseRef-Joral-Proprietary"
+COPY="Copyright (c) 2026 Joral LLC. All rights reserved."
 
 changed=0; skipped=0
 
@@ -21,6 +33,10 @@ is_excluded() {
 		*/node_modules/*|*/dist/*|*/out/*|*/build/*|*/.git/*) return 0;;
 		*/web/public/*|*/docs/manual/pdf/*) return 0;;
 		*/eipscanner/*|*/third_party/*|*/vendor/*) return 0;;
+		# Vendored Rockchip header — carries Rockchip's own proprietary notice.
+		# It was stamped MPL-2.0 by the 2026-08-16 pass, which declared their
+		# trade-secret header under our outbound licence. Never ours to tag.
+		*/core/ai/rknn_api.h) return 0;;
 		*.min.js|*.bundle.js) return 0;;
 	esac
 	return 1
@@ -52,6 +68,11 @@ apply() {
 			/SPDX-License-Identifier:/ && !done {
 				sub(/SPDX-License-Identifier:[ \t]*[^ \t*\/]+/, "SPDX-License-Identifier: " id); done=1
 			} { print }' "$f" > "$tmp"
+		# Bring an existing Joral copyright line up to the current wording,
+		# in whichever comment style the file already uses. Without this the
+		# tag would say proprietary while the line beside it still read like
+		# the open-licence wording it was written for.
+		sed -i '/Copyright/{ /All rights reserved/! s/Joral LLC/Joral LLC. All rights reserved./ }' "$tmp"
 		# Add the copyright line directly under it if the file has none.
 		if ! grep -q "Joral LLC" "$f"; then
 			awk -v c="$COPY" -v o="$open" -v cl="$close" '
