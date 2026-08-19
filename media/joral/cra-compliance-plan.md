@@ -2665,6 +2665,42 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   shared password on the unit at all.
 
 
+- **2026-08-19 (late) — Annex I #7: the SWUpdate verification plan is complete,
+  10 of 10, and the roll-up was wrong about how much of it was left.**
+
+  Two things closed. The **`order=unknown` refusal**, which was the last
+  genuinely untested item: a package that is correctly DEV-signed, whose payload
+  matches its manifest, and whose declared version is `1.0.0` — what a build
+  from before release numbering looks like. It verifies, and is then refused by
+  the layer *after* verification, with a message that admits the unit cannot
+  order it rather than guessing, and an audit record saying
+  `reason=downgrade_unconfirmed order=unknown from=2026.08.9 to=1.0.0`. The rule
+  it proves is that `unknown` counts as needing confirmation rather than as
+  safe: a gate that silently allowed what it could not order would be bypassed
+  by the oldest packages in existence, which are precisely the ones an advisory
+  concerns. The artifact is reproducible per release —
+  `scripts/compliance/make-negative-swu.sh` now builds it alongside the three
+  corruption packages, because a negative test built from a different release
+  proves nothing about the one on the bench.
+
+  And **item 8d, which claimed six passing hardware tests were still open.** The
+  correction is above; what belongs here is why it is worth an entry of its own.
+  Every other stale-document finding in this programme has been an overclaim, and
+  the discipline built around them — cite the evidence, prefer the bench, treat a
+  documented control as unproven until executed — is all aimed in that direction.
+  This one pointed the other way and the discipline did not catch it: the gates
+  check that claims are true, not that they are current, and no gate anywhere
+  asks whether a document *understates* what has been done. It cost a bench
+  session that was about to re-run six passing tests and was caught by the
+  operator remembering, which is not a control.
+
+  The cheap structural fix is not another gate but a convention: the swupdate
+  plan owns its verification results, and the compliance plan should cite that
+  table rather than paraphrase it. Item 8d paraphrased, and the paraphrase went
+  stale while the table stayed right. **Where two documents describe the same
+  evidence, one of them is going to be wrong eventually, and it will be the copy.**
+
+
 ## Remaining work (refreshed 2026-08-16 against both trees and `main` on each)
 
 The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) and
@@ -2858,8 +2894,22 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    the whole of `image-ownership-and-ssh-key-plan.md` Part 1.
    **The 2026-08-19/20 session closed four of the seven** — legs a, c, f and
    the substantive half of e; see the dated entry above for the evidence and
-   for the four findings and three corrections they produced. **Three remain,
-   plus one the session created:**
+   for the four findings and three corrections they produced. **A fifth, leg d,
+   turned out to have been closed on 2026-08-14 all along** — this document
+   said otherwise for five days (see 5d below). It also created one new leg,
+   and closed that too.
+
+   **Two legs remain, and neither blocks anything:**
+   - **b — MQTT mutual TLS**, which needs a broker whose authentication we
+     control. The only leg still requiring equipment we do not have set up.
+   - **g — the encoder-sim replay.** It no longer gates anything: it existed
+     because the python3 removal waited on it, and that removal was reversed on
+     2026-08-19 in favour of a version bump, so the interpreter stays and
+     `encoder-sim.py` runs on the device as before. Worth doing to prove the
+     candump-log path works on hardware, but it is a control on a tool rather
+     than on the product.
+
+   *(Per-leg detail, kept as written:)*
    - ~~a. the downgrade refusal~~ — **CLOSED 2026-08-19**, both outcomes
      audited with the version transition in each record;
    - ~~c. media-gateway durable audit~~ — **CLOSED 2026-08-19**, the failed
@@ -2886,13 +2936,29 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    c. **media-gateway durable-audit spot-check** and a failed-login record
       correlated against stunnel's peer line (the peer line itself is confirmed
       present on a running unit);
-   d. **SWUpdate negative and fault paths** — tampered payload, tampered
-      signature and wrong key are built and *host*-verified only
-      (`output/image/negative-tests/`); power-cut mid-write, a deliberately
-      broken standby slot exhausting its tries, and factory reset from both
-      slots have not been run at all. These are items 3–4 and 6–7, 9 of the
-      swupdate plan's verification list — the ones that decide whether row #7
-      survives contact with a bad update rather than a good one.
+   d. ~~**SWUpdate negative and fault paths**~~ — **THIS ROW WAS WRONG, and
+      corrected 2026-08-19.** It said the tampered-payload, tampered-signature
+      and wrong-key packages were "built and *host*-verified only" and that
+      power-cut, broken-slot and factory-reset "have not been run at all". All
+      six had **passed on hardware on 2026-08-14** and are recorded in
+      `swupdate-implementation-plan.md`'s own bench-results table (items 3, 4,
+      6, 7, 9), five days before this row was last refreshed. Highlights worth
+      keeping visible here rather than only in that document: the power cut at
+      ~50% of a write left the target slot **never armed**, because
+      `mark-active` only runs on a clean swupdate exit; and the deliberately
+      broken slot fell back **in one boot, not seven** — the initramfs failed
+      the mount and set `priority=0 bootable=no` rather than burning through
+      `tries_remaining`.
+
+      **The correction matters more than the row.** Every other stale-document
+      finding in this programme has been an *overclaim* — a control described
+      as working that was not. This is the opposite, and it is not harmless: it
+      cost a bench session that was about to re-run six passing tests, and it
+      was caught by the operator remembering, not by any gate. A roll-up that
+      undercounts completed work is still a roll-up that cannot be trusted, and
+      the same reading that treats an overclaim as serious has to treat this as
+      serious. What is genuinely left of the swupdate verification list is the
+      one sub-case named under item 5 below.
    f. **The 2026-08-19 OPC UA identity change, not yet on a unit** (ADR-151):
       a factory-configured unit must refuse every session with
       `BadIdentityTokenInvalid` until a username/password is set; setting one

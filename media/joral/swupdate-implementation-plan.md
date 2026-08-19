@@ -617,11 +617,21 @@ long updates are promised and therefore how much this is worth.
 
 | 9 | Factory reset works from both slots | **pass** (operator-confirmed) |
 | 10 | Firewall, console HTTPS, OPC UA Sign&Encrypt, CAN, MQTT TLS after an update | **pass** (operator-confirmed) |
-| 5 | Downgrade attempt behaves as specified | **now testable, bench-pending** — the version field became orderable 2026-08-15 (below); host-verified by 47 checks driving the real CGI. The bench leg is: upload an older `.swu`, expect the console to refuse it until `DOWNGRADE` is typed, and both audit records to name the two releases |
+| 5 | Downgrade attempt behaves as specified | **pass, both halves, 2026-08-19.** *older:* 2026.08.5 offered to a unit running 2026.08.6 — `"verified":true` (a valid CMS signature cannot tell you a package is old), refused with no phrase and refused again with the phrase in the wrong case, then installed on `DOWNGRADE`; `fw_apply fail … reason=downgrade_unconfirmed order=older from=2026.08.6 to=2026.08.5`, then `started … downgrade=true`, then `success`. *unknown:* a correctly DEV-signed package whose manifest declares `1.0.0` — what a pre-numbering build looks like — verified, then refused with a **different** message admitting the unit cannot order it, and audited `order=unknown from=2026.08.9 to=1.0.0`. Driven with `curl` against the CGI throughout, never the console: the distinction between a control and a screen |
 
 Round trip closed: updates verified in BOTH directions (a→b and b→a), both
-slots healthy and `successful_boot=1` at the end. **9 of 10 items pass on
-hardware; item 5 is blocked by a design gap, not by a test.**
+slots healthy and `successful_boot=1` at the end. ~~**9 of 10 items pass on
+hardware; item 5 is blocked by a design gap, not by a test.**~~ **10 of 10 since
+2026-08-19** — item 5 closed on hardware in both its halves, `older` and
+`unknown`. The verification plan is complete.
+
+*Two things this list did not do, and a reader should not assume it did.* It
+never exercised an `unknown` **install** — only the refusal — because the phrase
+check does not branch on which ordering triggered it, so the confirmed path is
+the same code proven by the `older` half. And nothing here tests a package
+signed by a **production** key, because there isn't one yet: every result above
+is DEV-keyed, which is why "no customer shipment on a DEV-keyed trust store"
+survives a complete verification list.
 
 ### Item 5 / one-way door #4 — CLOSED 2026-08-15
 
