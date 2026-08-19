@@ -48,6 +48,7 @@ scripts/compliance/test-root-credential.sh   # is the shipped root credential st
 scripts/compliance/test-security-txt.sh      # can a reporter still reach us?
 scripts/compliance/test-cve-mitigations.sh   # do the config-level triage decisions still hold?
 scripts/compliance/test-image-ownership.sh   # does the packer still hand every inode to root?
+scripts/compliance/test-ssh-host-persistence.sh  # does a unit keep its identity across an update?
 ```
 
 `test-image-ownership.sh` needs no build at all — it packs its own throwaway
@@ -63,6 +64,15 @@ be read (the overlay cannot express it; see the test):
 ```sh
 scripts/compliance/test-cve-mitigations.sh output/out/rootfs_uclibc_rv1106
 scripts/compliance/test-root-credential.sh output/out/rootfs_uclibc_rv1106
+```
+
+`test-ssh-host-persistence.sh` drives the shipped `S50sshd` itself — through
+its `persist-keys` entry point and an `$SSHD_STATE_ROOT` path prefix — rather
+than reimplementing the logic, so what is tested is what boots. Give it the
+packed tree as well, which is the only place a lost overlay shows up:
+
+```sh
+scripts/compliance/test-ssh-host-persistence.sh output/out/rootfs_uclibc_rv1106
 ```
 
 Then, **after** the image is built and **before** it is shipped or tagged:

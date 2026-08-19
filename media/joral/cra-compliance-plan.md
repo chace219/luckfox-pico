@@ -3049,14 +3049,68 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
     entry above for how each was found). None was visible in a code read; three
     of the four are upgrade-path defects, which is the class this programme has
     least coverage of because every host test starts from a clean tree.
-    - **A — SSH host keys live on the rootfs slot.** `S50sshd` runs
-      `ssh-keygen -A` into `/etc/ssh`, which Phase 0 never moved. Every update
-      mints a new identity and each slot keeps its own, so a routine update is
-      indistinguishable from a MITM. Fix has the same shape as the rest of
-      Phase 0: seed `/userdata/<product>/state/ssh/` on first boot and symlink,
-      preserving the existing key so units in the field keep their identity.
-      **Annex I #1/#3, and the highest-value of the four** — it is the one that
-      actively teaches operators to ignore a security warning.
+    - ~~**A — SSH host keys live on the rootfs slot.**~~ **FIXED 2026-08-20,
+      awaiting one bench leg.** `S50sshd` ran `ssh-keygen -A` into `/etc/ssh`,
+      which Phase 0 never moved, so every update minted a new identity and each
+      slot kept its own. The keys now live in `/userdata/platform/ssh` — a
+      platform path, not a per-product one, since sshd is shared — and
+      `/etc/ssh` holds symlinks to them.
+
+      **Symlinks rather than `sshd_config` `HostKey` lines**, because
+      `ssh-keygen -A` decides what to generate by testing the *default* paths:
+      a symlink to an existing key reads as present, so `-A` generates only
+      genuinely missing types and can never overwrite an identity. The sequence
+      is **adopt → link → generate → adopt → link**; the second pass captures
+      anything `-A` just created (a newly supported key type after an openssl
+      or openssh bump) rather than letting it live on the slot.
+
+      **The degraded case is the one that would have looked like success.** The
+      `/userdata` mountpoint *directory* exists on the rootfs whether or not
+      `S20linkmount` worked, so a naive existence test would write the keys into
+      an unmounted mountpoint — persisting them onto the slot again while
+      reporting success. Production gates on `/proc/mounts` and reports the
+      degraded case to syslog.
+
+      **Stated limit, because operators will see it:** the update that first
+      carries this script cannot recover the identity the unit had before it —
+      those keys are in the *other* slot's `/etc/ssh`, on a partition that boot
+      has not mounted. So identity changes **one more time, on this update
+      only**, and is stable from then on. Reading the standby slot to rescue it
+      was considered and rejected: mounting it during early boot adds a failure
+      path to every boot forever, to serve a migration that happens once.
+
+      Guarded by `scripts/compliance/test-ssh-host-persistence.sh`, which drives
+      the shipped script through a `persist-keys` entry point and an
+      `$SSHD_STATE_ROOT` prefix rather than reimplementing it — 11 checks, six
+      mutations of the shipped logic each confirmed to fail it (adopt loop
+      removed, symlink replaced by a copy, target made relative, mount gate
+      weakened to a directory test, restore moved after `-A`, private-key mode
+      loosened). **BENCH-CONFIRMED 2026-08-19 on release 2026.08.9**, as a
+      two-boot test, because only the second boot proves anything.
+
+      *Boot 1* (08.9 installed to the standby slot): `ssh-keygen -A` generated
+      into `/etc/ssh`, the second persist pass moved all six files to
+      `/userdata/platform/ssh` and linked them back — private keys 0600, public
+      0644, directory 0700 — and the degraded-mode syslog line was absent, so
+      `/userdata` was a real mount and nothing persisted onto the slot.
+
+      *Boot 2* (the **same** release installed again, so the other slot comes up
+      with a rootfs that has never held a host key — the condition every future
+      update creates): `last_boot` flipped b → a, the symlinks were re-created
+      on that boot (mtime 18:36 against boot 1's 18:13), the three fingerprints
+      were byte-identical to boot 1's, and the client connected **with no
+      warning of any kind**. That is the whole claim: a fresh rootfs on a
+      different slot carrying the same host identity.
+
+      **The first attempt at boot 2 read as a pass and was not**, which is worth
+      recording because the tell was subtle. The dumps were taken without the
+      second install having happened, so they described boot 1 three times over
+      and the fingerprint comparison compared a boot against itself. Two things
+      exposed it: `misc_ab status` was byte-identical (`last_boot=b` both
+      times), and so were the symlink mtimes — and `ln -sf` re-runs on every
+      boot, so an unchanged mtime means no boot occurred. Both are now part of
+      the leg rather than the fingerprints alone: a test whose evidence can be
+      produced by doing nothing needs a check that doing nothing fails.
     - **B — an updated unit keeps pre-Phase-0 paths forever.** `S60` seeds state
       only when absent, so a `gateway.json` written before 2026-08-14 keeps
       pointing `cert_path`, `key_path` and `usage_state_path` at
