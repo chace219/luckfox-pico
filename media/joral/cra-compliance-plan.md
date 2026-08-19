@@ -1816,9 +1816,9 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   `./build.sh partitions`** — source-level like `cited`, so it runs on a clean
   checkout, and it holds the frozen string as its **own** constant rather than
   reading it from the board config, because a gate that reads its expectation
-  out of the file it is checking cannot fail. That lesson — a verification sharing an input with the
-  thing it verifies — was learned twice in the preceding week; this applies it
-  before the fact rather than after. It asserts the board profile, both flashing maps' names *and* byte
+  out of the file it is checking cannot fail. That is the 2026-08-19
+  `test-image-ownership.sh` lesson applied before the fact rather than after
+  it. It asserts the board profile, both flashing maps' names *and* byte
   offsets, the install targets, the generated `blkdevparts` and by-name links,
   image occupancy against every frozen size, and the structural invariants
   (`misc` unsuffixed — `spl_ab_append_part_slot()` special-cases the literal
@@ -2375,132 +2375,6 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   partition we do not rewrite" and "the partition on the daemon's library path"
   are the same sentence. **Verify the image, then verify the unit** — they are
   different claims, and this one was only ever visible on the unit.
-
-
-- **2026-08-19 — platform, Annex I #7 / item 11: the partition layout is
-  FROZEN, and freezing it turned up a document describing a product we do not
-  ship.** One-way door #1, closed ahead of the key ceremony (door #2) as the
-  ordering requires: a unit shipped on a wrong layout cannot be corrected by
-  any update, whereas a DEV-keyed trust store at least fails closed.
-
-  The table itself did not change. It has been the value of
-  `RK_PARTITION_CMD_IN_ENV` in the `-IPC-AB` board profile since 2026-08-14,
-  the spike closed on hardware the same day (sixth pass), and releases
-  2026.08.3 and 2026.08.4 were both delivered onto it through the A/B updater
-  and bench-confirmed. **What was missing was not the decision — it was
-  anything that made the decision hold:**
-
-```
-32K(env),512K@32K(idblock),256K(uboot),4M(misc),32M(boot),32M(boot_b),512M(oem),512M(userdata),1536M(rootfs_a),1536M(rootfs_b)
-```
-
-  4165 MiB of the nominal 8 G eMMC; ~3 G deliberately unallocated at the tail,
-  which is the only post-freeze escape hatch (a partition appended there shifts
-  no existing index).
-
-  **Considered and declined the same day: growing `userdata` 512 M → 1024 M.**
-  Recorded because the sizing question will come back. Measured use is 18 MiB
-  of 512 M (3%), and — the point that settled it — **on-device audit retention
-  is not bounded by the partition at all.** It is bounded by rotation:
-  `AUDIT_MAX_BYTES` (1 MB) × `AUDIT_KEEP` (3), giving 4 MiB per product, and
-  both are shell variables in the rootfs, so retention can be raised by an
-  ordinary release through the updater at any time — even to ~128 MiB per
-  product within the existing 512 M. The partition only bounds what cannot be
-  resized after shipment, and no such claim on the space could be priced today.
-  The unallocated tail remains available if one appears **before** first
-  shipment.
-
-  Costed while the question was open, so it does not need re-deriving: growing
-  p8 moves the `rootfs_a`/`rootfs_b` byte offsets but **no partition index**,
-  so `sw-description.in` (which names `/dev/mmcblk0p9`/`p10`) and the initramfs
-  (which resolves by `PARTNAME`) would need no edit. It is a six-file change —
-  the frozen constant, the board profile, both SocToolKit maps and both
-  documents — plus a **reflash** of every already-flashed unit, since the
-  updater cannot repartition.
-
-  **The trial change also found a defect in this gate, now fixed.** The first
-  version checked `output/image/.env.txt`; `build.sh` regenerates that file
-  from the board config during its own startup, so by the time
-  `./build.sh partitions` ran it had just been rewritten and agreed by
-  construction. It reported ok against an image set still carrying the previous
-  table. The check now reads the **packed** artifacts instead — the
-  `blkdevparts` string inside `env.img`, and the `S20linkmount` inside
-  `rootfs.img` via debugfs — neither of which a build.sh startup touches. Third
-  instance in four days of the same failure: a verification sharing an input
-  with the thing it verifies. It was caught only because the table was changed
-  and the check did not go red.
-
-  **The layout is written once and consumed in six places. Three are
-  hand-maintained, and one of those three was wrong.**
-
-  - **The plan document was wrong, and had been for the entire
-    implementation.** `swupdate-implementation-plan.md` §"Partition layout"
-    specified `uboot_a`/`uboot_b` and `boot_a` — four partitions that no board
-    profile has ever carried and no unit was ever flashed with. Nothing was
-    built from it, because the board config was always the real source; the
-    damage is that this document is the **technical file's** description of the
-    update mechanism, and Annex II asks for the *real* update procedure. An
-    assessor reading it would have been told about a layout that does not
-    exist. Corrected to the shipped table, with per-partition offsets and the
-    reason for each size.
-  - **`sysdrv/tools/board/emmc/emmc_fstab` still carried single-slot indices**
-    — `/oem` on `p5`, which under the A/B table is `boot`, a raw FIT image. It
-    is harmless *only* because nothing installs it: no rule in `sysdrv/Makefile`
-    or `build.sh` copies it, the shipped `/etc/fstab` is buildroot's skeleton,
-    and `/oem` + `/userdata` are mounted by `/etc/init.d/S20linkmount`, which
-    `build.sh` **generates** from the partition table and which therefore cannot
-    disagree with it. Three documents nonetheless listed editing that file as a
-    step of the A/B change, including the board profile's own comment — a
-    build step that had never done anything, believed by everyone who read it.
-    File corrected and headed with what it is; the same note added to
-    `emmc_filesystem_resize.sh`, which resizes `p5/p6/p7` and would take
-    `resize2fs` to two FIT images if it were ever wired up.
-  - `tools/{linux,windows}/SocToolKit/ipc.json` and
-    `ab-boot/swupdate/sw-description.in` were both correct — checked
-    offset-by-offset rather than assumed, because these are the two that cost
-    hardware: the first is read by the factory flashing station and a stale
-    offset writes an image over the wrong partition; the second names
-    `/dev/mmcblk0p9` and `p10`, the partitions an update installs onto.
-
-  **The freeze is now `scripts/compliance/check-partition-layout.sh`, wired as
-  `./build.sh partitions`** — source-level like `cited`, so it runs on a clean
-  checkout, and it holds the frozen string as its **own** constant rather than
-  reading it from the board config, because a gate that reads its expectation
-  out of the file it is checking cannot fail. That is the 2026-08-19
-  `test-image-ownership.sh` lesson applied before the fact rather than after
-  it. It asserts the board profile, both flashing maps' names *and* byte
-  offsets, the install targets, the generated `blkdevparts` and by-name links,
-  image occupancy against every frozen size, and the structural invariants
-  (`misc` unsuffixed — `spl_ab_append_part_slot()` special-cases the literal
-  name; slots equal; `oem`/`userdata` single-copy so they survive a slot
-  switch; contiguous from offset 0; fits the part). Verified by injecting drift
-  rather than by passing: a moved `oem` offset, an install target changed to
-  `p8`, a shrunk `rootfs_b`, a suffixed `misc`, per-slot `oem`, a gap in the
-  table and slots grown past the eMMC are each caught, named and exit 1.
-
-  **Occupancy at the freeze** (release 2026.08.5): rootfs 117 MiB in a 1536 MiB
-  slot (7%), `oem` 7%, `userdata` 3%, `boot` 14%. The rootfs slot is 13×
-  oversized on purpose — it is the one dimension that cannot be widened on a
-  fielded unit.
-
-  *Recorded and deliberately not fixed:* `RK_PARTITION_FS_TYPE_CFG` lists only
-  `rootfs_a`, so the generated `S20linkmount` resizes the filesystem to 1536 M
-  on slot A and **never on slot B** — a unit running on B keeps the 117 MiB
-  filesystem the image was packed at, ~2.5 MB free. Benign today (`/var/log`,
-  `/var/tmp`, `/var/spool` are symlinks to the `/tmp` tmpfs, all mutable state
-  is on `/userdata` since Phase 0, the rootfs is not written at runtime) and,
-  more to the point, **not a one-way door**: `S20linkmount` is generated into
-  the rootfs, which an update replaces wholesale, so the fix ships as an
-  ordinary release. Changing resize behaviour on both slots days before
-  freezing the layout would have wanted its own bench pass to buy nothing.
-
-  *Worth recording:* every one of the three hand-maintained consumers is
-  invisible to a build. The board config is checked by the compiler of nothing;
-  a wrong `ipc.json` produces a clean build and a bricked unit at the factory;
-  a wrong `sw-description.in` produces a clean build and an update that
-  installs onto `userdata`. **A one-way door with no gate on it is a
-  convention, and this one had been a convention for five days while two
-  releases shipped through it.**
 
 
 ## Remaining work (refreshed 2026-08-16 against both trees and `main` on each)
