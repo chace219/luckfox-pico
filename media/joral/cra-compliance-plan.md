@@ -3184,16 +3184,66 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       partition every update replaces. Needs a one-shot config migration on
       load, keyed on the old prefix, with the same "rewrite once" pattern the
       secrets sidecar already uses for legacy plaintext.
-    - **C — the TLS readiness probe accepts any listener, on satisense.** The
-      identical defect was found and fixed on media-gateway 2026-08-09 and
-      flagged then as needing carrying across; it has been sitting unported for
-      ten days and was observed on hardware. Port `certgen_pair_valid()` and
-      the probe-identity check together — they are the same divergence between
-      the two vendored copies of `certgen.c` that the 08-09 entry named.
+    - ~~**C — the TLS readiness probe accepts any listener, on satisense.**~~
+      **WITHDRAWN 2026-08-19: there is no such defect, and this entry was
+      wrong.** Both halves it said to port were already present. `start_web`
+      has used `--cert-check` — validity, not existence — since the console-TLS
+      work, and the predicate is the same three-part check media-gateway uses:
+      `pid_alive $HTTPD_PID && pid_alive $STUNNEL_PID && web_port_listening`.
+      It requires *our own* stunnel to be alive, so it cannot mistake a
+      squatter for success.
+
+      What I read as a near-miss —
+      `Binding service [web] to 0.0.0.0:8080: Address already in use (98)`
+      printed while `S60` reported `(https:8080)` — is stunnel binding the same
+      `accept` spec in **both address families**. With `bindv6only=0` (the
+      Linux default, confirmed on the unit) the `::` bind is dual-stack and
+      already covers IPv4, so the following `0.0.0.0` bind must fail. Disproved
+      properly rather than by argument: the service was stopped, `netstat`
+      confirmed the port fully released, and a clean start produced the
+      identical line while the console came up normally. It also appears for
+      media-gateway's `:443` on every boot. Routine, both products, always.
+
+      **What IS true, and is a smaller and different problem:** that benign
+      line is *byte-identical* to what a genuine port conflict would print, so
+      a real squatter would be invisible in the log — and an error-looking line
+      at every start teaches operators to ignore stunnel errors. Same argument
+      as finding A, one layer down. Filed as item 16 rather than left inside a
+      withdrawn entry, because a correction that quietly becomes a different
+      claim is how the original error survives.
+
+      **The lesson is the one this programme keeps paying for, inverted.** The
+      finding was written from a log line plus a plausible mechanism, and the
+      mechanism was wrong. Reading the two scripts before filing would have
+      shown the check was already correct; the two minutes of bench work that
+      disproved it would have cost less than the entry did. A defect asserted
+      from evidence one has not traced is the same failure as a control claimed
+      from a document one has not executed.
     - **D — the `fw_apply success` audit record names no version**, only the
       slot. Half of the problem the `started` record exists to solve,
       reappearing one record later. One-line fix, and it belongs with the next
       change to that CGI.
+
+16. **stunnel logs a benign bind failure that is indistinguishable from a real
+    one** (found 2026-08-19 while disproving finding C, see item 15). Both
+    products write a bare `accept = <port>`, so stunnel attempts the bind in
+    both address families; with `bindv6only=0` the `::` socket already serves
+    IPv4 and the `0.0.0.0` attempt necessarily fails with `EADDRINUSE`. The
+    console works, and every start logs what reads as an error.
+
+    Two costs, both small and both real. An operator who sees it at every boot
+    learns to ignore stunnel errors — the same "cries wolf" problem as the SSH
+    host keys, one layer down. And because the benign message is byte-identical
+    to a genuine port conflict, the one case where it would matter is the one
+    case it cannot be seen in.
+
+    The fix is to attempt one bind rather than two, by naming the address family
+    in the `accept` spec — in `S60intelligence-edge`'s generated
+    `stunnel-web.conf` and in the equivalent `fprintf` in media-gateway's
+    `src/main.c`, which must stay in step. **Verify the syntax against the
+    packaged stunnel before changing it**: guessing at it would trade a
+    cosmetic log line for a console that does not listen, which is a far worse
+    trade than the one it fixes.
 
 ## Default network exposure (Annex II facts, current truth)
 
