@@ -473,6 +473,7 @@ function usage() {
 	echo "sbom               -generate the CRA software bill of materials (add --reuse to skip legal-info)"
 	echo "cve                -check image components against NVD; fails on unaccepted findings (add --offline for cache only)"
 	echo "cited              -check every commit the compliance documents cite as closed actually ships (add --ref <rev> to audit a tag)"
+	echo "partitions         -check the FROZEN A/B partition layout against every consumer of it (add --verbose for the table)"
 	echo "swu                -pack + sign the A/B firmware update package from rootfs.img (--sig <file> to resume the offline-signing flow)"
 	echo ""
 	echo "buildrootconfig    -config b	# EMMCuildroot and save defconfig"
@@ -859,6 +860,34 @@ function build_cited() {
 		echo "A document claims something that is not in the release. Either land"
 		echo "the commit and bump the submodule, or correct the document — do not"
 		echo "delete the citation to make this pass."
+		exit $rc
+	fi
+
+	finish_build
+}
+
+function build_partitions() {
+	echo "============Start frozen-partition-layout check (CRA Annex I Part I #7)============"
+
+	# One-way door #1. The layout is written once and consumed in five places,
+	# three of them hand-maintained: the two SocToolKit flashing maps and the
+	# install targets in sw-description.in. Neither drift fails a build — the
+	# first flashes an image over the wrong partition at the factory, the
+	# second installs an update onto something that is not a rootfs slot. Both
+	# are silent until hardware, which is what makes this a gate.
+	#
+	# Source-level like build_cited: it reads the tree, not a build, so it runs
+	# on a clean checkout. With a build present it additionally checks the
+	# generated blkdevparts/by-name links and image occupancy. Same discipline
+	# on the exit status — it must reach the caller, not finish_build.
+	local rc=0
+	"$SDK_ROOT_DIR/scripts/compliance/check-partition-layout.sh" "$@" || rc=$?
+
+	if [ $rc -ne 0 ]; then
+		echo "============Partition-layout check FAILED (exit $rc)============"
+		echo "A consumer of the frozen table drifted. Fix the consumer — do not"
+		echo "edit the frozen string to make this pass: after the first customer"
+		echo "shipment, changing the layout is a truck roll, not a release."
 		exit $rc
 	fi
 
@@ -3191,6 +3220,10 @@ while [ $# -ne 0 ]; do
 		;;
 	cited)
 		option="build_cited ${@:2}"
+		break
+		;;
+	partitions)
+		option="build_partitions ${@:2}"
 		break
 		;;
 	swu)

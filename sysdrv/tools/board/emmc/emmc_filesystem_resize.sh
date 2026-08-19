@@ -1,4 +1,13 @@
 #!/bin/bash
+# NOT INSTALLED BY THIS SDK'S BUILD, and NOT VALID for the frozen A/B layout.
+# Nothing copies this file into a rootfs. Its p5/p6/p7 are the single-slot
+# indices; under the frozen A/B table those are boot, boot_b and oem, so
+# running it as written would take resize2fs to two raw FIT images. On the A/B
+# layout the rootfs slot is resized by the generated /etc/init.d/S20linkmount
+# instead (see the "Known asymmetry" note in
+# media/joral/swupdate-implementation-plan.md). Left unmodified rather than
+# corrected, because it has no role in this product.
+#
 
 # Check if the filesystem has been resized previously
 if [ ! -f /etc/.filesystem_resized ]; then
