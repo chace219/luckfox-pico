@@ -1,0 +1,14 @@
+# Python 3.11.16 (released 2026-08-12), bumped from buildroot 2023.02.6's stock
+# 3.11.6 on 2026-08-19. See sysdrv/tools/board/buildroot/luckfox_pico_w_defconfig
+# for why the interpreter is kept, and scripts/compliance/cve-triage.csv for the
+# rows this closes.
+#
+# Both sums below are locally computed over the tarball fetched from
+# https://www.python.org/ftp/python/3.11.16/Python-3.11.16.tar.xz — python.org no
+# longer prints an md5 on the release page. The sha256 was independently confirmed
+# against the messageDigest in Python-3.11.16.tar.xz.sigstore, i.e. the digest
+# CPython's release signing committed to the Rekor transparency log.
+md5  f70195c90393fabb19ea9a1815e638aa  Python-3.11.16.tar.xz
+sha256  91bcdebfdde239a003ae93738a7fce0f9230fee5c4bc2b86f6e6e8c6f98aabe8  Python-3.11.16.tar.xz
+# LICENSE is byte-identical to 3.11.6's, which buildroot already trusted.
+sha256  3b2f81fe21d181c499c59a256c8e1968455d6689d269aa85373bfb6af41da3bf  LICENSE
