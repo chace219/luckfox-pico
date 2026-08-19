@@ -2474,6 +2474,197 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   different claims, and this one was only ever visible on the unit.
 
 
+- **2026-08-19/20 — bench session: four legs closed, four findings, three plan
+  corrections.** Run against release 2026.08.6 on the Pico Ultra bench unit,
+  driven from the bench PC; every command and its output is in the session
+  record. The pattern of the day was the one this programme keeps re-learning:
+  three of the four findings were invisible to review and only appeared because
+  something was executed.
+
+  **Leg f (OPC UA identity, ADR-151) — CLOSED.** The assertion that had only
+  ever been made by a host harness has now been made by UaExpert against a
+  board, in both directions and with the layers separated:
+
+  | Config | Token | Result |
+  |---|---|---|
+  | `anon:true`, no user, `trust_path:""` | anonymous | `BadIdentityTokenInvalid` ×2 |
+  | `anon:false`, no user, **pinned** | username/pw | `BadUserAccessDenied` ×8 |
+  | `anon:false`, no user, pinned | — | `sessions_possible:false` + the exact `identity_reason` |
+  | `anon:false`, user set, pinned | username/pw | **session established**, address space browsed |
+  | `anon:false`, user set, pinned | anonymous | `BadIdentityTokenInvalid` |
+
+  Pinning the client certificate first is what makes this evidence rather than
+  noise: with an empty trust folder the refusal lands at the *channel* layer
+  (`BadCertificateUntrusted`) and never reaches identity at all. Every refusal
+  above sits behind a `Reloading the trust-list` line, so the channel succeeded
+  and the only variable was the user token.
+
+  **Correction 1 — item 8f's expected status code was wrong by half.** It said
+  every refusal is `BadIdentityTokenInvalid`. Per open62541 1.3.15's
+  `ua_accesscontrol_default.c`, that is right for an anonymous token but a
+  well-formed *username* token against a server with no configured logins
+  returns `BadUserAccessDenied` (the loop over `usernamePasswordLogin` finds no
+  match). Both are refusals; they are different rows and a runbook that expects
+  only one of them reads a pass as a failure.
+
+  **Correction 2 — and this one was mine, corrected by the bench.** Reading the
+  same source, the anonymous `UserTokenPolicy` is only advertised
+  `if(allowAnonymous)`, from which it follows that a conforming client should
+  never send the token and no refusal should ever be logged. UaExpert sends it
+  anyway and the server refuses it at `ActivateSession`, logged. The source read
+  was a plausible inference; the client is the fact.
+
+  **Leg e (secrets at rest) — half CLOSED, half withdrawn by a product
+  decision.** `diagnostics.json` reports
+  `"secrets_at_rest":{"mode":"encrypted","binding":"soc-otp+emmc-cid"}` on a
+  flashed unit, and both binding sources were read from real hardware for the
+  first time (the OTP carries the SoC part string, the eMMC CID its vendor id —
+  the host suite fakes both). A password stored through the console minutes
+  earlier appears in neither `gateway.json` nor the sidecar, and the sidecar is
+  a `{"v":1,"cipher":"aes-256-gcm","kdf":"hkdf-sha256",...}` envelope at 0600.
+  That discharges what item 9 owed. The `$6$` serial-console login is not
+  outstanding any more — it is **withdrawn**, see the product decision below.
+
+  **Leg c (media-gateway durable audit) — CLOSED.** A deliberately failed login
+  produced `event=login result=fail user=admin src=unknown-via-tls` with no
+  password, and stunnel logged `accepted connection from ::ffff:172.32.0.100`
+  in the **same second**. That join is the attribution chain: behind the TLS
+  terminator every request arrives from 127.0.0.1, so recording that would name
+  the wrong principal. Durability is exact — 2425 → 2426 lines, the record
+  surviving a reboot that wiped `/var/log` as the tmpfs it is.
+
+  **Leg a (downgrade refusal) — CLOSED, both outcomes.** The gate that had never
+  run on hardware:
+
+  ```
+  fw_upload success version=2026.08.5 running=2026.08.6 order=older   <- "verified":true
+  fw_apply  fail    reason=downgrade_unconfirmed order=older from=2026.08.6 to=2026.08.5
+  fw_apply  fail    reason=downgrade_unconfirmed   (phrase in the wrong case)
+  fw_apply  started from=2026.08.6 to=2026.08.5 order=older downgrade=true
+  fw_apply  success target=a
+  ```
+
+  Driven with `curl` against the CGI, never through the browser — the
+  difference between a control and a screen. A **valid** CMS signature on a
+  package the gate still refused is the point: CMS attests who built it, never
+  when. What it buys is honest and limited: it does not stop an attacker holding
+  console credentials, it converts a silent signed rollback into a warned,
+  confirmed and recorded one.
+
+  **Correction 3 — the runbook's expected audit token does not exist.**
+  §6 says to look for `fw_apply refused …`; the shipped CGI writes
+  `fw_apply fail … reason=downgrade_unconfirmed …`. A bench operator matching
+  the runbook literally would have recorded a miss.
+
+  **Finding A — SSH host keys are per-slot, and Phase 0 missed them.**
+  `/etc/ssh` ships no host keys; `S50sshd` runs `ssh-keygen -A` into `/etc/ssh`,
+  which is on the **rootfs slot**. Phase 0 moved config, secrets, the console
+  credential and per-unit TLS material to `/userdata` and did not move these.
+  So every A/B update mints a new SSH identity, each slot keeps its own, and
+  switching slots flips between them. The operator-facing consequence is the
+  serious one: a routine update is indistinguishable from a man-in-the-middle,
+  which trains people to delete the warning. Observed as a real
+  `REMOTE HOST IDENTIFICATION HAS CHANGED` on the bench.
+
+  **Finding B — an updated unit keeps pre-Phase-0 paths forever.** The bench
+  unit's `gateway.json` still points `cert_path`/`key_path` at
+  `/etc/intelligence-edge/` and `usage_state_path` at
+  `/etc/intelligence-edge/usage-state`. Those files exist and are live —
+  the OPC UA **private key** and the usage state are on the partition every
+  update replaces — while an unused correct pair sits in
+  `/userdata/satisense/state/`. The factory default ships `/userdata/...`
+  paths and `S60` seeds state *only when absent*, so a unit updated from a
+  pre-2026-08-14 release never migrates. Same class as Finding A: per-unit
+  identity on a slot.
+
+  **Finding C — the TLS readiness probe accepts any listener, on satisense
+  too.** A console-driven service restart logged
+  `Binding service [web] to 0.0.0.0:8080: Address already in use (98)` while
+  `S60` printed `(https:8080) OK` — the probe took the *old* stunnel as proof
+  the new one had started. This is defect (2) from the media-gateway TLS work
+  of 2026-08-09, which that entry explicitly flagged as needing carrying
+  across. It recovered on its own here, so it is a latent defect rather than an
+  outage, but the fix has a known shape and has been sitting in the other tree
+  for ten days.
+
+  **Finding D — a completion audit record names no version.**
+  `fw_apply result=success target=a` carries the slot and nothing else; only the
+  `started` record names the transition. That is half of the problem the
+  `started` record was written to solve — "target=b alone cannot answer whether
+  this unit ever ran an affected build" — reappearing one record later.
+
+  **Product decision, taken 2026-08-19: serial console access is not provided
+  on production images.** That withdraws the last use of the shared root
+  password (SSH has been `PermitRootLogin prohibit-password` since 2026-08-08,
+  so it was already unreachable over the network), and with it the objection
+  that had blocked the strongest option on the standing three-way decision.
+  Both halves are implemented together, because either alone is worse than
+  either together — a live getty in front of a locked account is a prompt
+  nobody can pass, and a removed getty in front of a live shared password
+  leaves a fleet secret behind a door that is merely closed:
+
+  - the getty is removed in `luckfox-hardening-post.sh` (buildroot installs the
+    skeleton `inittab` after both the defconfig and the overlay, so the
+    post-build hook is the only place that can), and the build **fails** rather
+    than shipping an image that still serves one;
+  - the board overlay's `/etc/shadow` ships root as `*`, the same value every
+    other system account in that file already carried;
+  - `scripts/compliance/test-root-credential.sh` guards both halves in one
+    file and now fails if either is lost — verified by running it against the
+    pre-change staging tree, which it correctly rejects on the live directive.
+
+  Kernel console *output* is unaffected; only the login goes.
+
+  **The cost is ours, and it is worth stating.** Engineering loses the console
+  too — the decision was "customers and developers", not customers alone — so a
+  unit that will not boot far enough for sshd is now a reflash rather than a
+  debug session, and `ab-boot/README.md` still lists a serial console among the
+  prerequisites for the A/B bring-up spike it describes. That prerequisite was
+  satisfiable when it was written and is not any more on a production image;
+  bring-up of that kind needs a build with the hook disabled, which is a
+  deliberate, non-shippable image rather than a flag on a released one.
+
+  **`*` and `!` are not interchangeable here, and the difference would have
+  bricked the unit.** openssh 9.3p2's `allowed_user()` (auth.c) calls
+  `platform_locked_account()` whenever `UsePAM` is off — it is — and a true
+  answer denies **every** authentication method, public keys included.
+  `platform.c` decides that from three optional macros and this build's
+  `config.h` defines exactly one: `LOCKED_PASSWD_PREFIX "!"`;
+  `LOCKED_PASSWD_STRING` and `LOCKED_PASSWD_SUBSTR` are `#undef`. So `*`
+  disables password login and leaves key auth working, while `!` — the value
+  `passwd -l` writes and the one a reasonable person would reach for — would
+  have denied key auth on an image with no console, leaving reflash as the only
+  way in. The guard now **fails the build** on `!` and says why, mutation-tested
+  in both directions.
+
+  **Documentation reconciled the same day.** Eight documents described serial
+  console access: both Annex II fact sheets (platform-interface table row and
+  the whole root-password section, plus the "physical access is equivalent to
+  full control" assumption, which was stale in both halves), both user manuals,
+  both quick-starts, and media-gateway's installation and production-build
+  guides. The load-bearing one was satisfaction of first-use trust —
+  satisfaction User Manual §2.1 made the serial console step 1 of verifying a
+  self-signed certificate fingerprint, and that path no longer exists. It is
+  replaced by commissioning over a **direct Ethernet connection**, which was
+  already documented as the alternative and is now the only out-of-band path a
+  customer has: SSH cannot serve here, both because it is a vendor-only
+  interface and because its host key is itself unverified on first contact
+  (Finding A). On-device Help and the customer PDFs were regenerated from the
+  corrected Markdown in both trees.
+
+  **CONFIRMED ON HARDWARE 2026-08-19/20.** Proven in two stages, deliberately,
+  because the failure mode is unrecoverable. First a pre-flight on the running
+  2026.08.6, where the getty was still present as a fallback: `/etc/shadow`
+  edited to `root:*` in place and a *second*, independent SSH session opened —
+  it authenticated. Only then was 2026.08.7 built, uploaded and applied through
+  the A/B updater (`"order":"newer","downgrade":false` — no phrase, correctly
+  frictionless) and the unit rebooted into the new slot. It came back reporting
+  `rootfs 2026.08.7`, `root:*`, no getty line in `/etc/inittab` and zero getty
+  processes — over a key-authenticated SSH session, which is the assertion
+  itself. Row #4's "one short shared value" residual is closed: there is no
+  shared password on the unit at all.
+
+
 ## Remaining work (refreshed 2026-08-16 against both trees and `main` on each)
 
 The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) and
@@ -2544,10 +2735,14 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    documents' long-standing mis-citation of the defconfig as the effective
    source (the board overlay's `/etc/shadow` is). What is left on this row:
    **root CGIs**; a **serial-console login on hardware** to prove the `$6$`
-   path; and the standing product decision between one shared value, locking
+   path; and ~~the standing product decision between one shared value, locking
    the account (which costs the documented serial-console recovery) and minting
-   a per-unit password the console can surface — the change made removes a
-   published default, it does not make a short shared password strong.
+   a per-unit password the console can surface~~ — **decided 2026-08-19: the
+   account is LOCKED and the serial getty is removed.** The cost that had
+   blocked locking was the documented serial-console recovery, and the product
+   decision withdrew that recovery, so the option became free. What is left on
+   this row is **root CGIs** and the bench leg proving key-auth SSH still works
+   against a locked account (item 8, new leg).
 3. **Secure defaults (row #1)** — **closed on both products** *(text reconciled
    2026-08-12 — this item had gone stale against action-plan items 4g/4h)*:
    SatiSense ships `signencrypt` + `web.tls: true` (2026-08-08), the
@@ -2661,10 +2856,27 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    reports uid 0 / gid 0 on `/`, `/etc` and `/etc/ssh` and accepts a fresh
    key-authenticated SSH session with `StrictModes` at its **default**. That is
    the whole of `image-ownership-and-ssh-key-plan.md` Part 1.
-   **Still open, seven legs** *(the count read "four" until 2026-08-19, when leg
-   e — appended on 08-16 — turned out never to have been counted; legs f and g
-   were added the same day. An undercount of remaining work is the direction
-   that matters)*:
+   **The 2026-08-19/20 session closed four of the seven** — legs a, c, f and
+   the substantive half of e; see the dated entry above for the evidence and
+   for the four findings and three corrections they produced. **Three remain,
+   plus one the session created:**
+   - ~~a. the downgrade refusal~~ — **CLOSED 2026-08-19**, both outcomes
+     audited with the version transition in each record;
+   - ~~c. media-gateway durable audit~~ — **CLOSED 2026-08-19**, the failed
+     login and stunnel's peer line joined in the same second, surviving a
+     reboot;
+   - ~~e. secrets at rest~~ — **CLOSED 2026-08-19** (`mode:encrypted`,
+     both binding sources read off real hardware). Its other half, the `$6$`
+     serial login, is **withdrawn** rather than outstanding: the product
+     decision of the same day removes the getty and locks the account;
+   - ~~f. the OPC UA identity change~~ — **CLOSED 2026-08-19**, refused and
+     admitted on a board with the channel and identity layers separated;
+   - ~~**NEW — key-authenticated SSH against a locked root account and no
+     getty**~~ — **CLOSED 2026-08-19/20 on release 2026.08.7**, delivered
+     through the A/B updater and preceded by a pre-flight on the outgoing
+     release while a getty was still available. See the dated entry.
+
+   *(Superseded leg text, kept for the record:)*
    a. **the downgrade refusal** (runbook §6) — the gate has never run on
       hardware; the 08-15 session staged `same`, which is correctly frictionless
       and proves only the other half. Evidence to cite is the CGI driven with
@@ -2833,6 +3045,36 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       differing `cgi-bin/*.sh`) on `oem` where nothing serves it. Dead code on a
       device is evidence that has to be explained.
 
+15. **The four findings from the 2026-08-19/20 bench session** (see the dated
+    entry above for how each was found). None was visible in a code read; three
+    of the four are upgrade-path defects, which is the class this programme has
+    least coverage of because every host test starts from a clean tree.
+    - **A — SSH host keys live on the rootfs slot.** `S50sshd` runs
+      `ssh-keygen -A` into `/etc/ssh`, which Phase 0 never moved. Every update
+      mints a new identity and each slot keeps its own, so a routine update is
+      indistinguishable from a MITM. Fix has the same shape as the rest of
+      Phase 0: seed `/userdata/<product>/state/ssh/` on first boot and symlink,
+      preserving the existing key so units in the field keep their identity.
+      **Annex I #1/#3, and the highest-value of the four** — it is the one that
+      actively teaches operators to ignore a security warning.
+    - **B — an updated unit keeps pre-Phase-0 paths forever.** `S60` seeds state
+      only when absent, so a `gateway.json` written before 2026-08-14 keeps
+      pointing `cert_path`, `key_path` and `usage_state_path` at
+      `/etc/intelligence-edge/`, and the OPC UA **private key** stays on the
+      partition every update replaces. Needs a one-shot config migration on
+      load, keyed on the old prefix, with the same "rewrite once" pattern the
+      secrets sidecar already uses for legacy plaintext.
+    - **C — the TLS readiness probe accepts any listener, on satisense.** The
+      identical defect was found and fixed on media-gateway 2026-08-09 and
+      flagged then as needing carrying across; it has been sitting unported for
+      ten days and was observed on hardware. Port `certgen_pair_valid()` and
+      the probe-identity check together — they are the same divergence between
+      the two vendored copies of `certgen.c` that the 08-09 entry named.
+    - **D — the `fw_apply success` audit record names no version**, only the
+      slot. Half of the problem the `started` record exists to solve,
+      reappearing one record later. One-line fix, and it belongs with the next
+      change to that CGI.
+
 ## Default network exposure (Annex II facts, current truth)
 
 *Superseded by the per-product fact sheets (`docs/compliance/cra-annex2-facts.md`
@@ -2848,9 +3090,15 @@ here as the cross-product summary.*
   **Dropped from the build 2026-08-12, confirmed absent on the flashed image**:
   the prebuilt `wifi_app` binaries — `hostapd`, `dnsmasq`, `wpa_supplicant` ×3,
   `wpa_cli` ×2, `iperf`, `rkwifi_server` — no longer install (`RK_ENABLE_WIFI=n`);
-  they sat in `/usr/bin` unstarted and invisible to the SBOM and the gate. The
-  root password remains `luckfox` (`BR2_TARGET_GENERIC_ROOT_PASSWD`) but is no
-  longer reachable over the network.
+  they sat in `/usr/bin` unstarted and invisible to the SBOM and the gate.
+  **Serial getty and root password, updated 2026-08-19/20** *(this text read
+  "the root password remains `luckfox`" until then — stale since 2026-08-16,
+  and superseded outright by the change below)*: serial console access is not
+  provided on production images, so the getty is **removed from `/etc/inittab`
+  by the post-build hook** and the root account ships **locked with `*`**.
+  The platform interface list is therefore :22 sshd (key-only) and **no
+  interactive console at all** — the serial line still carries kernel output,
+  but nothing offers a login on it. Bench-confirmed on 2026.08.7.
   **Firewall (2026-08-12, bench-confirmed on a flashed unit):**
   `/etc/iptables.conf` and `/etc/ip6tables.conf` ship default-deny INPUT
   rulesets (documented service ports only on IPv4; nothing served over IPv6,
