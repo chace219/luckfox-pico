@@ -92,24 +92,65 @@ BR2_PACKAGE_XZ=y
 BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y
 BR2_PACKAGE_EVTEST=y
 
-# Python: the interpreter is KEPT, the third-party modules are not.
+# Python: the interpreter is KEPT and gets VERSION-BUMPED. Third-party modules
+# stay out (every BR2_PACKAGE_PYTHON_* below is unset — verified 0 enabled).
 #
-# Neither product uses python at runtime (no reference in any init script, CGI
-# or daemon), but the on-device bench tooling does —
-# satisense-edge/scripts/bench/{encoder-sim,modbus-slave,...}.py run ON the
-# device and are how TC-S3 and the commissioning gates are executed against a
-# flashed image. They import only the standard library plus `ssl`, so
-# python3 + PYTHON3_SSL is the whole requirement.
+# Decision 2026-08-19, reversing the removal staged earlier the same day.
 #
-# Removing the interpreter as well would close 5 more findings and is the
-# right end state for a shipped image, but it would mean validating an image
-# that is not the one we test on. Tracked as a dated row in
-# scripts/compliance/cve-triage.csv instead of silently kept.
+# The removal case was real: no product component uses python (no reference in
+# any init script, CGI or daemon in either tree), the S99python boot hook that
+# executed /root/main.py as root went on 2026-08-10, and five of the six bench
+# scripts turned out to be network clients that run on the bench PC, not on the
+# device — only encoder-sim.py genuinely needs the unit's CAN bus, and its
+# candump-log replacement is host-verified. That finding stands and is why the
+# canplayer path was built.
+#
+# It was reversed anyway: keeping a working interpreter on the device is worth
+# more than the ~18 MB, and the CVE argument for removal is weaker than it
+# looked — see the re-triage of CVE-2020-29396 in scripts/compliance/cve-triage.csv,
+# which was never a CPython defect at all.
+#
+# The five accepted-risk rows are addressed by moving off 3.11.6 instead:
+#   CVE-2024-6232   tarfile ReDoS            fixed 3.11.10
+#   CVE-2024-7592   http.cookies quadratic   fixed 3.11.10
+#   CVE-2026-4519   webbrowser.open dashes   post-3.11.15, expected 3.11.16
+#   CVE-2026-15308  html.parser DoS          post-3.11.15, expected 3.11.16
+#   CVE-2020-29396  NOT CPython — Odoo sandbox escape, python listed only as the
+#                   running-with platform. Re-triaged not-affected; no version
+#                   bump would ever have cleared it.
+#
+# The version pin itself lives in the tracked package replacement
+# sysdrv/tools/board/buildroot/python3/ (same mechanism as libopenssl 3.5.7 and
+# open62541 1.3.15, copied in by sysdrv/Makefile) — NOT here, and NOT in
+# sysdrv/source/buildroot/**, which .gitignore treats as throwaway.
+#
+# Target is the 3.11 branch (3.11.16, 12 Aug 2026; security-only until Oct 2027).
+# 3.12+ is not a version bump but a port: 11 of buildroot 2023.02.6's 31 python3
+# patches target files CPython has since deleted or moved — setup.py (7 patches,
+# gone in 3.12), Lib/distutils (2, gone in 3.12), Lib/crypt.py (1, gone in 3.13),
+# Tools/scripts (1, moved in 3.12) — and patch 0003, the infrastructure the
+# module-disable options all rest on, is one of the setup.py ones. The external
+# Rockchip toolchain is gcc 8.3.0 and is not ours to move.
+#
+# PYTHON3_SSL: bench tooling imports ssl. PYTHON3_ZLIB: previously enabled only
+# as a side effect of python-pillow; kept explicitly because libzlib is in the
+# image regardless (so it adds no component) and a stdlib without it fails in
+# ways that look like a bench-script bug.
+#
+# Two stray scripts, neither of which belongs on a shipped target:
+#   /usr/bin/smtpd.py.11  FIXED in the package replacement. CPython's stdlib demo
+#                         SMTP *server*, 31 KB and executable, had shipped on PATH
+#                         in every image: stock python3.mk removes 'smtpd.py.3',
+#                         but CPython installs it as smtpd.py.<minor>, so the rm
+#                         had always been a no-op. Now globbed. Takes effect on the
+#                         next python3 rebuild.
+#   /usr/bin/event_rpcgen.py  STILL PRESENT, and not ours to fix here — it comes
+#                         from libevent, not python3. A BUILD tool carrying
+#                         `#!/usr/bin/env python`, so already broken today since
+#                         there is no python2.
+# /sbin/routel (`#!/usr/bin/env python3`) keeps working, since the interpreter stays.
 BR2_PACKAGE_PYTHON3=y
 BR2_PACKAGE_PYTHON3_SSL=y
-# zlib was previously enabled only as a side effect of python-pillow. Kept
-# explicitly: libzlib is in the image regardless (so it adds no component), and
-# a stdlib without it fails in ways that look like a bench-script bug.
 BR2_PACKAGE_PYTHON3_ZLIB=y
 # BR2_PACKAGE_PYTHON_AIOHTTP is not set
 # BR2_PACKAGE_PYTHON_CLICK is not set

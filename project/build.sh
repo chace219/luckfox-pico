@@ -2879,6 +2879,34 @@ function __CHECK_PC_TOOLS_FRESH() {
 	fi
 }
 
+# Modes on files the OVERLAY installs, for the files whose whole purpose is to
+# be unreadable. This has to run HERE, and it cannot be done anywhere else:
+#
+#   - not in git, which stores only the executable bit, so a 0600 file in the
+#     tree checks out 0644 for the next person;
+#   - not in RK_POST_BUILD_SCRIPT, which post_overlay runs AFTER, so the
+#     overlay would overwrite whatever it set;
+#   - not in the overlay itself, because post_overlay installs with
+#     `rsync --chmod=u=rwX,go=rX` and therefore CANNOT express a mode narrower
+#     than 0644. That is structural, not accidental: every overlay file is
+#     world-readable by construction.
+#
+# Found 2026-08-19 while verifying the packed image for the other board
+# configs: /etc/shadow shipped 0755 in every image ever built — world-readable
+# and executable, carrying the root hash. Inert only for the same reason the
+# uid-1000 ownership bug was inert (nothing runs unprivileged yet), and it goes
+# live the moment CRA hardening unprivileges a daemon. The ownership pass in
+# mkfs_ext4.sh fixed uid/gid and never looked at modes.
+function __HARDEN_SECRET_FILE_MODES() {
+	local f
+	for f in etc/shadow etc/gshadow; do
+		if [ -f "$RK_PROJECT_PACKAGE_ROOTFS_DIR/$f" ]; then
+			chmod 0600 "$RK_PROJECT_PACKAGE_ROOTFS_DIR/$f"
+			msg_info "hardened /$f to 0600"
+		fi
+	done
+}
+
 function build_firmware() {
 	check_config RK_PARTITION_CMD_IN_ENV || return 0
 
@@ -2915,6 +2943,7 @@ function build_firmware() {
 
 	__RUN_POST_BUILD_SCRIPT
 	post_overlay
+	__HARDEN_SECRET_FILE_MODES
 
 	if [ -n "$GLOBAL_INITRAMFS_BOOT_NAME" ]; then
 		build_mkimg boot $RK_PROJECT_PACKAGE_ROOTFS_DIR

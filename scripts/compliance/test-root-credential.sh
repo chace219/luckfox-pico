@@ -93,6 +93,31 @@ for dc in $DEFCONFIGS; do
 	esac
 done
 
+echo "== The mode has to be narrowed by the build, and only the build can do it"
+# /etc/shadow shipped 0755 in every image ever built until 2026-08-19 —
+# world-readable and executable, carrying the hash this file spends its length
+# protecting. Three mechanisms each look like the place to fix it and none of
+# them can:
+#
+#   - git stores only the executable bit, so a 0600 file in the tree checks out
+#     0644 for the next person;
+#   - RK_POST_BUILD_SCRIPT runs BEFORE post_overlay, so the overlay overwrites
+#     whatever it sets;
+#   - post_overlay installs with `rsync --chmod=u=rwX,go=rX`, which CANNOT
+#     express a mode narrower than 0644. Every overlay file is world-readable
+#     by construction.
+#
+# So the guarantee is one hook in build_firmware, immediately after
+# post_overlay, and this checks that it is still there and still after it.
+if ! grep -q '__HARDEN_SECRET_FILE_MODES' build.sh; then
+	bad "build.sh no longer hardens overlay-installed modes; /etc/shadow will ship world-readable"
+elif [ "$(grep -n 'post_overlay$' build.sh | tail -1 | cut -d: -f1)" -lt \
+       "$(grep -n '^\s*__HARDEN_SECRET_FILE_MODES$' build.sh | tail -1 | cut -d: -f1)" ]; then
+	ok "build.sh narrows overlay-installed modes after post_overlay"
+else
+	bad "__HARDEN_SECRET_FILE_MODES runs before post_overlay, which would then undo it"
+fi
+
 echo "== Customer-facing documentation must not print it"
 # The value is deliberately not published: manuals, quick-starts and the
 # on-device Help are what a customer receives. The compliance fact sheets are
@@ -110,6 +135,16 @@ if [ $# -gt 0 ]; then
 	for tree in "$@"; do
 		[ -d "$tree" ] || { echo "skip — $tree not built"; continue; }
 		check_shadow "$(basename "$tree")" "$tree/etc/shadow"
+		# Modes survive packing unchanged — mkfs.ext4 -d copies them verbatim,
+		# and the ownership pass in mkfs_ext4.sh only ever touches uid/gid — so
+		# the staging tree is a faithful reading of what the image ships.
+		if [ -f "$tree/etc/shadow" ]; then
+			mode=$(stat -c '%a' "$tree/etc/shadow")
+			case "$mode" in
+				600|400|0600|0400) ok "$(basename "$tree"): /etc/shadow is $mode";;
+				*) bad "$(basename "$tree"): /etc/shadow is $mode — readable beyond root";;
+			esac
+		fi
 		# The packed tree must agree with the overlay, since the overlay is
 		# what a firmware repack applies last.
 		if [ -f "$tree/etc/shadow" ] && [ "$(root_hash "$tree/etc/shadow")" = "$(root_hash "$OVERLAY")" ]; then

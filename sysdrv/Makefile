@@ -325,6 +325,11 @@ OPEN62541_PKG_PATH :=$(SYSDRV_DIR)/tools/board/buildroot/open62541
 # pppd.mk only (overlay): disables EAP-TLS, which needs the ENGINE API that
 # OpenSSL 3.x no longer builds. See the comment in the file.
 PPPD_PKG_PATH :=$(SYSDRV_DIR)/tools/board/buildroot/pppd
+# python3 3.11.16 replacing stock 3.11.6 (2026-08-19). Whole-package replacement
+# like libopenssl: the .hash pins the new tarball, and all 31 stock patches were
+# verified to apply sequentially against 3.11.16 (0 failures). Closes the four
+# remaining accepted-risk rows in scripts/compliance/cve-triage.csv.
+PYTHON3_PKG_PATH :=$(SYSDRV_DIR)/tools/board/buildroot/python3
 
 export SYSDRV_DIR_OUT_PC
 export SYSDRV_DIR_OUT_BOARD
@@ -621,6 +626,8 @@ buildroot_create:
 	cp ${OPEN62541_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/open62541/
 	cp ${PPPD_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/pppd/
 	cp $(SYSDRV_DIR)/tools/board/buildroot/swupdate/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/swupdate/
+	rm -rf $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/python3/*
+	cp ${PYTHON3_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/python3/
 
 buildroot: prepare
 	@echo -e "$(C_GREEN) ==sysdrv== build buildroot   $(C_NORMAL)"
@@ -638,6 +645,8 @@ buildroot: prepare
 		cp ${OPEN62541_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/open62541/ ;\
 		cp ${PPPD_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/pppd/ ;\
 		cp $(SYSDRV_DIR)/tools/board/buildroot/swupdate/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/swupdate/ ;\
+		rm -rf $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/python3/* ;\
+		cp ${PYTHON3_PKG_PATH}/* $(BUILDROOT_DIR)/$(BUILDROOT_VER)/package/python3/ ;\
 	);
 
 	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) BR2_EXTERNAL=$(BR2_EXTERNAL_DIR) $(BUILDROOT_DEFCONFIG) -C $(BUILDROOT_DIR)/$(BUILDROOT_VER)

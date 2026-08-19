@@ -38,14 +38,31 @@ identifier the daemons report via `--version` and the consoles show.
 
 ## Release procedure
 
-Three source-level gates first — they read git and the tree, not the image, so
-they need no build and should fail before you spend eight minutes on one:
+Source-level gates first — they read git and the tree, not the image, so they
+need no build and should fail before you spend eight minutes on one:
 
 ```sh
 ./build.sh cited                             # do the documents describe what ships?
 ./build.sh partitions                        # does everything still agree on the frozen layout?
 scripts/compliance/test-root-credential.sh   # is the shipped root credential still ours?
 scripts/compliance/test-security-txt.sh      # can a reporter still reach us?
+scripts/compliance/test-cve-mitigations.sh   # do the config-level triage decisions still hold?
+scripts/compliance/test-image-ownership.sh   # does the packer still hand every inode to root?
+```
+
+`test-image-ownership.sh` needs no build at all — it packs its own throwaway
+trees with the tracked SDK e2fsprogs. It is the guard on shared tooling that
+runs for **every** board config, so it is the one to re-run after touching
+anything under `sysdrv/tools/pc/`.
+
+`test-cve-mitigations.sh` and `test-root-credential.sh` take optional rootfs
+paths, and after a build it is worth giving them the packed tree — that is the
+only place a lost overlay shows up, and the only place `/etc/shadow`'s mode can
+be read (the overlay cannot express it; see the test):
+
+```sh
+scripts/compliance/test-cve-mitigations.sh output/out/rootfs_uclibc_rv1106
+scripts/compliance/test-root-credential.sh output/out/rootfs_uclibc_rv1106
 ```
 
 Then, **after** the image is built and **before** it is shipped or tagged:
@@ -100,6 +117,22 @@ That expiry is the point. An allowlist without one turns "accepted for now" into
 "forgotten", which is the exact failure the CRA's "without delay" wording is
 aimed at. The checker also rejects a malformed row rather than ignoring it, so a
 half-filled entry can never quietly hide a finding.
+
+### Decisions that rest on a config line
+
+`not-affected` divides into two kinds, and they do not age the same way. A
+decision resting on a compiled-out feature or an upstream version fact stays
+true by itself — nobody can edit minizip back into libz. A decision resting on a
+**configuration line** can be undone by an edit, an overlay that fails to apply,
+or a runtime script that rewrites the file, and when that happens `./build.sh
+cve` keeps passing, because the gate reads the triage row rather than the config
+the row is talking about.
+
+So a config-level `not-affected` needs a check in
+[`test-cve-mitigations.sh`](test-cve-mitigations.sh) before it is written, and
+the justification must name it. Without one you have traded a dated review for a
+silent regression, which is the worse of the two. CVE-2026-56116 (dhcpcd
+`ipv4only`) is the worked example.
 
 Buildroot's own `<PKG>_IGNORE_CVES` declarations are honoured separately — those
 are upstream's determination that a CVE does not apply to the version they
