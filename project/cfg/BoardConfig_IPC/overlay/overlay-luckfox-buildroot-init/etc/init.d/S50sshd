@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# sshd        Starts sshd.
+# sshd        Starts sshd, with host keys that survive an A/B update.
 #
 
 # Make sure the ssh-keygen progam exists
@@ -8,10 +8,99 @@
 
 umask 077
 
+# ---------------------------------------------------------------------------
+# Host-key persistence (CRA Annex I #1/#3; compliance plan item 15, finding A)
+#
+# Stock behaviour is `ssh-keygen -A` into /etc/ssh, which lives on the ROOTFS
+# SLOT. Phase 0 moved config, secrets, the console credential and per-unit TLS
+# material to /userdata and did not move these, so every A/B update installed a
+# rootfs with no host keys, the first boot minted fresh ones, and each slot kept
+# its own — flipping identity back and forth as slots alternate.
+#
+# The security consequence is not the key material, it is the operator: a
+# routine update is indistinguishable from a man-in-the-middle. The client says
+# REMOTE HOST IDENTIFICATION HAS CHANGED, the change is in fact benign, and the
+# person learns to clear the warning and reconnect. Observed on the bench
+# 2026-08-19. A warning that cries wolf on every update is worse than no
+# warning, because it trains away the response to the real one.
+#
+# So the keys live on /userdata and /etc/ssh holds symlinks to them. Symlinks
+# rather than sshd_config HostKey lines because `ssh-keygen -A` decides what to
+# generate by testing the default paths: a symlink to an existing key reads as
+# present, so -A generates only genuinely missing types and never overwrites a
+# unit's identity.
+#
+# The sequence is adopt -> link -> generate -> adopt -> link. The second pass
+# captures anything -A just created (a newly supported key type after an
+# openssh bump, say) so it persists too, rather than silently living on the
+# slot again.
+#
+# LIMIT, and it is worth stating because it is visible to operators: the update
+# that first carries this script cannot recover the identity the unit had
+# before it. The old keys are in the OTHER slot's /etc/ssh, on a partition this
+# boot has not mounted. So identity changes ONE more time, on this update only,
+# and is stable from then on. Reading the other slot to rescue it was
+# considered and rejected: mounting the standby rootfs during early boot to
+# chase a one-time migration adds a failure path to every boot forever.
+#
+# $SSHD_STATE_ROOT prefixes every path so the logic that ships is the logic
+# that is tested (scripts/compliance/test-ssh-host-persistence.sh, the same
+# pattern as satisense's factory-reset script). Unset in production.
+# ---------------------------------------------------------------------------
+ETC_SSH="${SSHD_STATE_ROOT}/etc/ssh"
+PERSIST="${SSHD_STATE_ROOT}/userdata/platform/ssh"
+
+userdata_ready() {
+	# Under test the caller supplies the tree, so trust it. In production
+	# require /userdata to be a REAL mount: the mountpoint directory exists
+	# on the rootfs whether or not S20linkmount succeeded, and writing keys
+	# into an unmounted mountpoint would persist them onto the slot again
+	# while looking exactly like success.
+	[ -n "$SSHD_STATE_ROOT" ] && return 0
+	grep -q ' /userdata ' /proc/mounts
+}
+
+persist_host_keys() {
+	if ! userdata_ready; then
+		logger -t sshd -p daemon.warning \
+		   "/userdata is not mounted — host keys stay on the rootfs slot and will change on the next update"
+		return 0
+	fi
+
+	mkdir -p "$PERSIST" || return 0
+	chmod 0700 "$PERSIST"
+
+	# Adopt: a real key file in /etc/ssh is either a fresh -A generation or
+	# the identity this slot has been using. Either way it belongs on
+	# /userdata. -f skips symlinks, so an already-linked key is left alone.
+	for f in "$ETC_SSH"/ssh_host_*; do
+		[ -f "$f" ] || continue
+		[ -L "$f" ] && continue
+		mv -f "$f" "$PERSIST/" 2>/dev/null || continue
+	done
+
+	# Link: point the default paths at the persistent copies. sshd stats
+	# through the symlink, so the TARGET carries the mode it enforces.
+	for f in "$PERSIST"/ssh_host_*; do
+		[ -f "$f" ] || continue
+		case "$f" in
+			*.pub) chmod 0644 "$f" ;;
+			*)     chmod 0600 "$f" ;;
+		esac
+		ln -sf "/userdata/platform/ssh/$(basename "$f")" \
+		       "$ETC_SSH/$(basename "$f")"
+	done
+}
+
 start() {
 	chown root:root /var/empty/
+
+	# Restore this unit's identity before -A decides anything is missing.
+	persist_host_keys
 	# Create any missing keys
 	/usr/bin/ssh-keygen -A
+	# ...and persist whatever that just created.
+	persist_host_keys
 
 	printf "Starting sshd: "
 	/usr/sbin/sshd
@@ -39,10 +128,13 @@ case "$1" in
   restart|reload)
 	restart
 	;;
+  persist-keys)
+	# Test entry point — the persistence step alone, no daemon, no keygen.
+	persist_host_keys
+	;;
   *)
 	echo "Usage: $0 {start|stop|restart}"
 	exit 1
 esac
 
 exit $?
-

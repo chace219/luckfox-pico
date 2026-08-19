@@ -2665,6 +2665,42 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   shared password on the unit at all.
 
 
+- **2026-08-19 (late) — Annex I #7: the SWUpdate verification plan is complete,
+  10 of 10, and the roll-up was wrong about how much of it was left.**
+
+  Two things closed. The **`order=unknown` refusal**, which was the last
+  genuinely untested item: a package that is correctly DEV-signed, whose payload
+  matches its manifest, and whose declared version is `1.0.0` — what a build
+  from before release numbering looks like. It verifies, and is then refused by
+  the layer *after* verification, with a message that admits the unit cannot
+  order it rather than guessing, and an audit record saying
+  `reason=downgrade_unconfirmed order=unknown from=2026.08.9 to=1.0.0`. The rule
+  it proves is that `unknown` counts as needing confirmation rather than as
+  safe: a gate that silently allowed what it could not order would be bypassed
+  by the oldest packages in existence, which are precisely the ones an advisory
+  concerns. The artifact is reproducible per release —
+  `scripts/compliance/make-negative-swu.sh` now builds it alongside the three
+  corruption packages, because a negative test built from a different release
+  proves nothing about the one on the bench.
+
+  And **item 8d, which claimed six passing hardware tests were still open.** The
+  correction is above; what belongs here is why it is worth an entry of its own.
+  Every other stale-document finding in this programme has been an overclaim, and
+  the discipline built around them — cite the evidence, prefer the bench, treat a
+  documented control as unproven until executed — is all aimed in that direction.
+  This one pointed the other way and the discipline did not catch it: the gates
+  check that claims are true, not that they are current, and no gate anywhere
+  asks whether a document *understates* what has been done. It cost a bench
+  session that was about to re-run six passing tests and was caught by the
+  operator remembering, which is not a control.
+
+  The cheap structural fix is not another gate but a convention: the swupdate
+  plan owns its verification results, and the compliance plan should cite that
+  table rather than paraphrase it. Item 8d paraphrased, and the paraphrase went
+  stale while the table stayed right. **Where two documents describe the same
+  evidence, one of them is going to be wrong eventually, and it will be the copy.**
+
+
 ## Remaining work (refreshed 2026-08-16 against both trees and `main` on each)
 
 The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) and
@@ -2858,8 +2894,22 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    the whole of `image-ownership-and-ssh-key-plan.md` Part 1.
    **The 2026-08-19/20 session closed four of the seven** — legs a, c, f and
    the substantive half of e; see the dated entry above for the evidence and
-   for the four findings and three corrections they produced. **Three remain,
-   plus one the session created:**
+   for the four findings and three corrections they produced. **A fifth, leg d,
+   turned out to have been closed on 2026-08-14 all along** — this document
+   said otherwise for five days (see 5d below). It also created one new leg,
+   and closed that too.
+
+   **Two legs remain, and neither blocks anything:**
+   - **b — MQTT mutual TLS**, which needs a broker whose authentication we
+     control. The only leg still requiring equipment we do not have set up.
+   - **g — the encoder-sim replay.** It no longer gates anything: it existed
+     because the python3 removal waited on it, and that removal was reversed on
+     2026-08-19 in favour of a version bump, so the interpreter stays and
+     `encoder-sim.py` runs on the device as before. Worth doing to prove the
+     candump-log path works on hardware, but it is a control on a tool rather
+     than on the product.
+
+   *(Per-leg detail, kept as written:)*
    - ~~a. the downgrade refusal~~ — **CLOSED 2026-08-19**, both outcomes
      audited with the version transition in each record;
    - ~~c. media-gateway durable audit~~ — **CLOSED 2026-08-19**, the failed
@@ -2886,13 +2936,29 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    c. **media-gateway durable-audit spot-check** and a failed-login record
       correlated against stunnel's peer line (the peer line itself is confirmed
       present on a running unit);
-   d. **SWUpdate negative and fault paths** — tampered payload, tampered
-      signature and wrong key are built and *host*-verified only
-      (`output/image/negative-tests/`); power-cut mid-write, a deliberately
-      broken standby slot exhausting its tries, and factory reset from both
-      slots have not been run at all. These are items 3–4 and 6–7, 9 of the
-      swupdate plan's verification list — the ones that decide whether row #7
-      survives contact with a bad update rather than a good one.
+   d. ~~**SWUpdate negative and fault paths**~~ — **THIS ROW WAS WRONG, and
+      corrected 2026-08-19.** It said the tampered-payload, tampered-signature
+      and wrong-key packages were "built and *host*-verified only" and that
+      power-cut, broken-slot and factory-reset "have not been run at all". All
+      six had **passed on hardware on 2026-08-14** and are recorded in
+      `swupdate-implementation-plan.md`'s own bench-results table (items 3, 4,
+      6, 7, 9), five days before this row was last refreshed. Highlights worth
+      keeping visible here rather than only in that document: the power cut at
+      ~50% of a write left the target slot **never armed**, because
+      `mark-active` only runs on a clean swupdate exit; and the deliberately
+      broken slot fell back **in one boot, not seven** — the initramfs failed
+      the mount and set `priority=0 bootable=no` rather than burning through
+      `tries_remaining`.
+
+      **The correction matters more than the row.** Every other stale-document
+      finding in this programme has been an *overclaim* — a control described
+      as working that was not. This is the opposite, and it is not harmless: it
+      cost a bench session that was about to re-run six passing tests, and it
+      was caught by the operator remembering, not by any gate. A roll-up that
+      undercounts completed work is still a roll-up that cannot be trusted, and
+      the same reading that treats an overclaim as serious has to treat this as
+      serious. What is genuinely left of the swupdate verification list is the
+      one sub-case named under item 5 below.
    f. **The 2026-08-19 OPC UA identity change, not yet on a unit** (ADR-151):
       a factory-configured unit must refuse every session with
       `BadIdentityTokenInvalid` until a username/password is set; setting one
@@ -3049,14 +3115,68 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
     entry above for how each was found). None was visible in a code read; three
     of the four are upgrade-path defects, which is the class this programme has
     least coverage of because every host test starts from a clean tree.
-    - **A — SSH host keys live on the rootfs slot.** `S50sshd` runs
-      `ssh-keygen -A` into `/etc/ssh`, which Phase 0 never moved. Every update
-      mints a new identity and each slot keeps its own, so a routine update is
-      indistinguishable from a MITM. Fix has the same shape as the rest of
-      Phase 0: seed `/userdata/<product>/state/ssh/` on first boot and symlink,
-      preserving the existing key so units in the field keep their identity.
-      **Annex I #1/#3, and the highest-value of the four** — it is the one that
-      actively teaches operators to ignore a security warning.
+    - ~~**A — SSH host keys live on the rootfs slot.**~~ **FIXED 2026-08-20,
+      awaiting one bench leg.** `S50sshd` ran `ssh-keygen -A` into `/etc/ssh`,
+      which Phase 0 never moved, so every update minted a new identity and each
+      slot kept its own. The keys now live in `/userdata/platform/ssh` — a
+      platform path, not a per-product one, since sshd is shared — and
+      `/etc/ssh` holds symlinks to them.
+
+      **Symlinks rather than `sshd_config` `HostKey` lines**, because
+      `ssh-keygen -A` decides what to generate by testing the *default* paths:
+      a symlink to an existing key reads as present, so `-A` generates only
+      genuinely missing types and can never overwrite an identity. The sequence
+      is **adopt → link → generate → adopt → link**; the second pass captures
+      anything `-A` just created (a newly supported key type after an openssl
+      or openssh bump) rather than letting it live on the slot.
+
+      **The degraded case is the one that would have looked like success.** The
+      `/userdata` mountpoint *directory* exists on the rootfs whether or not
+      `S20linkmount` worked, so a naive existence test would write the keys into
+      an unmounted mountpoint — persisting them onto the slot again while
+      reporting success. Production gates on `/proc/mounts` and reports the
+      degraded case to syslog.
+
+      **Stated limit, because operators will see it:** the update that first
+      carries this script cannot recover the identity the unit had before it —
+      those keys are in the *other* slot's `/etc/ssh`, on a partition that boot
+      has not mounted. So identity changes **one more time, on this update
+      only**, and is stable from then on. Reading the standby slot to rescue it
+      was considered and rejected: mounting it during early boot adds a failure
+      path to every boot forever, to serve a migration that happens once.
+
+      Guarded by `scripts/compliance/test-ssh-host-persistence.sh`, which drives
+      the shipped script through a `persist-keys` entry point and an
+      `$SSHD_STATE_ROOT` prefix rather than reimplementing it — 11 checks, six
+      mutations of the shipped logic each confirmed to fail it (adopt loop
+      removed, symlink replaced by a copy, target made relative, mount gate
+      weakened to a directory test, restore moved after `-A`, private-key mode
+      loosened). **BENCH-CONFIRMED 2026-08-19 on release 2026.08.9**, as a
+      two-boot test, because only the second boot proves anything.
+
+      *Boot 1* (08.9 installed to the standby slot): `ssh-keygen -A` generated
+      into `/etc/ssh`, the second persist pass moved all six files to
+      `/userdata/platform/ssh` and linked them back — private keys 0600, public
+      0644, directory 0700 — and the degraded-mode syslog line was absent, so
+      `/userdata` was a real mount and nothing persisted onto the slot.
+
+      *Boot 2* (the **same** release installed again, so the other slot comes up
+      with a rootfs that has never held a host key — the condition every future
+      update creates): `last_boot` flipped b → a, the symlinks were re-created
+      on that boot (mtime 18:36 against boot 1's 18:13), the three fingerprints
+      were byte-identical to boot 1's, and the client connected **with no
+      warning of any kind**. That is the whole claim: a fresh rootfs on a
+      different slot carrying the same host identity.
+
+      **The first attempt at boot 2 read as a pass and was not**, which is worth
+      recording because the tell was subtle. The dumps were taken without the
+      second install having happened, so they described boot 1 three times over
+      and the fingerprint comparison compared a boot against itself. Two things
+      exposed it: `misc_ab status` was byte-identical (`last_boot=b` both
+      times), and so were the symlink mtimes — and `ln -sf` re-runs on every
+      boot, so an unchanged mtime means no boot occurred. Both are now part of
+      the leg rather than the fingerprints alone: a test whose evidence can be
+      produced by doing nothing needs a check that doing nothing fails.
     - **B — an updated unit keeps pre-Phase-0 paths forever.** `S60` seeds state
       only when absent, so a `gateway.json` written before 2026-08-14 keeps
       pointing `cert_path`, `key_path` and `usage_state_path` at
