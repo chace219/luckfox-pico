@@ -34,5 +34,35 @@ function remove_stray_stunnel() {
 	rm -rfv "$RK_PROJECT_PACKAGE_ROOTFS_DIR/etc/stunnel"
 }
 
+function remove_oem_loader_path() {
+	# /etc/profile.d/RkEnv.sh is Rockchip BSP boilerplate for the IPC camera
+	# app (rkipc), which this image deliberately does not run (see the board
+	# overlay's S21appinit). It sets HOME=/oem, appends /oem/{,usr/}{bin,sbin}
+	# to PATH, and — the part that matters — PREPENDS /oem/usr/lib:/oem/lib to
+	# LD_LIBRARY_PATH.
+	#
+	# /oem is the one partition the A/B updater never writes: single-copy, no
+	# standby, absent from the .swu payload. It therefore still carries
+	# build-host ownership on every unit flashed before 2026-08-15 —
+	# /oem/usr measured drwxrwxr-x 1000 1000 on a bench unit — and no update
+	# can ever re-own it. Only a reflash can.
+	#
+	# So this file put a uid-1000-writable directory AHEAD of /usr/lib on the
+	# library search path of every interactive root login. The daemon half of
+	# the same exposure was fixed in 2026.08.5 by shipping librknnmrt.so in the
+	# rootfs and dropping the export from S60intelligence-edge; profile.d is
+	# sourced only by login shells, so that fix did not reach this one, and an
+	# `ldd` on the daemon looked clean while an admin's own shell did not.
+	# See the compliance plan, item 14.
+	#
+	# Its only consumer in this image is the BSP's S60micinit, which is
+	# already a permanent no-op: it guards everything behind
+	# `command -v amixer`, and amixer is in neither the rootfs nor oem. The
+	# source line there is guarded with `[ -f ... ] &&`, so removing the file
+	# is inert for it.
+	rm -fv "$RK_PROJECT_PACKAGE_ROOTFS_DIR/etc/profile.d/RkEnv.sh"
+}
+
 echo "luckfox-hardening-post.sh: applying image hardening"
 remove_stray_stunnel
+remove_oem_loader_path
