@@ -3177,13 +3177,55 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       boot, so an unchanged mtime means no boot occurred. Both are now part of
       the leg rather than the fingerprints alone: a test whose evidence can be
       produced by doing nothing needs a check that doing nothing fails.
-    - **B — an updated unit keeps pre-Phase-0 paths forever.** `S60` seeds state
-      only when absent, so a `gateway.json` written before 2026-08-14 keeps
-      pointing `cert_path`, `key_path` and `usage_state_path` at
-      `/etc/intelligence-edge/`, and the OPC UA **private key** stays on the
-      partition every update replaces. Needs a one-shot config migration on
-      load, keyed on the old prefix, with the same "rewrite once" pattern the
-      secrets sidecar already uses for legacy plaintext.
+    - ~~**B — an updated unit keeps pre-Phase-0 paths forever.**~~ **FIXED
+      2026-08-19** (satisense-edge#65), and the fix is larger than the entry
+      predicted. `config_load()` flags the old prefix and the daemon acts on it
+      once at startup, in the same shape as the plaintext-secret migration —
+      but **the files move, not just the paths**. Rewriting a path alone would
+      point the daemon at nothing, `certgen` would mint a fresh server
+      certificate, and every client that pinned the old fingerprint would fail:
+      a silent data-loss bug turned into a loud outage. Copy-then-unlink,
+      because rootfs and `/userdata` are different filesystems and `rename(2)`
+      returns `EXDEV`; the config is not rewritten unless the move succeeded,
+      so an interruption simply retries next boot. 15 checks, mutation-verified.
+      **BENCH-RUN 2026-08-19/20 on release 2026.08.11, and it FAILED the
+      assertion it was given — correctly, because the assertion was wrong.**
+      The mechanism worked: `moved 3 path(s) off the rootfs`,
+      `/etc/intelligence-edge` emptied, config rewritten. The certificate
+      fingerprint changed anyway (`32:70:94:9F…` → `BB:87:73:98…`) and UaExpert
+      had to re-trust the server, which the operator confirmed.
+
+      **Structural, not a coding defect.** The migration runs on the first boot
+      of the NEW slot. The files it was meant to rescue are on the OTHER slot's
+      rootfs, which that boot never mounts — so `S60`'s `prepare_opcua_cert`
+      found nothing at the configured `/etc` path, minted a fresh certificate,
+      and the daemon dutifully migrated *that*. A unit cannot reach back into a
+      partition it has already replaced.
+
+      **This is the same limit finding A carries, written out there and not
+      applied here.** Finding A's entry says plainly that the delivering update
+      cannot recover the prior identity because the keys are on the other slot.
+      The identical argument applies to B; instead the commit message and PR
+      claimed the fix spares clients from re-pinning. Corrected in `config.h`,
+      the test header and here (satisense-edge#66). The lesson is narrow and
+      worth keeping: **an argument already written down for one case is not
+      automatically carried to the next**, and the bench caught the omission
+      that review did not.
+
+      What the fix genuinely buys: **every subsequent update is safe**, since
+      the paths then name `/userdata`. Reaching into the standby slot to rescue
+      the originals stays rejected for finding A's reason — a failure path on
+      every boot forever, to serve a migration that happens once per unit.
+
+      **An ordering defect the run also exposed, now fixed** (satisense-edge#66):
+      `S60` generated the certificate before the daemon migrated anything, so
+      freshly minted private key material was created ON the rootfs and moved a
+      moment later. `S60` now calls `--migrate-paths` before `start_web` and
+      `prepare_opcua_cert`. Two ordering checks, mutation-verified.
+
+      **Still owed: the honest leg** — that the fingerprint survives the update
+      *after* the delivering one. That is the claim the fix actually supports,
+      and it is the one nobody has run.
     - ~~**C — the TLS readiness probe accepts any listener, on satisense.**~~
       **WITHDRAWN 2026-08-19: there is no such defect, and this entry was
       wrong.** Both halves it said to port were already present. `start_web`
@@ -3219,10 +3261,14 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       disproved it would have cost less than the entry did. A defect asserted
       from evidence one has not traced is the same failure as a control claimed
       from a document one has not executed.
-    - **D — the `fw_apply success` audit record names no version**, only the
-      slot. Half of the problem the `started` record exists to solve,
-      reappearing one record later. One-line fix, and it belongs with the next
-      change to that CGI.
+    - ~~**D — the `fw_apply success` audit record names no version**~~ —
+      **FIXED 2026-08-19** in both trees (satisense-edge#65,
+      t1s-media-gateway#41). The worker now names the transition in the success
+      record and in both post-install failures. Passed to it rather than
+      re-derived from the staged package, so the `started` and completion
+      records cannot disagree about which two releases were involved — a pair
+      of audit lines that contradict each other is worse than one that is
+      terse.
 
 16. **stunnel logs a benign bind failure that is indistinguishable from a real
     one** (found 2026-08-19 while disproving finding C, see item 15). Both
