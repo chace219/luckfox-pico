@@ -3223,9 +3223,36 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       moment later. `S60` now calls `--migrate-paths` before `start_web` and
       `prepare_opcua_cert`. Two ordering checks, mutation-verified.
 
-      **Still owed: the honest leg** — that the fingerprint survives the update
-      *after* the delivering one. That is the claim the fix actually supports,
-      and it is the one nobody has run.
+      **CLOSED 2026-08-20 on release 2026.08.12**, in the form the fix actually
+      supports. A unit already migrated (2026.08.11, paths on `/userdata`,
+      fingerprint `BB:87:73:98…`) was updated again: the fingerprint was
+      **unchanged** and no `moved N path(s)` line appeared, because there was
+      nothing left to move. Every update after the delivering one preserves the
+      server certificate, which is the whole of what the fix buys and now the
+      whole of what it claims.
+
+      *Scope of that evidence, stated because the first draft of this paragraph
+      over-reached.* It asserted that the OPC UA client "reconnected without
+      re-trusting". That was not observed — the operator reported a trust
+      prompt after the 08.12 update, and whether it was raised by the
+      reconstruction reinstall (where a new certificate is minted deliberately)
+      or by the first presentation of a certificate never previously accepted
+      is **unresolved at the time of writing**. What is measured is the
+      fingerprint on the device, twice, by the device. The client-side half —
+      that a pinned client reconnects silently — is not yet evidence and must
+      not be cited as though it were.
+
+      **The ordering fix is confirmed too, and the assertion was sharp:** the
+      pre-state was reconstructed (files on the rootfs, config naming `/etc`)
+      and the release reinstalled. Afterwards `/etc/intelligence-edge` **did not
+      exist at all** — where the 2026.08.11 run left it existing but empty,
+      because `S60` had created it minting a key there before the daemon moved
+      it out. No private key touches the rootfs at any point now, not even for
+      one boot. The absent `moved N path(s)` line in the daemon log is itself
+      the evidence: the daemon routes its stdout to that file, so its own
+      migration branch demonstrably did not run — `--migrate-paths` had already
+      done the work from the init script, which is exactly the ordering the fix
+      introduces.
     - ~~**C — the TLS readiness probe accepts any listener, on satisense.**~~
       **WITHDRAWN 2026-08-19: there is no such defect, and this entry was
       wrong.** Both halves it said to port were already present. `start_web`
@@ -3263,7 +3290,13 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       from a document one has not executed.
     - ~~**D — the `fw_apply success` audit record names no version**~~ —
       **FIXED 2026-08-19** in both trees (satisense-edge#65,
-      t1s-media-gateway#41). The worker now names the transition in the success
+      t1s-media-gateway#41), **and confirmed on hardware 2026-08-20**:
+      `fw_apply result=success … from=2026.08.11 to=2026.08.12`. It could not
+      be observed before that, and the reason is worth keeping — every earlier
+      update was *initiated from* a release predating the fix, so the old CGI
+      and worker ran. A fix to the code that performs an update is only visible
+      on the update after the one that delivers it, the same shape as finding
+      B's limit. The worker now names the transition in the success
       record and in both post-install failures. Passed to it rather than
       re-derived from the staged package, so the `started` and completion
       records cannot disagree about which two releases were involved — a pair
