@@ -3239,15 +3239,24 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       the new certificate, so 08.12 was simply the first time that certificate
       was presented to a client. Nothing about the update caused it.
 
-      **What this leaves genuinely undone is the client-side half of the
-      claim.** At no point in this programme has a client with an *accepted*
-      certificate been carried across an update, so "a pinned client reconnects
-      silently" remains reasoning from the device-side fingerprint rather than
-      an observation. The device-side evidence is complete and is what row #7
-      should cite; the client-side demonstration is cheap to arrange and has
-      simply never been set up — accept the current certificate in the client,
-      complete a session, then update and reconnect. Worth doing before the
-      claim is made to anyone outside engineering.
+      **The client-side half was then closed too, 2026-08-20.** It had been
+      the last inference in this row: at no earlier point had a client holding
+      an *accepted* certificate been carried across an update, so "a pinned
+      client reconnects silently" was reasoning from the device-side
+      fingerprint rather than something anyone had seen. Arranged deliberately
+      — the operator accepted the running certificate (`4C:7F:36:F1…`) in
+      UaExpert and completed a session, then the release was reinstalled
+      (`order=same`, which still swaps the rootfs slot, so it tests the same
+      condition as an upgrade without inventing an empty release). After the
+      reboot the fingerprint was unchanged and **UaExpert reconnected with no
+      trust prompt**.
+
+      That is the form the claim takes when a customer meets it, and it is what
+      row #7 should cite. Getting there took three attempts, and the two failed
+      ones are the reason it is worth citing: the first update changed the
+      certificate (the delivering-update limit), and the second raised a prompt
+      for a certificate the client had never accepted. Neither was the claim
+      failing; both were the claim not yet having been tested.
 
       **The ordering fix is confirmed too, and the assertion was sharp:** the
       pre-state was reconstructed (files on the rootfs, config naming `/etc`)
