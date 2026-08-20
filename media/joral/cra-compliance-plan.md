@@ -3188,11 +3188,44 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       because rootfs and `/userdata` are different filesystems and `rename(2)`
       returns `EXDEV`; the config is not rewritten unless the move succeeded,
       so an interruption simply retries next boot. 15 checks, mutation-verified.
-      **Owed: a bench leg** — this unit is in exactly the affected state, so
-      updating it to a release carrying the fix should relocate the live OPC UA
-      key and leave the config naming `/userdata`, with the *same* certificate
-      fingerprint before and after. The fingerprint is the assertion; the file
-      moving is only the mechanism.
+      **BENCH-RUN 2026-08-19/20 on release 2026.08.11, and it FAILED the
+      assertion it was given — correctly, because the assertion was wrong.**
+      The mechanism worked: `moved 3 path(s) off the rootfs`,
+      `/etc/intelligence-edge` emptied, config rewritten. The certificate
+      fingerprint changed anyway (`32:70:94:9F…` → `BB:87:73:98…`) and UaExpert
+      had to re-trust the server, which the operator confirmed.
+
+      **Structural, not a coding defect.** The migration runs on the first boot
+      of the NEW slot. The files it was meant to rescue are on the OTHER slot's
+      rootfs, which that boot never mounts — so `S60`'s `prepare_opcua_cert`
+      found nothing at the configured `/etc` path, minted a fresh certificate,
+      and the daemon dutifully migrated *that*. A unit cannot reach back into a
+      partition it has already replaced.
+
+      **This is the same limit finding A carries, written out there and not
+      applied here.** Finding A's entry says plainly that the delivering update
+      cannot recover the prior identity because the keys are on the other slot.
+      The identical argument applies to B; instead the commit message and PR
+      claimed the fix spares clients from re-pinning. Corrected in `config.h`,
+      the test header and here (satisense-edge#66). The lesson is narrow and
+      worth keeping: **an argument already written down for one case is not
+      automatically carried to the next**, and the bench caught the omission
+      that review did not.
+
+      What the fix genuinely buys: **every subsequent update is safe**, since
+      the paths then name `/userdata`. Reaching into the standby slot to rescue
+      the originals stays rejected for finding A's reason — a failure path on
+      every boot forever, to serve a migration that happens once per unit.
+
+      **An ordering defect the run also exposed, now fixed** (satisense-edge#66):
+      `S60` generated the certificate before the daemon migrated anything, so
+      freshly minted private key material was created ON the rootfs and moved a
+      moment later. `S60` now calls `--migrate-paths` before `start_web` and
+      `prepare_opcua_cert`. Two ordering checks, mutation-verified.
+
+      **Still owed: the honest leg** — that the fingerprint survives the update
+      *after* the delivering one. That is the claim the fix actually supports,
+      and it is the one nobody has run.
     - ~~**C — the TLS readiness probe accepts any listener, on satisense.**~~
       **WITHDRAWN 2026-08-19: there is no such defect, and this entry was
       wrong.** Both halves it said to port were already present. `start_web`
