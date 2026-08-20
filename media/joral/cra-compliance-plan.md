@@ -3226,11 +3226,21 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       **CLOSED 2026-08-20 on release 2026.08.12**, in the form the fix actually
       supports. A unit already migrated (2026.08.11, paths on `/userdata`,
       fingerprint `BB:87:73:98…`) was updated again: the fingerprint was
-      **unchanged**, no `moved N path(s)` line appeared because there was
-      nothing left to move, and the OPC UA client reconnected without
-      re-trusting. Every update after the delivering one preserves identity,
-      which is the whole of what the fix buys and now the whole of what it
-      claims.
+      **unchanged** and no `moved N path(s)` line appeared, because there was
+      nothing left to move. Every update after the delivering one preserves the
+      server certificate, which is the whole of what the fix buys and now the
+      whole of what it claims.
+
+      *Scope of that evidence, stated because the first draft of this paragraph
+      over-reached.* It asserted that the OPC UA client "reconnected without
+      re-trusting". That was not observed — the operator reported a trust
+      prompt after the 08.12 update, and whether it was raised by the
+      reconstruction reinstall (where a new certificate is minted deliberately)
+      or by the first presentation of a certificate never previously accepted
+      is **unresolved at the time of writing**. What is measured is the
+      fingerprint on the device, twice, by the device. The client-side half —
+      that a pinned client reconnects silently — is not yet evidence and must
+      not be cited as though it were.
 
       **The ordering fix is confirmed too, and the assertion was sharp:** the
       pre-state was reconstructed (files on the rootfs, config naming `/etc`)
