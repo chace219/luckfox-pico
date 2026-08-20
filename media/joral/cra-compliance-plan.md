@@ -3231,16 +3231,23 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       server certificate, which is the whole of what the fix buys and now the
       whole of what it claims.
 
-      *Scope of that evidence, stated because the first draft of this paragraph
-      over-reached.* It asserted that the OPC UA client "reconnected without
-      re-trusting". That was not observed — the operator reported a trust
-      prompt after the 08.12 update, and whether it was raised by the
-      reconstruction reinstall (where a new certificate is minted deliberately)
-      or by the first presentation of a certificate never previously accepted
-      is **unresolved at the time of writing**. What is measured is the
-      fingerprint on the device, twice, by the device. The client-side half —
-      that a pinned client reconnects silently — is not yet evidence and must
-      not be cited as though it were.
+      *Scope of that evidence, because the first draft of this paragraph
+      over-reached and the correction is the useful part.* It asserted that the
+      OPC UA client "reconnected without re-trusting". A trust prompt WAS
+      raised after the 08.12 update, and the explanation is benign: the
+      operator had observed the 08.11 fingerprint change without ever accepting
+      the new certificate, so 08.12 was simply the first time that certificate
+      was presented to a client. Nothing about the update caused it.
+
+      **What this leaves genuinely undone is the client-side half of the
+      claim.** At no point in this programme has a client with an *accepted*
+      certificate been carried across an update, so "a pinned client reconnects
+      silently" remains reasoning from the device-side fingerprint rather than
+      an observation. The device-side evidence is complete and is what row #7
+      should cite; the client-side demonstration is cheap to arrange and has
+      simply never been set up — accept the current certificate in the client,
+      complete a session, then update and reconnect. Worth doing before the
+      claim is made to anyone outside engineering.
 
       **The ordering fix is confirmed too, and the assertion was sharp:** the
       pre-state was reconstructed (files on the rootfs, config naming `/etc`)
