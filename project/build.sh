@@ -474,6 +474,9 @@ function usage() {
 	echo "cve                -check image components against NVD; fails on unaccepted findings (add --offline for cache only)"
 	echo "cited              -check every commit the compliance documents cite as closed actually ships (add --ref <rev> to audit a tag)"
 	echo "partitions         -check the FROZEN A/B partition layout against every consumer of it (add --verbose for the table)"
+	echo "oem                -check the oem partition payload is stripped and the modules it kept moved to the rootfs"
+	echo "hardening          -check every board profile is hardened, or its exception is written down"
+	echo "doccmds           -check no document tells an operator to run a command the image does not have"
 	echo "swu                -pack + sign the A/B firmware update package from rootfs.img (--sig <file> to resume the offline-signing flow)"
 	echo ""
 	echo "buildrootconfig    -config b	# EMMCuildroot and save defconfig"
@@ -860,6 +863,75 @@ function build_cited() {
 		echo "A document claims something that is not in the release. Either land"
 		echo "the commit and bump the submodule, or correct the document — do not"
 		echo "delete the citation to make this pass."
+		exit $rc
+	fi
+
+	finish_build
+}
+
+function build_doccmds() {
+	echo "============Start documented-command check (Annex II accuracy)============"
+
+	# `logread` is not in this image and never has been. It was found on the
+	# bench 2026-08-16, written down in the runbook — trap and all — and then
+	# used again five days later in four new bench legs and found sitting in
+	# BOTH CUSTOMER MANUALS. A note in a document did not survive the person who
+	# had read it; this asks the packed image instead.
+	local rc=0
+	"$SDK_ROOT_DIR/scripts/compliance/check-documented-commands.sh" "$@" || rc=$?
+
+	if [ $rc -ne 0 ]; then
+		echo "============Documented-command check FAILED (exit $rc)============"
+		echo "A document invokes something the image does not have. Fix the"
+		echo "document — or, if the command should be there, add the applet and"
+		echo "say so here. Do not silence this by rewording the sentence."
+		exit $rc
+	fi
+
+	finish_build
+}
+
+function build_hardening() {
+	echo "============Start board-hardening check (CRA Annex I Part I #1/#4)============"
+
+	# 16 board profiles, one `lunch` menu, and until 2026-08-21 only two of them
+	# were hardened. Nothing said which two. This asserts that every profile
+	# either takes the hardening or has its exception written down with a
+	# reason — source-level, so it runs on a clean checkout.
+	local rc=0
+	"$SDK_ROOT_DIR/scripts/compliance/check-board-hardening.sh" "$@" || rc=$?
+
+	if [ $rc -ne 0 ]; then
+		echo "============Board-hardening check FAILED (exit $rc)============"
+		echo "A profile drifted off the hardened set. Harden it, or add it to the"
+		echo "exception list WITH the reason — an undocumented exception is how"
+		echo "14 profiles kept a serial login while two did not."
+		exit $rc
+	fi
+
+	finish_build
+}
+
+function build_oem() {
+	echo "============Start oem-payload check (CRA Annex I Part I #4)============"
+
+	# The oem partition is the one the A/B updater cannot write, and until
+	# 2026-08-21 it was also the one nothing checked: the SBOM, the CVE gate and
+	# every ownership check read the rootfs. It shipped 21 MB of Rockchip demo
+	# suite, a Wi-Fi driver for a radio removed from the build, and a stale
+	# second copy of the SATISense console. None of that was a build failure,
+	# because nothing declared what the partition is for.
+	#
+	# Source-level like build_partitions, plus image checks when a build is
+	# present. Same discipline on the exit status — it must reach the caller.
+	local rc=0
+	"$SDK_ROOT_DIR/scripts/compliance/check-oem-payload.sh" "$@" || rc=$?
+
+	if [ $rc -ne 0 ]; then
+		echo "============oem-payload check FAILED (exit $rc)============"
+		echo "Either the strip did not run, or the BSP staged something new onto"
+		echo "oem. Decide which it is — do not add it to the keep list to make"
+		echo "this pass: a file on oem can never be replaced by a firmware fix."
 		exit $rc
 	fi
 
@@ -3253,6 +3325,18 @@ while [ $# -ne 0 ]; do
 		;;
 	partitions)
 		option="build_partitions ${@:2}"
+		break
+		;;
+	oem)
+		option="build_oem ${@:2}"
+		break
+		;;
+	hardening)
+		option="build_hardening ${@:2}"
+		break
+		;;
+	doccmds)
+		option="build_doccmds ${@:2}"
 		break
 		;;
 	swu)
