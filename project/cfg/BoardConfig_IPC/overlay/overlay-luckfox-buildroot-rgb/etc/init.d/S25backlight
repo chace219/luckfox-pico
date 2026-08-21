@@ -1,10 +1,28 @@
 #!/bin/sh
+#
+# RGB panel backlight. Loads pwm_bl.ko, preferring the copy in the rootfs.
+#
+# The BSP put every kernel module on /oem, which the A/B updater cannot write
+# (compliance plan item 14): a module there can never be replaced by a firmware
+# fix. On the Joral profiles luckfox-joral-oem-pre.sh rescues this module into
+# /lib/modules/<release>/ and empties the oem payload, so the rootfs path is the
+# real one there.
+#
+# The /oem path is kept as a fallback, not as a legacy: the board profiles that
+# are not Joral products (86Panel) still carry the stock oem payload, and this
+# overlay is shared with them.
 
-start(){
-	if [ -f "/oem/usr/ko/pwm_bl.ko" ]; then
-		sleep 1
-		insmod /oem/usr/ko/pwm_bl.ko
-	fi
+MODULE="pwm_bl.ko"
+
+start() {
+	sleep 1
+
+	for candidate in "/lib/modules/$(uname -r)/$MODULE" "/oem/usr/ko/$MODULE"; do
+		if [ -f "$candidate" ]; then
+			insmod "$candidate"
+			return 0
+		fi
+	done
 }
 
 case $1 in

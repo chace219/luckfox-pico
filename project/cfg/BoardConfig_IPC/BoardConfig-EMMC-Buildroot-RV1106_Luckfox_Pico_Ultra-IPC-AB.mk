@@ -165,7 +165,13 @@ export RK_ENABLE_WIFI=n
 #################################################
 
 # specify pre.sh for delete/overlay files
-export RK_PRE_BUILD_OEM_SCRIPT=luckfox-buildroot-oem-pre.sh
+# Joral profiles empty the oem payload instead of pruning it (CRA Annex I #4,
+# compliance plan item 14). The stock luckfox-buildroot-oem-pre.sh deleted a
+# handful of duplicate libraries and left 198 files / 21 MB of Rockchip IPC
+# demo suite that nothing on this product runs; this one rescues the two
+# modules that are used into the rootfs and drops the rest. Asserted by
+# ./build.sh oem.
+export RK_PRE_BUILD_OEM_SCRIPT=luckfox-joral-oem-pre.sh
 
 # specify post.sh for delete/overlay files
 export RK_PRE_BUILD_USERDATA_SCRIPT=luckfox-userdata-pre.sh

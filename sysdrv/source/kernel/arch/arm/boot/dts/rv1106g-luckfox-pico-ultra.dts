@@ -89,9 +89,30 @@
 //};
 
 /**********NPU**********/
-//&npu {
-//	assigned-clock-rates = <700000000>;
-//};
+/*
+ * Enabled 2026-08-21 (CRA compliance plan item 14).
+ *
+ * rv1106.dtsi ships this node "disabled", so rknpu never probed and /dev/rknpu
+ * has never existed on any unit — while the SATISense daemon links librknnmrt
+ * and core/ai/aiworker.c calls rknn_init() on the MVAD autoencoder's INT8
+ * sibling whenever a .rknn model is present. The accelerated path could not
+ * have worked on a shipped image; it failed at the device open and fell back.
+ *
+ * The module itself is loaded by the overlay's S52npu, from the rootfs rather
+ * than from /oem (see luckfox-joral-oem-pre.sh).
+ *
+ * TAKES EFFECT ON A REFLASH ONLY: the dtb travels in the FIT in the `boot`
+ * partition, which is single-copy and is not part of the .swu payload, so an
+ * A/B update carries the loader and not this. Same class of caveat as the
+ * pre-2026-08-15 /oem ownership.
+ *
+ * Clock rate is left at the dtsi default (ACLK_RKNN 420 MHz). The commented
+ * 700 MHz override below is the BSP's, kept as it was found.
+ */
+&npu {
+	//assigned-clock-rates = <700000000>;
+	status = "okay";
+};
 
 /**********EMMC**********/
 &emmc {
