@@ -22,10 +22,8 @@ BR2_TARGET_GENERIC_PASSWD_METHOD="sha-512"
 BR2_SYSTEM_ENABLE_NLS=y
 BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y
 BR2_PACKAGE_GZIP=y
-BR2_PACKAGE_P7ZIP=y
 BR2_PACKAGE_UNZIP=y
 BR2_PACKAGE_XZ=y
-BR2_PACKAGE_ZIP=y
 BR2_PACKAGE_E2FSPROGS=y
 BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y
 BR2_PACKAGE_EVTEST=y
@@ -54,23 +52,17 @@ BR2_PACKAGE_LIBV4L_UTILS=y
 BR2_PACKAGE_LIBCURL=y
 BR2_PACKAGE_LIBCURL_CURL=y
 BR2_PACKAGE_LIBCURL_VERBOSE=y
-BR2_PACKAGE_LIBRSYNC=y
 BR2_PACKAGE_PCRE2=y
 BR2_PACKAGE_PCRE2_16=y
 BR2_PACKAGE_PCRE2_32=y
 BR2_PACKAGE_BMON=y
 BR2_PACKAGE_DHCPCD=y
-BR2_PACKAGE_IPERF=y
-BR2_PACKAGE_IPERF3=y
 BR2_PACKAGE_IPTABLES=y
 BR2_PACKAGE_IPTABLES_BPF_NFSYNPROXY=y
 BR2_PACKAGE_IPTABLES_NFTABLES=y
-BR2_PACKAGE_LRZSZ=y
 BR2_PACKAGE_NTP=y
 BR2_PACKAGE_OPENSSH=y
-BR2_PACKAGE_RSYNC=y
 BR2_PACKAGE_SOCAT=y
-BR2_PACKAGE_WGET=y
 BR2_PACKAGE_BASH=y
 BR2_PACKAGE_BASH_LOADABLE_EXAMPLES=y
 BR2_PACKAGE_DIALOG=y
@@ -81,3 +73,38 @@ BR2_PACKAGE_NANO=y
 BR2_PACKAGE_HOST_DTC=y
 BR2_PACKAGE_CAN_UTILS=y
 BR2_PACKAGE_IPROUTE2=y
+
+# ---------------------------------------------------------------------------
+# CRA Annex I #4 (minimise attack surface) / #2 (no known CVEs at shipment).
+#
+# This is the BSP defconfig for the nine SD_CARD and SPI_NAND board profiles.
+# It is not a Joral product image — but it is in a Joral fork, and an image that
+# can be built from it can be shipped from it, which is why the hardening was
+# extended here on 2026-08-21 (compliance plan item 13).
+#
+# The removals below are the subset of luckfox_pico_w_defconfig's that carry no
+# board function on ANY profile: general-purpose transfer and archive utilities
+# selected by the vendor defconfig with nothing invoking them. iperf3 3.14
+# carries the highest-scoring finding in the product image's own CVE run
+# (CVE-2025-54349, CVSS 10.0) and rsync carries seven; busybox's applets cover
+# the script-level uses of wget and the archivers.
+#
+# WHAT IS DELIBERATELY NOT REMOVED, and why it is written here rather than left
+# looking unexamined: freetype, gnutls, libmd and the python module set
+# (pillow, periphery, spidev, smbus, serial, ...) ARE these boards' declared
+# function — the Luckfox GPIO/SPI/I2C demos and rkipc's OSD text rendering. A
+# "hardening" pass that silently broke the demos a board exists for would be a
+# worse trade than the CVE exposure of a board nobody ships. If one of these
+# profiles is ever put into a product, that decision has to be revisited, and
+# scripts/compliance/check-board-hardening.sh names it as an exception with an
+# owner rather than passing in silence.
+# ---------------------------------------------------------------------------
+# BR2_PACKAGE_P7ZIP is not set
+# BR2_PACKAGE_ZIP is not set
+# BR2_PACKAGE_LIBRSYNC is not set
+# BR2_PACKAGE_IPERF is not set
+# BR2_PACKAGE_IPERF3 is not set
+# BR2_PACKAGE_LRZSZ is not set
+# BR2_PACKAGE_RSYNC is not set
+# GNU wget: busybox's own wget applet (CONFIG_WGET=y) serves any script use.
+# BR2_PACKAGE_WGET is not set

@@ -111,6 +111,14 @@ export RK_ENABLE_ROCKCHIP_TEST=y
 # specify pre.sh for delete/overlay files
 export RK_PRE_BUILD_OEM_SCRIPT=luckfox-buildroot-nocsi-oem-pre.sh
 
+# Image hardening (CRA compliance plan item 13, 2026-08-21). Removes the serial
+# login prompt and any unauthenticated console shell, the stray buildroot
+# stunnel sample config, and — only where the oem payload has been stripped —
+# the /oem loader path. Applied to every profile in this SDK: a config that can
+# be built is a config that can ship. Asserted by ./build.sh hardening.
+export RK_POST_BUILD_SCRIPT=luckfox-hardening-post.sh
+
+
 # specify post.sh for delete/overlay files
 export RK_PRE_BUILD_USERDATA_SCRIPT=luckfox-userdata-pre.sh
 

@@ -30,7 +30,20 @@ null::sysinit:/bin/ln -sf /proc/self/fd/2 /dev/stderr
 
 # Put a getty on the serial port
 #console::respawn:/sbin/getty -L  console 0 vt100 # GENERIC_SERIAL
-console::respawn:-/bin/sh 
+# 2026-08-21 (CRA compliance plan item 13): the line below was
+#
+#     console::respawn:-/bin/sh
+#
+# a root shell respawned on the console with no authentication of any kind —
+# not even the one shared password the buildroot profiles' getty asked for.
+# It survived every hardening pass so far because the profiles that carry it
+# ship their own inittab from this overlay, applied AFTER the post-build
+# hardening that edits the buildroot skeleton's.
+#
+# Re-enabling it for bring-up is a deliberate act on a bench image; it must not
+# be committed. scripts/compliance/check-board-hardening.sh fails if it comes
+# back.
+#console::respawn:-/bin/sh 
 
 # Stuff to do for the 3-finger salute
 #::ctrlaltdel:/sbin/reboot

@@ -108,7 +108,13 @@ export RK_BUILD_APP_TO_OEM_PARTITION=y
 export RK_ENABLE_ROCKCHIP_TEST=y
 
 # enable rockchip wifi
-export RK_ENABLE_WIFI=y
+# Wi-Fi disabled 2026-08-21 (CRA compliance plan item 13), for the reason
+# already recorded on the Pico Ultra profile: enabling it ships prebuilt
+# hostapd 2.6 / wpa_supplicant 2.6 (2016) plus dnsmasq and iperf binaries
+# into /usr/bin, outside the SBOM and outside ./build.sh cve entirely.
+# Re-enabling requires declaring every one of those binaries in
+# scripts/compliance/ first.
+export RK_ENABLE_WIFI=n
 export RK_ENABLE_WIFI_CHIP=AIC8800DC
 
 # config wifi ssid and passwd
@@ -121,6 +127,14 @@ export LF_WIFI_PSK="Your wifi password"
 
 # specify pre.sh for delete/overlay files
 export RK_PRE_BUILD_OEM_SCRIPT=luckfox-buildroot-oem-pre.sh
+
+# Image hardening (CRA compliance plan item 13, 2026-08-21). Removes the serial
+# login prompt and any unauthenticated console shell, the stray buildroot
+# stunnel sample config, and — only where the oem payload has been stripped —
+# the /oem loader path. Applied to every profile in this SDK: a config that can
+# be built is a config that can ship. Asserted by ./build.sh hardening.
+export RK_POST_BUILD_SCRIPT=luckfox-hardening-post.sh
+
 
 # specify post.sh for delete/overlay files
 export RK_PRE_BUILD_USERDATA_SCRIPT=luckfox-userdata-pre.sh
