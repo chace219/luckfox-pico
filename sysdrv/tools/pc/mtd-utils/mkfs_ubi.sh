@@ -172,7 +172,13 @@ function mk_ubi_image_fake()
 					;;
 			esac
 
-			echo "$MKEROFS_TOOL $temp_image $UBI_SRC_DIR -z$erofs_compression_args" >> $UBI_IMAGE_FAKEROOT
+			# --all-root: mkfs.erofs is statically linked, so the fakeroot
+			# session this command runs inside cannot affect what it reads —
+			# the same defect the ubifs path below carries. The standalone
+			# mkfs_erofs.sh was fixed this way on 2026-08-19; THIS copy of the
+			# erofs invocation, the one SPI_NAND profiles use, was missed and
+			# is fixed here (2026-08-21).
+			echo "$MKEROFS_TOOL $temp_image $UBI_SRC_DIR -z$erofs_compression_args --all-root" >> $UBI_IMAGE_FAKEROOT
 			;;
 
 		ubifs|*)
@@ -187,7 +193,21 @@ function mk_ubi_image_fake()
 					UBI_COMPRESSION_TPYE=lzo
 					;;
 			esac
-			echo "$MKUBIFS_TOOL -x $UBI_COMPRESSION_TPYE -e $ubifs_lebsize -m $ubifs_miniosize -c $ubifs_maxlebcnt -d $UBI_SRC_DIR -F -v -o $temp_image" >> $UBI_IMAGE_FAKEROOT
+			# -U (--squash-uids) records uid/gid 0 for every inode the
+			# packer WALKS. It is kept, and it is NOT the fix: measured on
+			# 2026-08-19 and again on 2026-08-21, it moves three of four
+			# inodes to 0:0 and leaves inode 1 — the filesystem root — at the
+			# build user, because the root inode is created from the -d
+			# directory's own stat rather than walked. A device table cannot
+			# reach it either: mkfs.ubifs rejects "/" with "device table
+			# entries require absolute paths".
+			#
+			# What fixes it is the user namespace below, which makes the whole
+			# tree READ as root-owned, root inode included. -U stays as the
+			# second layer, and check-ubifs-ownership.py is what decides
+			# whether either worked.
+			echo "$MKUBIFS_TOOL -x $UBI_COMPRESSION_TPYE -e $ubifs_lebsize -m $ubifs_miniosize -c $ubifs_maxlebcnt -d $UBI_SRC_DIR -F -U -v -o $temp_image" >> $UBI_IMAGE_FAKEROOT
+			echo "$CURRENT_DIR/check-ubifs-ownership.py $temp_image" >> $UBI_IMAGE_FAKEROOT
 			;;
 	esac
 
@@ -321,12 +341,43 @@ msg_info "Start build ubi images..."
 echo "#!/bin/sh" > $ROOTFS_IMAGE_FAKEROOT_UBI
 echo "set -e" >> $ROOTFS_IMAGE_FAKEROOT_UBI
 
-if which fakeroot; then
-	FAKEROOT_TOOL="`which fakeroot`"
+# ── How the tree is made to READ as root-owned ──────────────────────────────
+#
+# This script used to run its generated command file under `fakeroot`, after a
+# `chown -h -R 0:0`. That is what the SDK shipped, and for ubifs and erofs it
+# did nothing at all: fakeroot is an LD_PRELOAD shim, and mkfs.ubifs,
+# mkfs.erofs and ubinize in sysdrv/tools/pc are STATICALLY linked, so they
+# never load it. Measured, not argued — a static packer run inside that
+# fakeroot session, after that chown, still wrote 1000:1000 (2026-08-19).
+# mksquashfs is dynamic, so squashfs was the one path where it worked, which is
+# exactly why the failure survived: the mechanism was present, plausible, and
+# demonstrable on one filesystem out of three.
+#
+# An unprivileged user namespace does what fakeroot pretended to. It is a
+# kernel-level uid mapping, so a static binary sees it too: inside `unshare
+# -r`, the build user IS uid 0, `chown 0:0` succeeds on its own files, and
+# every packer — static or not — reads and records 0:0, INCLUDING the root
+# inode that --squash-uids cannot reach. Nothing on disk actually changes
+# owner outside the namespace.
+#
+# Order matters: prefer the namespace, fall back to fakeroot only so squashfs
+# builds keep working on a host without user namespaces, and say plainly which
+# one is in use. For ubifs the fallback is not enough, and
+# check-ubifs-ownership.py fails the build rather than letting a 1000:1000
+# image out.
+if unshare -r true >/dev/null 2>&1; then
+	FAKEROOT_TOOL="`which unshare` -r --"
+	msg_info "using a user namespace for image ownership (static packers, root inode included)"
+	echo "chown -h -R 0:0 $ROOTFS_SRC_DIR" >> $ROOTFS_IMAGE_FAKEROOT_UBI
+elif which fakeroot; then
+	FAKEROOT_TOOL="`which fakeroot` --"
+	msg_warn "no user namespaces on this host — falling back to fakeroot."
+	msg_warn "fakeroot CANNOT reach the statically linked ubifs/erofs packers;"
+	msg_warn "a ubifs build will fail the ownership check that follows it."
 	echo "chown -h -R 0:0 $ROOTFS_SRC_DIR" >> $ROOTFS_IMAGE_FAKEROOT_UBI
 else
-	msg_warn "Install fakeroot First."
-	msg_warn "   sudo apt-get install fakeroot"
+	msg_warn "Neither user namespaces nor fakeroot are available."
+	msg_warn "   sudo apt-get install fakeroot   (partial: squashfs only)"
 	FAKEROOT_TOOL="NO_FOUND"
 fi
 
@@ -334,11 +385,11 @@ mk_ubi_image_fake_for_rootfs 0x20000 2048
 mk_ubi_image_fake_for_rootfs 0x40000 2048
 mk_ubi_image_fake_for_rootfs 0x40000 4096
 if [ "$FAKEROOT_TOOL" = "NO_FOUND" ]; then
-	msg_warn "No found fakeroot tool..."
+	msg_warn "packing with build-user ownership — no namespace, no fakeroot"
 	$ROOTFS_IMAGE_FAKEROOT_UBI
 else
-	echo "start build fakeroot image"
-	$FAKEROOT_TOOL -- $ROOTFS_IMAGE_FAKEROOT_UBI
+	echo "start build image as root ($FAKEROOT_TOOL)"
+	$FAKEROOT_TOOL $ROOTFS_IMAGE_FAKEROOT_UBI
 fi
 
 if [ "$RK_DEBUG" != "1" ]; then
