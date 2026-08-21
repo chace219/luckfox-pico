@@ -3065,9 +3065,33 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       placeholder Wi-Fi credentials. Stale copies cleared from every build
       output; absence from the packed rootfs must be re-verified after the
       next rebuild.
-   d. **Kernel/U-Boot currency** — report-only today (5098 and 41 findings). The
-      remediation is a vendor-base move, so it needs scoping against Rockchip's
-      releases rather than triage.
+   d. **Kernel/U-Boot currency** — report-only (kernel and 41 U-Boot findings).
+      **Scoped 2026-08-21; the decision is written up in
+      [`kernel-currency-plan.md`](kernel-currency-plan.md).** Recommendation:
+      refresh 5.10.160 → **5.10.252** on Rockchip's `develop-5.10` **before
+      first shipment**, do **not** move to 6.1, leave U-Boot alone.
+
+      Three findings drove it. **5.10 upstream stable EOL is Dec 2026**, four
+      months out, against a five-year support promise — that is the driver,
+      not the CVE count. **6.1 was checked and buys nothing structurally**:
+      Rockchip's `develop-6.1` has neither `oa_tc6`/`lan865x` nor
+      `microchip_t1s` nor the ethtool PLCA API, so all four driver files
+      re-port anyway, across netdev API churn, and it expires Dec 2027. And
+      **a kernel change cannot travel through the A/B updater** — the `.swu`
+      carries only `rootfs.img`; the kernel is in the single-copy `boot` FIT —
+      so this is a reflash, which is free before shipment and a recall after.
+
+      The local delta is extracted, curated and **verified** as a six-patch
+      series in [`kernel-port/`](kernel-port/): applied to a clean checkout of
+      the fork point it reproduces the current kernel byte-for-byte.
+
+      The uncomfortable part, and it belongs in the technical file: **no
+      available base covers five years** (6.12/6.18 have no RV1106; 6.1/6.6
+      die Dec 2027; 5.10 dies Dec 2026), so this product will be re-based at
+      least once inside its support period under any choice. The defensible
+      position is a documented re-base plan plus demonstrated ability to run
+      one — Annex I Part II §2 asks for a process, not a version — and the
+      5.10.252 refresh is the first exercise of it.
 6. **Audit-log off-device forwarding** — the one item left on Annex I #6; designed
    in `audit-log-forwarding-plan.md`, deferred pending a product decision (action
    plan item 5).

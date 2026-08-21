@@ -1,0 +1,162 @@
+diff --git a/sysdrv/source/kernel/arch/arm/boot/dts/rv1106g-luckfox-pico-ultra.dts b/sysdrv/source/kernel/arch/arm/boot/dts/rv1106g-luckfox-pico-ultra.dts
+index b9d243e68..49295e10f 100755
+--- a/sysdrv/source/kernel/arch/arm/boot/dts/rv1106g-luckfox-pico-ultra.dts
++++ b/sysdrv/source/kernel/arch/arm/boot/dts/rv1106g-luckfox-pico-ultra.dts
+@@ -13,6 +13,12 @@ / {
+ 	model = "Luckfox Pico Ultra";
+ 	compatible = "rockchip,rv1103g-38x38-ipc-v10", "rockchip,rv1106g3";
+ 
++	mcp251xfd_osc: mcp251xfd-osc {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		clock-frequency = <40000000>;
++	};
++
+ 	restart-poweroff {
+ 		compatible = "restart-poweroff";
+ 	};
+@@ -34,6 +40,36 @@ wireless_bluetooth: wireless-bluetooth {
+ 	};
+ };
+ 
++&pinctrl {
++	lan8651 {
++		lan8651_cs_pin: lan8651-cs-pin {
++			rockchip,pins = <1 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>;
++		};
++
++		lan8651_int_pin: lan8651-int-pin {
++			rockchip,pins = <1 RK_PB3 RK_FUNC_GPIO &pcfg_pull_up>;
++		};
++	};
++
++	mcp251xfd {
++		/*
++		 * SPI0 CS0 pin (GPIO1_C0) driven as a plain GPIO chip-select.
++		 * The Rockchip SPI controller (SPI_MASTER_GPIO_SS) also asserts
++		 * native SER[0] on every GPIO-CS transfer, so the MCP must NOT
++		 * sit on native CS0 while the LAN8651 uses a GPIO CS - otherwise
++		 * LAN8651 traffic re-selects the CAN controller and corrupts it.
++		 * Making both devices GPIO-CS keeps them isolated.
++		 */
++		mcp251xfd_cs_pin: mcp251xfd-cs-pin {
++			rockchip,pins = <1 RK_PC0 RK_FUNC_GPIO &pcfg_pull_up>;
++		};
++
++		mcp251xfd_int_pin: mcp251xfd-int-pin {
++			rockchip,pins = <2 RK_PA7 RK_FUNC_GPIO &pcfg_pull_up>;
++		};
++	};
++};
++
+ /**********CRU**********/
+ //&cru {
+ //	assigned-clocks =
+@@ -53,9 +89,30 @@ wireless_bluetooth: wireless-bluetooth {
+ //};
+ 
+ /**********NPU**********/
+-//&npu {
+-//	assigned-clock-rates = <700000000>;
+-//};
++/*
++ * Enabled 2026-08-21 (CRA compliance plan item 14).
++ *
++ * rv1106.dtsi ships this node "disabled", so rknpu never probed and /dev/rknpu
++ * has never existed on any unit — while the SATISense daemon links librknnmrt
++ * and core/ai/aiworker.c calls rknn_init() on the MVAD autoencoder's INT8
++ * sibling whenever a .rknn model is present. The accelerated path could not
++ * have worked on a shipped image; it failed at the device open and fell back.
++ *
++ * The module itself is loaded by the overlay's S52npu, from the rootfs rather
++ * than from /oem (see luckfox-joral-oem-pre.sh).
++ *
++ * TAKES EFFECT ON A REFLASH ONLY: the dtb travels in the FIT in the `boot`
++ * partition, which is single-copy and is not part of the .swu payload, so an
++ * A/B update carries the loader and not this. Same class of caveat as the
++ * pre-2026-08-15 /oem ownership.
++ *
++ * Clock rate is left at the dtsi default (ACLK_RKNN 420 MHz). The commented
++ * 700 MHz override below is the BSP's, kept as it was found.
++ */
++&npu {
++	//assigned-clock-rates = <700000000>;
++	status = "okay";
++};
+ 
+ /**********EMMC**********/
+ &emmc {
+@@ -122,6 +179,23 @@ &rtc {
+ 	status = "okay";
+ };
+ 
++/**********RGB**********/
++&backlight {
++	status = "disabled";
++};
++
++&panel {
++	status = "disabled";
++};
++
++&rgb {
++	status = "disabled";
++};
++
++&rgb_in_vop {
++	status = "disabled";
++};
++
+ /**********BT**********/
+ &uart1 {
+ 	status = "okay";
+@@ -139,8 +213,46 @@ uart1_gpios: uart1-gpios {
+ 
+ /**********SPI**********/
+ &spi0 {
+-	status = "disabled";
+-	spidev@0 {
+-		spi-max-frequency = <50000000>;
++	status = "okay";
++	num-cs = <2>;
++	/* CS0 = MCP251xFD (GPIO1_C0), CS1 = LAN8651 (GPIO1_B2); both GPIO, no native CS */
++	cs-gpios = <&gpio1 RK_PC0 GPIO_ACTIVE_LOW>, <&gpio1 RK_PB2 GPIO_ACTIVE_LOW>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&spi0m0_clk &spi0m0_miso &spi0m0_mosi &mcp251xfd_cs_pin
++				     &lan8651_cs_pin &lan8651_int_pin &mcp251xfd_int_pin>;
++	/delete-node/ spidev@0;
++
++	mcp251xfd: can@0 {
++		compatible = "microchip,mcp251xfd";
++		reg = <0>;
++		/* 8 MHz: derated from 10 MHz (ADR-013; chip max is 17 MHz = 85% of
++		 * SYSCLK/2 at 40 MHz) after CRC read errors on the shared SPI0 bus.
++		 * Keeps ~1.6x headroom over worst-case CAN FD 500k/2M SPI traffic;
++		 * do not lower further - transfers would occupy the shared bus even
++		 * longer, delaying LAN8651 OA-TC6 data-path servicing. */
++		spi-max-frequency = <8000000>;
++		clocks = <&mcp251xfd_osc>;
++		interrupt-parent = <&gpio2>;
++		interrupts = <RK_PA7 IRQ_TYPE_LEVEL_LOW>;
++		status = "okay";
++	};
++
++	lan8651: ethernet@1 {
++		compatible = "microchip,lan8651";
++		reg = <1>;
++		/* 15 MHz: 25 MHz caused OA-TC6 'ctrl write echo mismatch' on the
++		 * shared SPI0 bus (cf. MCP251863 at 10 MHz, ADR-013). Lowering to
++		 * 10 MHz did NOT cure the runtime 'Config unsync error' wedge (it
++		 * hit within a minute of boot vs ~23 h at 15 MHz), so the wedge is
++		 * not clock-rate-bound; 15 MHz keeps SPI headroom above the 10 Mbps
++		 * T1S line rate (~6% OA-TC6 chunk overhead) while the root cause
++		 * (bus contention vs signal integrity) is isolated. */
++		spi-max-frequency = <15000000>;
++		interrupt-parent = <&gpio1>;
++		interrupts = <RK_PB3 IRQ_TYPE_EDGE_FALLING>;
++		microchip,plca-enable;
++		microchip,plca-node-id = <0>;	/* 0 = PLCA coordinator (generates the BEACON) */
++		microchip,plca-node-count = <8>;
++		status = "okay";
+ 	};
+ };
