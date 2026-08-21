@@ -1,10 +1,30 @@
 #!/bin/bash
 #
-# Post-build hardening for the Joral edge images.
+# Post-build hardening. Applied to EVERY board profile in this SDK since
+# 2026-08-21 (CRA compliance plan item 13); before that it ran only on the two
+# Pico Ultra profiles Joral ships.
+#
+# WHY IT RUNS EVERYWHERE. This is a product fork, not the upstream BSP: any
+# image built from any config here is a Joral image, and an image that can be
+# built is an image that can be shipped. Fourteen profiles carried a serial
+# login prompt, and two of those a root shell on the console with no
+# authentication at all, while the two hardened ones did not. That difference
+# was invisible in every gate and every document.
+#
+# WHAT IT DOES NOT DO. It does not break a board's function to harden it. The
+# BSP camera profiles genuinely need what they load out of /oem, so the
+# loader-path removal is conditional on the payload having been stripped rather
+# than on which config is selected — see remove_oem_loader_path. Package-level
+# removals that would take away a board's declared demos are NOT made here;
+# they are recorded as exceptions in scripts/compliance/check-board-hardening.sh,
+# so "we decided not to" is written down instead of looking like "nobody
+# looked".
 #
 # Invoked by build.sh __RUN_POST_BUILD_SCRIPT, which runs against
 # $RK_PROJECT_PACKAGE_ROOTFS_DIR before the rootfs image is packed - so
-# anything removed here never reaches the device.
+# anything removed here never reaches the device. The two fastboot profiles
+# already had a board-specific post script; those call this one at their end
+# rather than replacing it.
 #
 # This is the home for "buildroot/BSP ships it, we do not want it" deletions
 # that cannot be expressed as a defconfig or overlay change.
@@ -35,6 +55,22 @@ function remove_stray_stunnel() {
 }
 
 function remove_oem_loader_path() {
+	# ONLY where the oem payload has been stripped. On the BSP board profiles
+	# this file is load-bearing: the generated S21appinit sources it before
+	# running RkLunch.sh, and rkipc resolves librockit and the rest of the
+	# camera pipeline through the LD_LIBRARY_PATH it sets. Removing it there
+	# would harden a board by breaking it.
+	#
+	# The condition is read from the staged payload rather than from a board
+	# variable, so it cannot disagree with what was actually packed:
+	# luckfox-joral-oem-pre.sh empties the directory, so a surviving usr/lib is
+	# exactly the case where the search path still matters.
+	if [ -d "$RK_PROJECT_PACKAGE_OEM_DIR/usr/lib" ] || \
+	   [ -d "$RK_PROJECT_PACKAGE_ROOTFS_DIR/oem/usr/lib" ]; then
+		echo "luckfox-hardening-post.sh: oem still carries libraries, keeping RkEnv.sh"
+		return 0
+	fi
+
 	# /etc/profile.d/RkEnv.sh is Rockchip BSP boilerplate for the IPC camera
 	# app (rkipc), which this image deliberately does not run (see the board
 	# overlay's S21appinit). It sets HOME=/oem, appends /oem/{,usr/}{bin,sbin}
@@ -61,6 +97,38 @@ function remove_oem_loader_path() {
 	# source line there is guarded with `[ -f ... ] &&`, so removing the file
 	# is inert for it.
 	rm -fv "$RK_PROJECT_PACKAGE_ROOTFS_DIR/etc/profile.d/RkEnv.sh"
+}
+
+function remove_superseded_files() {
+	# Files this overlay USED to ship, under names it no longer uses.
+	#
+	# post_overlay applies the overlay with `rsync -a` and NO --delete (it
+	# cannot have one: the source is the overlay, the destination is the whole
+	# rootfs). The staging rootfs is also reused between builds. So renaming or
+	# deleting an overlay file does not remove the old copy — it stays in
+	# output/out/rootfs_*/ and gets packed into every subsequent image, until
+	# somebody does a clean rebuild.
+	#
+	# Found 2026-08-21 on a flashed unit: S23npu had been renamed to S52npu to
+	# move an NPU driver load behind sshd, and the image shipped BOTH. The old
+	# one ran at its old position and loaded the module; the new one logged
+	# "already loaded" and did nothing. The rename had no effect on the unit,
+	# and nothing in the build said so — same shape as "buildroot never
+	# uninstalls" (2026-08-16, GNU wget), one layer up.
+	#
+	# So removals are declared here, where they run on every build, dirty tree
+	# or clean. An entry stays until a clean-output rebuild is known to have
+	# happened everywhere it matters; there is no cost to leaving it.
+	local superseded="
+		etc/init.d/S23npu
+	"
+	local f
+	for f in $superseded; do
+		if [ -e "$RK_PROJECT_PACKAGE_ROOTFS_DIR/$f" ]; then
+			rm -fv "$RK_PROJECT_PACKAGE_ROOTFS_DIR/$f"
+			echo "luckfox-hardening-post.sh: removed superseded $f"
+		fi
+	done
 }
 
 function remove_serial_getty() {
@@ -101,9 +169,29 @@ function remove_serial_getty() {
 		exit 1
 	fi
 	echo "removed serial getty from /etc/inittab"
+
+	# A getty is not the only way an inittab hands out the console. The
+	# fastboot profiles' overlay carries
+	#
+	#     ::respawn:-/bin/sh
+	#
+	# which is strictly worse: a root shell on the console with no
+	# authentication at all, not even the one shared password. Found
+	# 2026-08-21 while extending this script to the other board profiles.
+	# Removing the getty and leaving this would be the same half-measure as a
+	# locked account behind a live getty.
+	if grep -qE '^[^#]*respawn:-?/bin/(sh|ash|bash)' "$inittab"; then
+		sed -i -E '/^[^#]*respawn:-?\/bin\/(sh|ash|bash)/d' "$inittab"
+		if grep -qE '^[^#]*respawn:-?/bin/(sh|ash|bash)' "$inittab"; then
+			echo "luckfox-hardening-post.sh: FAILED to remove the console shell from $inittab" >&2
+			exit 1
+		fi
+		echo "removed the unauthenticated console shell from /etc/inittab"
+	fi
 }
 
 echo "luckfox-hardening-post.sh: applying image hardening"
 remove_stray_stunnel
 remove_oem_loader_path
 remove_serial_getty
+remove_superseded_files

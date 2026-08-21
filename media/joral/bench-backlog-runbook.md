@@ -29,9 +29,14 @@ through the A/B updater rather than reflashed, which is the stronger result: the
 change travelled the way a customer's would. Ownership was the only missing
 half; the modes on the key path were already `0755`/`0644`.
 
-**What is left is legs 2, 5, 6 and 7.** Leg 2 is the cheapest and the most
-overdue — the artifact is already built and the gate has never been exercised on
-hardware.
+**What is left of this table is leg 5** (MQTT mutual TLS, which needs a broker
+whose authentication we control). Legs 2, 6 and 7 closed on 2026-08-19, leg 8 on
+the same day. *(This paragraph read "legs 2, 5, 6 and 7" until 2026-08-21 —
+correct when written on 08-16, stale for two days afterwards.)*
+
+**A second session's worth of legs was opened on 2026-08-21** by the oem /
+board-hardening work: see **§10**, which is self-contained and ordered, because
+its legs destroy each other's pre-state if run out of sequence.
 
 ---
 
@@ -377,3 +382,429 @@ Two specific things are worth capturing even on a clean run:
 - whether `StrictModes` needed anything beyond ownership. The modes on the key
   path are already `0755`/`0644`, so ownership *should* have been the only
   missing half — if it was not, that belongs in the plan.
+
+---
+
+## 10. Session 2026-08-21 — the oem / NPU / stunnel legs (h–k)
+
+*Four legs opened by the 2026-08-21 work (compliance plan items 13, 14, 16).
+None blocks a shipment. Together they are about one hour, and the order below
+is not a suggestion: **§10.2 destroys the pre-state §10.3 needs, and §10.5 destroys
+the pre-state both need.** Run them in sequence or you will have to rebuild a
+unit to re-run one.*
+
+| Leg | Claim | Needs |
+|---|---|---|
+| j | stunnel's benign `Address already in use` line is gone from both products | nothing — a grep on the unit as it stands |
+| h | `/oem` is emptied and re-owned, **through an update**, on a unit that was flashed with the payload | the 2026.08.13 `.swu` |
+| k | nothing the strip removed was actually in use | the same updated unit |
+| i | `/dev/rknpu` exists — and, on an *updated* unit, the log says why it does not | a **reflash** for the positive half |
+
+### 10.0 Reading logs on this image — **there is no `logread`**
+
+*Corrected 2026-08-21, after the command failed on the bench for at least the
+second time. It was never going to work, and this section exists so nobody
+tries it a third time.*
+
+BusyBox here is built with `CONFIG_LOGREAD` **not set** and
+`CONFIG_FEATURE_IPC_SYSLOG` **not set** — the applet is absent from the image
+and the circular buffer it reads does not exist. `syslogd` runs with no
+arguments, so it writes the default **file**:
+
+| What you want | Command on the unit |
+|---|---|
+| System log — init scripts, `logger`, stunnel, sshd, dhcpcd | `cat /var/log/messages`, `grep X /var/log/messages` |
+| Kernel — driver probes, module loads, CAN controller | `dmesg` |
+| SATISense daemon | `cat /var/log/intelligence-edge.log` (1 MB cap + `.old`) |
+| Security audit trail — **the only durable one** | `/userdata/satisense/audit.log`, `/userdata/media-gateway/audit.log` |
+| Either console | Diagnostics / audit-log page |
+
+**`/var/log` is a symlink to `/tmp`, which is tmpfs.** Everything in the first
+three rows is **lost on the next reboot** — which is why the audit trail was
+given a file on `/userdata` in the first place (2026-08-07). For the legs below
+this is not a footnote: `S22oemclean` and `S52npu` log **on the boot that
+follows the update**, so read `/var/log/messages` *before* rebooting again, or
+the evidence is gone and the leg has to be re-run on a fresh unit.
+
+Every leg below therefore has **state evidence** as its primary claim —
+ownership, an empty directory, a device node, a listening socket — and treats
+the log line as corroboration. State survives; the log does not.
+
+**Starting state.** A unit on **2026.08.12**, updated (not reflashed) through
+the A/B updater on 2026-08-20 — the unit the finding-B legs left behind. That is
+exactly the right pre-state: it was flashed long before 2026-08-21, so it still
+carries the full BSP `oem` payload and the build-user ownership on the
+mountpoint.
+
+```sh
+# on the unit
+cat /etc/sw-versions                     # -> rootfs 2026.08.12
+MISC=$(for u in /sys/block/mmcblk*/mmcblk*/uevent; do \
+         grep -q '^PARTNAME=misc$' "$u" && echo "/dev/$(sed -n 's/^DEVNAME=//p' "$u")"; done)
+misc_ab status "$MISC"                   # note last_boot — it must FLIP in §10.3
+```
+
+### 10.1 Capture the pre-state — **do this first, it is not recoverable**
+
+```sh
+# on the unit
+ls -ldn /oem                             # EXPECT 0 0 — mke2fs always makes the fs root
+                                         #   root-owned; the defect is one level down
+ls -ldn /oem/usr                         # EXPECT 1000 1000   <- THE DEFECT
+find /oem ! -user 0 | head -5            # EXPECT non-empty — the build-user tree
+ls -la /oem                              # EXPECT usr/ and the BSP payload
+find /oem -type f | wc -l                # EXPECT ~198 (the number is the finding)
+du -sh /oem                              # EXPECT ~21M
+ls /oem/usr/share/intelligence-edge/www/assets/   # the divergent console bundle
+ls /oem/usr/ko/rknpu.ko /oem/usr/bin/rkipc        # what was stranded there
+```
+
+Paste that output into the results block. **The `find /oem ! -user 0` output is
+the whole point** — it is the ownership defect the compliance plan said only a
+reflash could clear, and §10.3 is the claim that an update clears it.
+
+### 10.2 Leg j — the stunnel line is gone
+
+Costs nothing and must happen before the update, because a *pass* here on
+2026.08.12 is what proves the fix travelled in the release that carries it
+(satisense `a3ee855`, media-gateway `1d57b1b`, both merged 2026-08-19 and both
+inside the pin 2026.08.12 was built from).
+
+```sh
+# 1. POSITIVE CONTROL FIRST — does stunnel reach this log at all?
+grep -ic stunnel /var/log/messages            # EXPECT > 0
+grep -i stunnel /var/log/messages | tail -20  # EXPECT startup lines, no errors
+
+# 2. only then is the absence meaningful
+grep -c 'Address already in use' /var/log/messages   # EXPECT 0
+
+# 3. the state evidence, which needs no log at all
+netstat -ltn | grep -E ':(443|8080) '         # EXPECT 0.0.0.0, NOT ::
+```
+
+**Step 1 is not optional.** "Zero hits" from a log that stunnel never writes to
+is a pass produced by doing nothing — the same failure shape as the finding-A
+boot-2 dumps that described the same boot three times. If step 1 comes back
+empty, this unit cannot answer leg j from its log and step 3 is the whole
+result.
+
+Step 3 is the stronger evidence in any case: a **single** listener, bound to
+`0.0.0.0` rather than `::`, is the fix itself. The old code produced a
+dual-stack `::` bind plus a failed `0.0.0.0` one; the new code attempts exactly
+one. `netstat -p` is not available here (BusyBox is built without
+`FEATURE_NETSTAT_PRG`) — use `ss -ltnp` if you want the owning process.
+
+Then confirm the console still answers over HTTPS from the bench PC. A green
+grep with a dead console is not a pass.
+
+### 10.3 Leg h — the update cleans `/oem`
+
+Install `output/image/joral-platform-2026.08.13.swu` from the console
+(**Firmware update**), exactly as in §3. It orders `newer` over 2026.08.12, so
+no confirmation phrase is asked for.
+
+**This leg is different from findings A and B, and that difference is the
+result.** Both of those could only be proved on the update *after* the
+delivering one, because the state they fix lives on the rootfs slot the update
+replaces. `/oem` is a separate partition that every boot mounts, so
+`S22oemclean` — shipped in the new rootfs — fixes it on the **first boot of the
+delivering update**. If it needed a second update, the fix would be wrong.
+
+After the reboot:
+
+```sh
+misc_ab status "$MISC"          # last_boot MUST have flipped — evidence a boot happened
+cat /etc/sw-versions            # -> rootfs 2026.08.13
+
+grep S22oemclean /var/log/messages   # EXPECT: removed N inherited entries from /oem
+                                    # READ THIS BEFORE ANY FURTHER REBOOT — tmpfs
+ls -ldn /oem                    # EXPECT drwxr-xr-x ... 0 0     <-- the claim
+ls -la /oem                     # EXPECT empty (lost+found only)
+find /oem -type f | wc -l       # EXPECT 0
+
+# and the modules that were rescued out of it, now in the rootfs:
+ls -l /lib/modules/$(uname -r)/
+```
+
+Three ways this can read as a pass while being one:
+
+- **an empty `/oem` with no log line** — then it was never mounted and the
+  script skipped; check for `not mounted` in `/var/log/messages` and fix
+  S20linkmount before believing anything here. (If you have already rebooted
+  since the update, the log is gone — tmpfs — and the ownership line below is
+  the only evidence left, which is why it is the primary claim);
+- **`last_boot` unchanged** — you are reading the same boot twice, which is
+  exactly how the first attempt at finding A's boot 2 read as a pass on
+  2026-08-19. If it did not flip, the install did not happen;
+- **`find /oem ! -user 0` still returns anything** — the purge did not reach the
+  build-user tree, and a fielded unit would still need a reflash. That is a FAIL
+  even if `/oem` looks empty, because the ownership is the half no update could
+  fix before. (The mountpoint's own `0 0` proves nothing either way: `mke2fs`
+  writes the filesystem root root-owned on every unit.)
+
+Also capture, here and not later, the paired negative for leg i:
+
+```sh
+grep S52npu /var/log/messages
+# EXPECT on an UPDATED unit:
+#   loaded rknpu (5.10.160) but /dev/rknpu is absent - the npu device-tree node
+#   is disabled on this unit; a reflash is required, an update cannot change the dtb
+ls -l /dev/rknpu                # EXPECT: No such file or directory
+```
+
+That message is a control in its own right: it is what stops the next person
+debugging the driver when the answer is the device tree.
+
+### 10.4 Leg k — nothing that was removed was in use
+
+On the same updated unit, in this order, because each is cheap and the first
+failure tells you where to look:
+
+```sh
+netstat -ltn                       # console + OPC UA, loopback backends on 127.0.0.1
+```
+
+- console over HTTPS from the bench PC: sign in, load Diagnostics;
+- OPC UA from UaExpert: connect Sign&Encrypt with the pinned certificate, read a
+  tag — **expect no trust prompt**, since 2026.08.12 already migrated the
+  certificate to `/userdata` (that is finding B's closed claim, and this is a
+  free re-confirmation of it on a third update);
+- CAN: `candump can0` shows traffic, or `can-diag.sh` reports the interface up;
+- SSH: a fresh key-authenticated session (host key must be unchanged — leg A's
+  claim, also free here);
+- media-gateway console on :443 and its CAN listener on :8001.
+
+21 MB of binaries left a device. The tree said nothing referenced them; this is
+the only thing that says so about a unit.
+
+### 10.5 Leg i — `/dev/rknpu`, which needs a reflash
+
+**Last, because it wipes the unit.** The device-tree node lives in the FIT in
+the single-copy `boot` partition, which no `.swu` writes — so this half cannot
+be reached through the updater by construction, and running it earlier would
+throw away the pre-state §10.1 and §10.3 depend on.
+
+Flash `output/image/` with SocToolKit / `upgrade_tool` as usual, then:
+
+```sh
+cat /etc/sw-versions            # -> rootfs 2026.08.13
+ls -l /dev/rknpu                # EXPECT the character device   <- the claim
+lsmod | grep rknpu              # EXPECT the module loaded
+dmesg | grep -i rknpu           # EXPECT the driver's own probe lines (kernel side)
+grep S52npu /var/log/messages   # EXPECT: loaded rknpu (5.10.160), /dev/rknpu present
+ls -ldn /oem; find /oem -type f | wc -l   # EXPECT 0 0 and 0 — the FLASH half of leg h
+```
+
+Note what this does and does not claim. It says the driver probes and the device
+node exists — the platform can now run the MVAD INT8 path. It does **not** say
+inference works: no `.rknn` model ships, and `core/ai/aiworker.c` only reaches
+`rknn_init()` when one is present. Proving the model path is a separate
+exercise and is not part of this leg.
+
+
+### 10.6 Results — 2026-08-21 session
+
+*Unit 172.32.0.93, flashed in MASKROM with the complete 2026.08.13 image set.
+Output quoted, not summarised.*
+
+**Before the flash, on 2026.08.12 (the pre-state, §10.1):**
+
+```
+drwxr-xr-x    4 0        0             4096 Aug 15 04:26 /oem
+200                     <- find /oem -type f | wc -l
+20.6M                   <- du -sh /oem
+/oem/usr /oem/usr/etc /oem/usr/share /oem/usr/share/iqfiles ...   <- find /oem ! -user 0
+/oem/usr/share/intelligence-edge/www/assets/index-CPPdWU3u.js    <- the divergent console
+```
+
+**Correction to §10.1, made by this run.** The step said to expect `1000 1000`
+on `/oem` itself. It came back `0 0`: `mke2fs` always creates the filesystem
+root owned by root, so the defect never lived there — it lived one level down,
+in `/oem/usr` and everything below it, which `find /oem ! -user 0` showed. The
+pass criterion is that find returning **nothing**, not the mountpoint's own
+ownership. Corrected in §10.1 and §10.3, and in the compliance plan.
+
+**Leg j — PASSED**, twice: on 2026.08.12 before the flash and again on
+2026.08.13 after it.
+
+```
+18                      <- grep -ic stunnel /var/log/messages  (positive control)
+0                       <- grep -c 'Address already in use'
+tcp  0  0 0.0.0.0:8080  0.0.0.0:*  LISTEN     users:(("stunnel",pid=761,fd=7))
+tcp  0  0 0.0.0.0:443   0.0.0.0:*  LISTEN     users:(("stunnel",pid=472,fd=10))
+```
+
+Both consoles bind IPv4 once. `sshd` (`:::22`) and the OPC UA server
+(`:::4840`) are **still dual-stack** on 2026.08.13 — which is what both Annex II
+fact sheets already say, and this run is the first evidence for it on a current
+release rather than on 2026.08.10.
+
+**Leg h, flash half — PASSED.**
+
+```
+/dev/block/by-name/oem on /oem type ext4 (rw,relatime)
+drwxr-xr-x    3 root     root          4096 Aug 21 04:53 .
+drwx------    2 root     root         16384 Aug 21 04:53 lost+found
+0                       <- find /oem -type f | wc -l     (was 200)
+0                       <- find /oem ! -user 0 | wc -l   (was ~150)
+```
+
+**Leg i — PASSED.** The NPU has never had a device node on any unit this
+product ever shipped; it does now.
+
+```
+crw-------    1 root     root       10, 123 /dev/rknpu
+rknpu                  27019  0
+[    3.429675] RKNPU ff660000.npu: RKNPU: rknpu iommu device-tree entry not found!, using non-iommu mode
+[    3.430100] RKNPU ff660000.npu: RKNPU: Initialized RKNPU driver: v0.9.2 for 20230825
+[    3.430184] RKNPU ff660000.npu: dev_pm_opp_set_regulators: no regulator (rknpu) found: -19
+```
+
+Two driver notes, neither fatal and both worth keeping: it runs in **non-IOMMU
+mode** (no `iommus` property on the node) and finds **no `rknpu` regulator**
+(`-ENODEV`), so there is no DVFS on that rail. Both are properties of the
+vendor dtsi, not of the change that enabled the node, and both would matter to
+anyone measuring inference throughput later.
+
+**The rescued modules landed, and both are in use:**
+
+```
+-rw-r--r--    1 root     root         10056 /lib/modules/5.10.160/pwm_bl.ko
+-rw-r--r--    1 root     root         41728 /lib/modules/5.10.160/rknpu.ko
+pwm_bl                  4629  0
+rknpu                  27019  0
+```
+
+`pwm_bl` loading proves S25backlight now resolves it from the rootfs — the
+`/oem` fallback is dead code on this profile, as intended.
+
+**Today's hardening, on the running unit:**
+
+```
+0                       <- grep -c getty /etc/inittab
+root:*:20681::::::      <- locked
+enable_coredump.sh umask.sh    <- /etc/profile.d, no RkEnv.sh
+```
+
+**OPEN — `S52npu` reported `rknpu already loaded`.** Something loaded the module
+at kernel time **3.43 s**, before S52npu ran, and the script correctly did
+nothing. That is the whole reason S52npu was moved behind `S50sshd`: if the real
+loader is udev's `80-drivers.rules` (`RUN{builtin}+="kmod load $env{MODALIAS}"`,
+fired by coldplug once the device-tree node became visible), then the driver is
+being brought up **before networking anyway** and the reorder bought nothing.
+The image ships no `modules.dep`/`modules.alias`, which is what libkmod normally
+needs to resolve an alias, so the mechanism is not obvious and must be
+established rather than assumed. Diagnostics: see the open item in §10.7.
+
+**Leg h, update half — the mechanism is proven on hardware; one run short of
+closed.**
+
+*First attempt, and why it proved nothing.* The fielded-unit condition was
+reconstructed (`/oem/usr` created and `chown`ed 1000:1000, confirmed
+`drwxr-xr-x 4 1000 1000`) and the unit rebooted. Afterwards `/oem` was clean and
+`find /oem ! -user 0` returned 0 — and `grep S22oemclean /var/log/messages`
+returned **nothing**. Two histories produce that: the script ran on the first
+boot and a second boot then cleared the tmpfs log; or the files never survived
+the reboot at all, having been written seconds before it with no `sync`. `/oem`'s
+mtime read `05:33`, the time of the `mkdir`, where a purge would have stamped it
+later — so it did not decide either.
+
+*What settled the behaviour.* The shipped script driven by hand on the unit,
+after a `sync`, with its output going straight to the terminal:
+
+```
+# mkdir -p /oem/usr/bin && echo stale > /oem/usr/bin/rkipc && chown -R 1000:1000 /oem/usr
+# sync
+# /etc/init.d/S22oemclean start
+S22oemclean: removed 1 inherited entry from /oem
+# find /oem ! -user 0 | wc -l
+0
+```
+
+*What settled the boot invocation.* On the first boot of **2026.08.15**
+(`uptime`: up 0 min), which carries the always-log change:
+
+```
+Aug 21 05:58:37 satisense daemon.info S22oemclean: /oem carries no inherited payload - nothing to purge
+Aug 21 05:59:05 satisense daemon.info S22oemclean: removed 1 inherited entry from /oem
+```
+
+The 05:58:37 line is the boot invocation — and it also proves the mount gate
+passed, since the script logs that message only after `/proc/mounts` shows
+`/oem`. The 05:59:05 line is the hand-driven run above. **Note what the first
+attempt would have looked like on this release: a line, either way.** The
+logging change was made because of that attempt and immediately paid for itself.
+
+*CLOSED 2026-08-21, in one run.* Reconstruct, `sync`, reboot — and the removal
+and the boot are the same event:
+
+```
+ 06:01:32 up 0 min,  1 user,  load average: 0.00, 0.00, 0.00
+Aug 21 06:01:08 satisense daemon.info S22oemclean: removed 1 inherited entry from /oem
+0                       <- find /oem ! -user 0 | wc -l
+```
+
+`up 0 min` with the log line stamped 24 seconds before it is what makes this a
+single observation rather than two joined by an argument: the removal happened
+during **this** boot, not a previous one whose log a reboot could have carried
+away. That is the claim the compliance plan needed — a unit that was flashed
+with the BSP payload reaches the current state **through an update**, not only
+through a reflash.
+
+The payload was reconstructed rather than original, and that is stated
+deliberately: the real 200-file payload had already been cleared by the flash
+half of this leg. The script cannot tell the difference — it purges what is
+there — but the record should say which one it saw.
+
+*Also confirmed by the same session:* the unit reached **2026.08.15** and
+reports it in `/etc/sw-versions`, so the update path carried today's changes.
+`misc_ab status "$MISC"` returned `open : No such file or directory` — `$MISC`
+was simply unset in the new shell, not a defect; re-run the discovery line from
+the starting-state block before reading slot state.
+
+**Leg k — CLOSED 2026-08-21, operator-confirmed.** Both consoles over HTTPS,
+UaExpert Sign&Encrypt, CAN and SSH on the unit flashed from the stripped image.
+Recorded as an operator confirmation, not as captured output: the console and
+UaExpert halves are interactive and produce nothing quotable, and a transcript
+invented for them would be worse than naming the evidence for what it is.
+
+**All four legs opened on 2026-08-21 (h, i, j, k) are closed.** What remains of
+this document is leg 5 / item 8b — MQTT mutual TLS, which needs a broker whose
+authentication we control — and item 8g, the encoder-sim replay, which gates
+nothing.
+
+### 10.7 Reading the standby slot
+
+Which release is on the *other* slot answers a question `misc_ab` cannot: did a
+release arrive **through the updater** or through a MASKROM flash? The updater
+writes the standby slot; a flash writes slot A and, if the flashing map includes
+`misc.img`, resets the A/B record to the factory one.
+
+```sh
+mkdir -p /mnt/slot
+mount -o ro /dev/block/by-name/rootfs_b /mnt/slot
+cat /mnt/slot/etc/sw-versions
+umount /mnt/slot
+```
+
+Read-only, so it cannot disturb the standby copy. If slot B carries the same
+release as the running slot, the updater delivered it; if it carries an older
+one, the running release was flashed and the updater has not been exercised
+since.
+
+*Left open after the 2026-08-21 session:* the unit ran **2026.08.15 from slot
+A** with `last_boot=a`, `slot_a priority=15`, and `slot_b successful_boot=1`.
+That fits a MASKROM flash whose map did not rewrite `misc` — leaving slot B's
+history from an earlier update — and does not fit "08.15 arrived through the
+console", which would have written B and left `last_boot=b`.
+
+### 10.8 Recording
+
+Per leg: pass/fail, the command output **quoted rather than summarised**, and
+for anything surprising the command you ran to disprove it. Then:
+
+- update the table in §0 and the leg list in `cra-compliance-plan.md` item 8;
+- if leg h passes, the fact sheets' "closed 2026-08-21" paragraphs stop being a
+  claim about the tree and become a claim about a unit — say so in both;
+- if leg i's positive half passes, the same for the NPU row.
+

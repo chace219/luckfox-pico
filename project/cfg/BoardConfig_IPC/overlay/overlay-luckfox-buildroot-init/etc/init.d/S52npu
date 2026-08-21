@@ -1,0 +1,141 @@
+#!/bin/sh
+#
+# S52npu — load the Rockchip NPU driver, from the rootfs.
+#
+# RENAMED AND MADE NON-BLOCKING 2026-08-21, after the first flash of the image
+# that introduced it failed to come up. As S23npu this ran BEFORE S35iptables,
+# S40network, S41dhcpcd and S50sshd, and rcS runs its scripts SEQUENTIALLY — so
+# an insmod that blocked, or a driver that spun in probe, took the network and
+# SSH down with it and left no way in. That is an unacceptable thing to put in
+# front of a unit's only remote access, for an accelerator no product function
+# depends on.
+#
+# Three changes, and each is a rule worth keeping for anything that touches a
+# driver at boot:
+#   1. it runs AFTER sshd (S52 > S50), so a failure costs the NPU, not access;
+#   2. the insmod runs in a BACKGROUND subshell, so even a wedged probe cannot
+#      stall the rest of rcS. There is no `timeout` applet in this image, so
+#      backgrounding is the only bound available;
+#   3. it can be switched off without a reflash — `touch /userdata/npu.disabled`
+#      on the persistent partition. A boot-time driver load with no off switch
+#      is a reflash waiting to happen.
+#
+# Compliance plan item 14. Three facts made this necessary, and none of them was
+# visible from either product's source:
+#
+#   1. CONFIG_ROCKCHIP_RKNPU=m, and the module shipped only in /oem/usr/ko;
+#   2. the only thing that ever insmod'd from there was the BSP's
+#      insmod_ko.sh, called by RkLunch.sh, which the overlay's S21appinit
+#      deliberately does not run;
+#   3. the npu node in rv1106.dtsi is status="disabled".
+#
+# So on every unit ever shipped there was no /dev/rknpu, while the SATISense
+# daemon linked librknnmrt and core/ai/aiworker.c called rknn_init() whenever a
+# .rknn model was present. The accelerated MVAD path was dead code on the
+# device. (1) and (2) are fixed here and in luckfox-joral-oem-pre.sh, (3) in
+# rv1106g-luckfox-pico-ultra.dts.
+#
+# The module is looked up under the RUNNING kernel's release rather than a fixed
+# path, because the rootfs and the kernel travel separately: the rootfs is A/B
+# updated, the FIT in `boot` is single-copy and is not in the .swu payload. If
+# they ever drift, this finds nothing and says so — which is a line in the log,
+# not an insmod failing with a version-magic error deep in the boot.
+#
+# Absent module, absent device and a driver that does not probe are all
+# non-fatal: no product function depends on the NPU being present, and a
+# gateway that refuses to boot because an optional accelerator is missing would
+# be a worse failure than the one being fixed.
+#
+# $NPU_STATE_ROOT prefixes the paths so the shipped logic is the tested logic
+# (scripts/compliance/test-oem-payload.sh). Unset in production.
+
+MODULE="rknpu"
+KREL=$(uname -r)
+MODULE_PATH="${NPU_STATE_ROOT}/lib/modules/${KREL}/${MODULE}.ko"
+SYS_MODULE="${NPU_STATE_ROOT}/sys/module/${MODULE}"
+DEV_NODE="${NPU_STATE_ROOT}/dev/${MODULE}"
+
+log_info() {
+	logger -t S52npu -p daemon.info "$1" 2>/dev/null
+	echo "S52npu: $1"
+}
+
+log_err() {
+	logger -t S52npu -p daemon.err "$1" 2>/dev/null
+	echo "S52npu: $1" >&2
+}
+
+DISABLE_FLAG="${NPU_STATE_ROOT}/userdata/npu.disabled"
+
+start() {
+	if [ -f "$DISABLE_FLAG" ]; then
+		log_info "disabled by $DISABLE_FLAG - not loading $MODULE"
+		return 0
+	fi
+
+	if [ -d "$SYS_MODULE" ]; then
+		log_info "$MODULE already loaded"
+		return 0
+	fi
+
+	if [ ! -f "$MODULE_PATH" ]; then
+		log_info "no $MODULE.ko for kernel $KREL - NPU acceleration unavailable"
+		return 0
+	fi
+
+	if ! insmod "$MODULE_PATH"; then
+		log_err "insmod $MODULE_PATH FAILED - NPU acceleration unavailable"
+		return 0
+	fi
+
+	# insmod succeeding is not the claim worth logging. The driver only
+	# registers its misc device from probe(), which needs the npu node enabled
+	# in the device tree — and that node ships disabled in rv1106.dtsi, so a
+	# unit flashed before 2026-08-21 loads this module and gets no device. The
+	# two cases have to read differently in the log, because the fix for each
+	# is different: one is an update, the other is a reflash.
+	if [ -e "$DEV_NODE" ]; then
+		log_info "loaded $MODULE ($KREL), /dev/$MODULE present"
+	else
+		log_err "loaded $MODULE ($KREL) but /dev/$MODULE is absent - the npu device-tree node is disabled on this unit; a reflash is required, an update cannot change the dtb"
+	fi
+
+	return 0
+}
+
+stop() {
+	[ -d "$SYS_MODULE" ] || return 0
+	rmmod "$MODULE" 2>/dev/null
+	return 0
+}
+
+case "$1" in
+	start)
+		# Backgrounded: nothing after this script in rcS may wait on a driver
+		# probe. The log line is the only thing that arrives late, and it is
+		# corroboration, not the claim - /dev/rknpu and lsmod are the claim.
+		start &
+		;;
+	load)
+		# Same work, in the FOREGROUND. Two callers: an operator loading the
+		# driver by hand on a bench (`/etc/init.d/S52npu load`), and
+		# test-oem-payload.sh, which cannot assert against a background job
+		# without racing it. Same entry-point pattern as S50sshd persist-keys:
+		# the tested path is the shipped path, minus the backgrounding that
+		# exists only to protect rcS.
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart|reload)
+		stop
+		start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+esac
+
+exit 0

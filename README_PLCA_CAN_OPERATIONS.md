@@ -151,7 +151,7 @@ recovers this state automatically:
    are rebuilt through the normal startup path
 
 Recovery triggers after 3 consecutive failed health checks (~30 s); failed
-attempts retry with backoff. Watch it with `logread | grep t1s-watchdog` (or
+attempts retry with backoff. Watch it with `grep t1s-watchdog /var/log/messages` (or
 `dmesg`). If the hard recovery keeps failing, the chip's SPI engine is wedged
 beyond software reach — a full **power cycle** (not `reboot`) is required.
 

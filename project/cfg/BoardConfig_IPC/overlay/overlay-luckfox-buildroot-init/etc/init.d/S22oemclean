@@ -1,0 +1,142 @@
+#!/bin/sh
+#
+# S22oemclean — remove the inherited BSP payload from /oem, on units that were
+# flashed with it.
+#
+# CRA Annex I #4 (minimise attack surface); compliance plan item 14.
+#
+# The build-side half of this change is luckfox-joral-oem-pre.sh, which packs an
+# EMPTY oem.img: 198 files / 21 MB of Rockchip IPC demo suite (rkipc, ~60
+# sample_*/rk_*_test binaries, the AIC8800 Wi-Fi driver and firmware, camera
+# sensor and ISP modules, a second divergent copy of the SATISense console),
+# none of it reachable on this product, all of it root-owned and executable.
+#
+# That half only governs what a FLASH writes. oem is single-copy and is not in
+# the .swu payload, so a unit already in the field keeps whatever its factory
+# flash put there, forever — which is precisely what item 14 recorded as "no
+# update can fix it, only a reflash". This script is what makes the update able
+# to fix it: the next A/B update carries this rootfs, and on its first boot the
+# payload goes.
+#
+# It also re-owns the mountpoint. /oem was packed by mkfs_ext4 before the
+# 2026-08-15 ownership fix, so its root inode is uid/gid 1000 on every unit
+# flashed before then — measured drwxrwxr-x 1000 1000 on a bench unit updated to
+# 2026.08.4. A uid-1000-writable directory on a root-only device is the exposure
+# that made RkEnv.sh's LD_LIBRARY_PATH matter; the search path went in
+# 2026.08.6, and this closes the directory itself.
+#
+# NOTHING ON THIS PRODUCT MAY STORE ANYTHING ON /oem. The updater cannot write
+# that partition, so a file there can never be replaced by a security fix, and
+# this script deletes what it finds. Persistent state belongs on /userdata
+# (Phase 0), code belongs in the rootfs.
+#
+# The mount gate is the same shape as S50sshd's: the /oem mountpoint DIRECTORY
+# exists in the rootfs whether or not S20linkmount succeeded, so a bare
+# existence test would report success while operating on the rootfs instead of
+# the partition. Gate on /proc/mounts and say so when it is not there.
+#
+# $OEM_STATE_ROOT / $OEM_MOUNTS_FILE prefix every path so the logic that ships
+# is the logic the test drives (scripts/compliance/test-oem-payload.sh). Unset
+# in production.
+
+OEM_DIR="${OEM_STATE_ROOT}/oem"
+MOUNTS_FILE="${OEM_MOUNTS_FILE:-/proc/mounts}"
+
+# Entries that are part of the filesystem rather than the payload.
+KEEP="lost+found"
+
+log_info() {
+	logger -t S22oemclean -p daemon.info "$1" 2>/dev/null
+	echo "S22oemclean: $1"
+}
+
+log_err() {
+	logger -t S22oemclean -p daemon.err "$1" 2>/dev/null
+	echo "S22oemclean: $1" >&2
+}
+
+oem_is_mounted() {
+	[ -f "$MOUNTS_FILE" ] || return 1
+	awk -v d="/oem" '$2 == d { found = 1 } END { exit !found }' "$MOUNTS_FILE"
+}
+
+is_kept() {
+	for k in $KEEP; do
+		[ "$1" = "$k" ] && return 0
+	done
+	return 1
+}
+
+purge() {
+	removed=0
+
+	for entry in "$OEM_DIR"/* "$OEM_DIR"/.*; do
+		[ -e "$entry" ] || continue
+		name=${entry##*/}
+		[ "$name" = "." ] && continue
+		[ "$name" = ".." ] && continue
+		is_kept "$name" && continue
+		rm -rf "$entry"
+		removed=$((removed + 1))
+	done
+
+	echo "$removed"
+}
+
+start() {
+	if ! oem_is_mounted; then
+		# Not fatal: with the payload gone from the image there is nothing on
+		# /oem to matter. But an unmounted /oem means S20linkmount did not do
+		# its job, which is worth a line in the log rather than silence.
+		log_err "/oem is not mounted (S20linkmount?) - nothing purged"
+		return 0
+	fi
+
+	count=$(purge)
+
+	# The ext4 root inode, not the contents: on pre-2026-08-15 images this is
+	# the uid-1000 directory itself. Unconditional and idempotent - chown on an
+	# already-root-owned directory is a no-op, and skipping it when the purge
+	# found nothing would leave the ownership defect on a unit whose payload
+	# had already been cleared by an earlier boot.
+	chown 0:0 "$OEM_DIR" 2>/dev/null
+	chmod 0755 "$OEM_DIR" 2>/dev/null
+
+	# ALWAYS log, including the nothing-to-do case.
+	#
+	# This used to stay quiet when there was nothing to remove, on the reasoning
+	# that a clean unit should not add noise to the boot log. The bench showed
+	# why that was wrong on 2026-08-21: a reconstructed payload was gone after a
+	# reboot and there was NO log line, and from that evidence alone "the script
+	# purged it" and "the script never ran, and the files were lost some other
+	# way" are indistinguishable. Silence that two different histories can
+	# produce is not evidence.
+	#
+	# One line per boot, naming the count, is the cost. It buys an answer to
+	# "did this control run on this unit" that does not depend on there having
+	# been something for it to do.
+	if [ "$count" -gt 0 ]; then
+		log_info "removed $count inherited entr$([ "$count" -eq 1 ] && echo y || echo ies) from /oem"
+	else
+		log_info "/oem carries no inherited payload - nothing to purge"
+	fi
+
+	return 0
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		;;
+	restart|reload)
+		start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+esac
+
+exit 0

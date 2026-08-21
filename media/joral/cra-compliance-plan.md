@@ -34,7 +34,7 @@ httpd + CGIs run as root (accepted in `project-context.md:78`). No firewall rule
 No LICENSE file in media-gateway. SatiSense config import has no schema validation
 (`web/cgi/api-config.sh:15-19`).
 
-## Status at a glance (2026-08-18)
+## Status at a glance (2026-08-21)
 
 *The table above is the 2026-07-26 audit and stays frozen. This one is the
 current position, and it is what to read first. "met" means a path in the tree
@@ -48,9 +48,9 @@ was found by executing, not by reading. Per-product detail lives in each tree's
 | 1 Secure by default | **met** — HTTPS on 443 by default, per-unit cert, factory credential buys only a password change | **met** — `signencrypt` + `web.tls` by default, same credential gate | ✅ 08-09/08-12 | first-use trust is a self-signed fingerprint; **anonymous OPC UA closed 2026-08-19** — factory `allow_anonymous: false`, no shipped OPC UA credential, not yet on a unit |
 | 2 No known CVEs at shipment | **met at the gate** — `./build.sh cve` **0 blocking**, OpenSSL 3.5.7 LTS | same (shared rootfs) | ✅ 08-12 | kernel (5155) + U-Boot (41) are report-only. the GNU wget accepted-risk was **resolved 08-16 by dropping the package**, leaving **python3 ×5** as the only accepted-risk. **dhcpcd was reclassified `not-affected` 2026-08-19** — it had been mis-filed `fixed-pending-release` for a mitigation that was ours and had already shipped, so it would have expired 2026-11-12 into a blocking finding for an unreachable code path; the config it rests on is now guarded by a test. **python3 removal was staged the same day and then reversed** — the interpreter is **kept** and the fix is a version bump, 3.11.6 → **3.11.16** (12 Aug 2026), carried as a tracked package replacement. **CVE-2020-29396 was reclassified `not-affected` 2026-08-19** — it is an Odoo sandbox escape with python listed only as the running-with platform, so it was never a CPython defect and no bump could ever have retired it. **BUILT AND GATED 2026-08-19**: the image carries 3.11.16 (read out of `rootfs.img`), `./build.sh cve` **0 blocking**. The bump retired **two** of the four — CVE-2024-6232 and CVE-2024-7592 now match nothing and their triage rows were deleted — and did **not** retire **CVE-2026-15308 and CVE-2026-4519**, which still match 3.11.16 and remain accepted-risk on the unchanged reachability argument. So: python3 ×2, not ×0 |
 | 3 Confidentiality / integrity | **met** for the console path | **met** — secrets in a 0600 sidecar, **encrypted at rest and bound to the board since 08-16**, never served to the browser; MQTT TLS verification proven enforced | ✅ 08-12/13, ⚠️ sealing not yet on a unit | the sealing protects the stored file, **not** a running unit against root (no secure element); MQTT mutual TLS unexercised; **`/oem` still carries build-user ownership on every fielded unit and no update can fix it — only a reflash** (item 14). Nothing loads from it any more: the daemon since 2026.08.5 (`ldd`-confirmed on a unit), interactive root shells since 2026.08.6 (`RkEnv.sh` removed) |
-| 4 Minimise attack surface | **met** — BSP daemons and 118 packages gone, default-deny IPv4+IPv6 firewall, `wifi_app` dropped, image inodes root-owned | same (shared rootfs) | ✅ 08-12/08-16 | httpd + CGIs run as root; root password is off the **published** vendor default since 08-16 (`$6$`, undocumented to customers) but is still one short shared value — unreachable over the network, serial-console login unverified |
+| 4 Minimise attack surface | **met** — BSP daemons and 118 packages gone, default-deny IPv4+IPv6 firewall, `wifi_app` dropped, image inodes root-owned, and since **2026-08-21** the `oem` partition ships **empty** (198 files / 21 MB of Rockchip demo suite, a Wi-Fi driver for a removed radio, and a divergent copy of the console — none of it in the SBOM or the CVE gate, both of which read the rootfs) | same (shared rootfs) | ✅ 08-12/08-16, **oem strip and board hardening confirmed on a unit 08-21** | httpd + CGIs run as root; root password is off the **published** vendor default since 08-16 (`$6$`, undocumented to customers) but is still one short shared value — unreachable over the network, serial-console login withdrawn with the getty. **All 16 board profiles are hardened since 08-21** (14 were not; two served an unauthenticated root shell) — but 15 of them have never been booted here |
 | 5 Access control | **met** for the console | **met** for the console and, since 2026-08-19, the OPC UA endpoint | ✅ 08-09, OPC UA identity ⚠️ not on a unit | CAN :8001 unauthenticated by protocol design |
-| 6 Security-event logging | **met** — console trail complete, and CAN peer identity is recorded on **both** transports since the 08-18 recovery (`50ec9b9`) | **met** | ✅ 08-12 (IE) | the UDP peer record has not been exercised on a unit (`logread` for `can_udp_peer_seen` after sending from two hosts); no off-device forwarding on either |
+| 6 Security-event logging | **met** — console trail complete, and CAN peer identity is recorded on **both** transports since the 08-18 recovery (`50ec9b9`) | **met** | ✅ 08-12 (IE) | the UDP peer record has not been exercised on a unit (`grep can_udp_peer_seen /var/log/messages` after sending from two hosts); no off-device forwarding on either |
 | 7 Update mechanism | **met** — signed A/B SWUpdate, ordered releases, downgrade gate | same | ⚠️ partial | DEV signing key only; downgrade **refusal** never run on hardware. Partition layout **frozen 2026-08-19** (gated by `./build.sh partitions`) |
 | 8 Factory reset | **met** | **met** | ✅ 08-12 | — |
 
@@ -58,7 +58,7 @@ was found by executing, not by reading. Per-product detail lives in each tree's
 |---|---|
 | §1 SBOM per release | **met** — `./build.sh sbom`, Buildroot legal-info + hand-declared app layer |
 | §2 Address vulnerabilities without delay | **met at the gate** — triage rows carry an owner and a `REVIEW_BY` date; first expiries 2026-11 |
-| §3 Periodic security testing | **partial** — hardware bench is the loop that finds the real defects; **seven** legs outstanding (item 8 a–g) |
+| §3 Periodic security testing | **partial** — hardware bench is the loop that finds the real defects; **two** legs outstanding (item 8 b, which needs a broker whose authentication we control, and g, which gates nothing). a, c–f closed 08-19/20; h–k opened and closed 2026-08-21, and that session found three defects no reading of the tree could have shown: a renamed init script shipping twice, a purge whose silence was unreadable, and a command both customer manuals told operators to run that this image has never had |
 | §4–6 Coordinated disclosure | **partial — the only deadline-bound row, and nothing on it is engineering's.** Policy, address and the publishable `security.txt` + policy page are all done (08-09, 08-18, `disclosure/`); the **mailbox does not exist yet**, and until mail is received the row is not met |
 
 **The one date that binds: 11 Sep 2026**, ~3.5 weeks out. Nothing on the
@@ -382,8 +382,8 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   shipped logic is the tested logic), each confirmed to fail against the code
   mutated back to per-datagram logging, address+port keying and no rate limit.
   ~~**Row #6 is met on both products again — this time on both transports.**~~
-  Bench-unverified: the daemon change needs a flash, and the check is a `logread`
-  for `can_udp_peer_seen` after sending from two hosts.
+  Bench-unverified: the daemon change needs a flash, and the check is
+  `grep can_udp_peer_seen /var/log/messages` after sending from two hosts.
 
   **Correction, 2026-08-16 — this never landed, and the entry above was wrong
   for four days.** The work exists as exactly one commit, 1a7bd8e
@@ -2701,7 +2701,246 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   evidence, one of them is going to be wrong eventually, and it will be the copy.**
 
 
-## Remaining work (refreshed 2026-08-16 against both trees and `main` on each)
+- **2026-08-21 — platform, Annex I #4 (minimise attack surface): the partition
+  nothing had ever looked at, and the fourteen board profiles nobody had
+  hardened.** Item 14's last residual and item 13's first two bullets, closed
+  together because they turned out to be the same defect twice: every control
+  this programme built reads **the rootfs of the one profile we ship**.
+
+  **The oem payload.** `__PACKAGE_RESOURCES` fills the `oem` staging directory
+  from the BSP's media/app output with no notion of what the product runs.
+  Measured on the 2026.08.12 tree: **198 files, 21 MB**; measured again when
+  staged fresh by a full `./build.sh firmware`: **252 files, 73 MB**. It is
+  `rkipc` and some sixty `sample_*`/`rk_*_test` binaries, `librockit`/`librkaiq`
+  and the rest of the camera pipeline, the **AIC8800 Wi-Fi driver and its
+  firmware blob** — for a radio removed from the build on 2026-08-12 — camera
+  sensor and ISP modules, an OSD font, a speaker-test wav, and a **second,
+  divergent copy of the SATISense console** (a different `assets/index-*` bundle
+  and differing `cgi-bin/*.sh` from the one the rootfs serves). Nothing on the
+  product reads any of it: the overlay's S21appinit replaces the BSP's, so
+  `RkLunch.sh` — which is what runs rkipc and `insmod_ko.sh` — never executes;
+  the daemon's library path stopped naming `/oem` in 2026.08.5 and login shells
+  in 2026.08.6; no httpd roots there.
+
+  The plan filed this as "a stale divergent copy of the console… dead code on a
+  device is evidence that has to be explained". That was the smallest true
+  statement about it. What it actually was: **21 MB of unreferenced root-owned
+  executables, outside the SBOM, outside `./build.sh cve`, and outside every
+  ownership and hardening check written since July** — because the SBOM
+  describes the rootfs, the CVE gate scans the rootfs, and the image-ownership
+  and hardening checks read the rootfs. The one partition that had never been
+  asserted about is the one partition the A/B updater cannot write.
+
+  Fixed on both sides of the flash/update boundary, which is the part worth
+  keeping:
+  - **What a flash writes** — `luckfox-joral-oem-pre.sh` (new, selected by both
+    Ultra profiles) empties the payload and asserts it is empty before
+    `build_mkimg` runs. Verified on a real `./build.sh firmware`: `debugfs` on
+    the packed `oem.img` lists nothing but `lost+found`.
+  - **What an update fixes** — `oem` is not in the `.swu`, so the build-side
+    change alone would have been a control on new units only, and item 14's
+    "no update can fix it, only a reflash" would still stand. The overlay now
+    ships **`S22oemclean`**, which removes the inherited payload from a mounted
+    `/oem` on first boot and re-owns the mountpoint `root:root` — closing the
+    pre-2026-08-15 uid-1000 `oem` for fielded units **through the updater**.
+    It gates on `/proc/mounts`, not on the mountpoint existing, because the
+    `/oem` directory is in the rootfs whether or not `S20linkmount` worked: the
+    same trap finding A's key persistence had to be gated against, and a naive
+    test would have purged the rootfs while reporting success.
+  - **The two modules that are used move into the rootfs**, not out of the
+    build: `rknpu.ko` and `pwm_bl.ko`, into `/lib/modules/<vermagic>/`, read
+    from the module's own vermagic rather than a hard-coded release. A file on
+    `oem` can never be replaced by a security fix; that is the whole reason this
+    item exists, and leaving two kernel modules there while emptying everything
+    around them would have kept the defect and lost the evidence of it.
+
+  **A dormant accelerator, found by asking what the payload was for.** The
+  SATISense daemon links `librknnmrt` and `core/ai/aiworker.c` calls
+  `rknn_init()` on the MVAD autoencoder's INT8 sibling whenever a `.rknn` model
+  is present. Three things meant that could never work on any unit ever
+  shipped: `CONFIG_ROCKCHIP_RKNPU=m` with the module only on `oem`; the only
+  thing that ever loaded it being the BSP's `insmod_ko.sh`, which our S21appinit
+  deliberately does not call; and the `npu` node in `rv1106.dtsi` shipping
+  `status = "disabled"`. All three are fixed — the module travels in the rootfs,
+  the overlay's **`S52npu`** loads it, and the Pico Ultra dts enables the node —
+  with one caveat stated in the code and the fact sheets: **the dtb is in the
+  single-copy `boot` partition, so the device node appears only after a
+  reflash.** An updated unit loads the module and logs that the node is
+  disabled and a reflash is required, rather than leaving the next person to
+  debug the driver.
+
+  **The board profiles.** `./build.sh lunch` offers 16 profiles with the same
+  face. Two were hardened. The other 14 were stock BSP: no
+  `luckfox-hardening-post.sh`, so **a serial login prompt on every one of
+  them**, and the two Busybox fastboot profiles carried
+  `::respawn:-/bin/sh` — a **root shell on the console with no authentication at
+  all**, not even the one shared password. That is worse than the getty this
+  programme removed on 2026-08-19, and it survived because those two profiles
+  ship their own inittab from an overlay applied *after* the post-build hook
+  that edits the buildroot skeleton's.
+
+  All 16 now take the hardening, with the script made portable rather than
+  copied: the `/oem` loader-path removal is **conditional on the payload having
+  been stripped**, because on the BSP camera profiles `RkEnv.sh` is load-bearing
+  — the generated S21appinit sources it and rkipc resolves `librockit` through
+  it — and hardening a board by breaking it is not hardening. Wi-Fi is off in
+  every profile (**seven** had `RK_ENABLE_WIFI=y`, not the four this document
+  claimed) and the Wi-Fi/BT firmware overlay goes with it. `luckfox_pico_defconfig`
+  loses the eight packages that carry findings and have no consumer on any board
+  (p7zip, zip, librsync, iperf, iperf3, lrzsz, rsync, GNU wget); it keeps
+  freetype, gnutls and the python module set, which **are** those boards'
+  declared function, and that decision is now written down with an owner instead
+  of looking unexamined. `./build.sh hardening` asserts all of it and was
+  verified by injecting six kinds of drift, not by passing.
+
+  **ubifs: the item said it could not be fixed, and it can.** The bullet read
+  "cannot be fully fixed with the bundled mtd-utils 2.0.1: `--squash-uids`
+  leaves the root inode at uid 1000". That measurement is exactly right and
+  reproduced here — three of four inodes move to 0:0 and inode 1 does not. The
+  conclusion drawn from it was wrong. `fakeroot` fails on these packers because
+  it is an `LD_PRELOAD` shim and `mkfs.ubifs`/`mkfs.erofs`/`ubinize` are
+  statically linked; **an unprivileged user namespace is a kernel-level uid
+  mapping, so a static binary sees it too.** Inside `unshare -r`, after the
+  `chown -h -R 0:0` the script already wrote, every inode packs 0:0 **including
+  the root inode**. Measured by parsing the inode nodes out of the raw image
+  with a new tracked reader (`check-ubifs-ownership.py`), which the packer now
+  runs on its own output and which fails the build if a single inode is not
+  root-owned. Negative-tested: with `unshare` unavailable the packer falls back
+  to fakeroot, the check names inode 1 as the filesystem root, and **no image is
+  produced**.
+
+  The same pass found one more: `mkfs_erofs.sh` got `--all-root` on 2026-08-19,
+  but the **second erofs invocation inside `mkfs_ubi.sh`** — the one SPI_NAND
+  profiles actually use — did not. Fixed. Both are covered by
+  `test-image-ownership.sh`, which now drives the ubi packer end to end.
+
+  **What this leaves.** Item 13's third bullet, unchanged and not closeable
+  here: **no boot pass, for 15 of the 16 profiles, because we do not have the
+  boards.** The BSP defconfig's package set was verified to resolve cleanly
+  (`make luckfox_pico_defconfig` in a scratch output directory: the eight
+  removals gone, the kept packages present, no unmet dependencies), which is the
+  configure half of the tree-content gap and not the build half. And four new
+  bench legs, added to item 8 — none of them blocking, all of them the
+  difference between a control and a claim.
+
+  **The lesson is the scope of every gate written before today.** Each one was
+  correct and each one was aimed at the same target. "The image is hardened"
+  meant one profile's rootfs; "every inode is root-owned" meant the ext4 packer;
+  "no unused packages" meant buildroot's. A partition, fourteen profiles and two
+  filesystem packers sat outside all of them, and nothing in the tree said so —
+  the gates did not lie, they answered a narrower question than the one their
+  names implied.
+
+
+- **2026-08-21 (later) — Annex II accuracy / Annex I Part II §3: both customer
+  manuals told operators to run a command this image has never had.** Found by
+  the bench, not by review: `logread` failed on the unit — again.
+
+  BusyBox here is built with `CONFIG_LOGREAD` **not set** and
+  `CONFIG_FEATURE_IPC_SYSLOG` **not set**, so the applet is absent and the
+  circular buffer it reads does not exist; `syslogd` runs with no arguments and
+  writes `/var/log/messages`, which is a symlink into tmpfs. None of that is
+  new. It was found on the bench on **2026-08-16** and written into
+  `bench-backlog-runbook.md` §6 — *including the exact trap*, that
+  `logread | grep -c` returns `0` when the command is missing and so reads like
+  a clean result.
+
+  Five days later the same command was written into four new bench legs in this
+  document, by the same reader. And a sweep found **23 uses across six files**,
+  of which the ones that matter are in **shipped customer documentation**: the
+  SATISense user manual's console-recovery row, the media-gateway user manual's
+  TLS-diagnosis note, its watchdog-history troubleshooting rows, its
+  diagnostics command table, and `installation-firmware.md`. An operator whose
+  console is down follows the manual, types the command, gets
+  `sh: logread: not found`, and now doubts the manual rather than the unit —
+  during the one procedure where they are already in trouble. Same class as the
+  "no authentication (v1)" claim corrected on 2026-08-07: shipped text that
+  contradicts the shipped image.
+
+  All 23 corrected to `cat`/`grep` on `/var/log/messages`, with `dmesg` added
+  where the kernel side is what the reader actually wants, and both manuals
+  gained a note saying **what does and does not survive a reboot** — the system
+  and daemon logs are RAM-backed, the audit trail on `/userdata` is not, and
+  that asymmetry is the reason the audit file exists at all.
+
+  **The control, because the note plainly did not work.** `./build.sh doccmds`
+  (`scripts/compliance/check-documented-commands.sh`) asks the **packed rootfs**
+  whether each command our documents invoke exists, and fails the build if one
+  does not. It matches command position rather than the bare word — the first
+  version flagged `debugfs -R "stat …"` and the prose "an openssl bump", and a
+  gate that cries wolf is a gate someone switches off. It allows a line that
+  *explains* an absence, which is how the fact gets passed on. Verified by
+  injection in three shapes (fenced invocation, prose backticks, after a pipe),
+  each caught.
+
+  **What this says about the other 22 uses that were not `logread`.** Nothing
+  yet — the gate only knows the commands the documents already use and whether
+  the image has them. It found two more absences on its first run (`openssl`,
+  `stat`, neither invoked on-device), which is the useful shape: the answer
+  comes from the image, so it stays true as the image changes.
+
+  **Regenerated 2026-08-21**, so the fix reaches the unit and the customer, not
+  only the repository: `node scripts/render-manual.mjs --pdf` in both trees — 5
+  HTML pages + 5 PDFs for media-gateway, 4 HTML pages + 3 PDFs for
+  satisense-edge. The only `logread` left in the generated Help is the sentence
+  explaining that the command does not exist.
+
+  **And the gap itself is now gated.** Fixing a manual is half the job: the Help
+  HTML and the PDFs are generated from the markdown and committed, so a source
+  corrected without a re-render ships the old text to every unit and every
+  customer — which is exactly the state this entry found. `./build.sh doccmds`
+  now fails when a manual source is newer than its generated Help page or PDF.
+  Injection-tested: touching one markdown file produces two failures naming the
+  stale artifacts, and it passes again once they are re-rendered.
+
+
+- **2026-08-21 (bench) — a renamed overlay file shipped TWICE, and the old copy
+  won.** Found by executing, and it is the reason the NPU leg read oddly rather
+  than failing.
+
+  `S23npu` was renamed to `S52npu` the same day, to move a kernel-module load
+  behind `S50sshd` (rcS is sequential, and a driver load ahead of `S40network`
+  can take a unit's only remote access down with it). The flashed image carried
+  **both**. On the unit, the old `S23npu` ran at its old position — `dmesg`
+  puts `Initialized RKNPU driver` at **3.43 s**, immediately after
+  `S20linkmount`'s ext4 mounts at 3.27 s — and the new `S52npu` then logged
+  `rknpu already loaded` exactly once. The rename had no effect on the running
+  unit, and nothing in the build said so.
+
+  **Cause, and it is general.** `post_overlay` applies the overlay with
+  `rsync -a` and **no `--delete`** — it cannot have one, since the source is the
+  overlay and the destination is the entire rootfs — and the staging tree
+  `output/out/rootfs_*/` is reused between builds. So **renaming or deleting an
+  overlay file never removes the old copy**; it is packed into every subsequent
+  image until someone does a clean-output rebuild. Same shape as "buildroot
+  never uninstalls" (2026-08-16, GNU wget), one layer up, and with the same
+  failure mode: the tree says one thing and the image says another.
+
+  Fixed in two places, because either alone would have let it recur:
+  - `luckfox-hardening-post.sh` gained `remove_superseded_files()`, a declared
+    list of paths a previous release shipped and this one must not. It runs on
+    every build, dirty tree or clean;
+  - `./build.sh oem` now asserts the superseded path is **absent from the packed
+    `rootfs.img`**. The gate failed against the image that had just been flashed,
+    which is how this entry got written; it passes against the rebuild.
+
+  **What the same evidence settles.** `S23npu` did **not** hang: it loaded the
+  driver at 3.43 s and the unit booted, reached the network and served SSH. So
+  the boot failure earlier that day was **not** the NPU ordering — it was the
+  image set, which was missing `download.bin`, `idblock.img` and `uboot.img`,
+  and for which `./build.sh firmware` had failed outright (exit 255,
+  `Not found image file: download.bin`) so no `update.img` was ever produced.
+  The ordering was still wrong and the fix stands, but the attribution has to
+  follow the evidence rather than the most recent change.
+
+  **A second-order lesson worth the line.** The reorder was made *because* a
+  boot had failed, on a theory about what caused it, before the evidence was in.
+  It happened to be a good change for its own reasons. It was not a fix for the
+  thing it was made to fix, and had the bench not shown `already loaded`, this
+  document would now record it as one.
+
+
+## Remaining work (refreshed 2026-08-21 against both trees and `main` on each)
 
 The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) and
 gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
@@ -2899,6 +3138,14 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
    said otherwise for five days (see 5d below). It also created one new leg,
    and closed that too.
 
+   **The 2026-08-21 session opened four more (h–k) and closed all four the same
+   day**, on a unit at 172.32.0.93 — quoted evidence in
+   `bench-backlog-runbook.md` §10.6. It also found three defects that no reading
+   of the tree could have produced: a renamed init script that shipped **twice**
+   and whose old copy won by running first, a purge whose silence could not be
+   told apart from not having run, and `logread` — a command **both customer
+   manuals** told operators to run, which this image has never had.
+
    **Two legs remain, and neither blocks anything:**
    - **b — MQTT mutual TLS**, which needs a broker whose authentication we
      control. The only leg still requiring equipment we do not have set up.
@@ -2908,6 +3155,56 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
      `encoder-sim.py` runs on the device as before. Worth doing to prove the
      candump-log path works on hardware, but it is a control on a tool rather
      than on the product.
+   - ~~**h — the oem payload is gone, both ways.**~~ **CLOSED 2026-08-21, both
+     halves.** Flash half: a unit flashed with the stripped image reports
+     `/oem` empty and `find /oem ! -user 0` = 0, where the same unit had carried
+     **200 files / 20.6 MB / ~150 non-root inodes** an hour earlier. Update
+     half: with the fielded-unit condition reconstructed and `sync`ed, one
+     reboot produced `up 0 min` alongside `S22oemclean: removed 1 inherited
+     entry from /oem` — the removal and the boot are the same event, so it is an
+     observation rather than two runs joined by an argument. **This is what
+     retires "no update can fix it, only a reflash" from both Annex II fact
+     sheets.** *(Original text:)* On a **freshly flashed** unit:
+     `ls -la /oem` empty and `root:root`. On a unit **updated** from a release
+     that predates 2026-08-21: the `S22oemclean` line in `/var/log/messages`
+     naming how many entries it removed, `/oem` empty afterwards, and the mountpoint
+     re-owned from `1000:1000` to `0:0` — that last one is the actual claim,
+     since it is what turns "only a reflash can fix it" into "the next update
+     fixes it". Ten minutes, and the update case is the one that matters.
+   - ~~**i — `/dev/rknpu` exists on a reflashed unit.**~~ **CLOSED 2026-08-21**:
+     `crw------- root root 10, 123 /dev/rknpu` on a flashed unit, `rknpu` in
+     `lsmod`, and `RKNPU: Initialized RKNPU driver: v0.9.2` in `dmesg`. Two
+     driver notes from the same output, both from the vendor dtsi rather than
+     from enabling the node: it runs in **non-IOMMU mode** (no `iommus`
+     property) and finds **no `rknpu` regulator** (`-ENODEV`), so there is no
+     DVFS on that rail. Neither is fatal; both would matter to anyone measuring
+     inference throughput. *(Original text:)* The dtb enabling the node
+     travels in the single-copy `boot` partition, so this leg cannot be run
+     through the updater. Evidence: `S52npu`'s `loaded rknpu (5.10.160),
+     /dev/rknpu present` in `/var/log/messages`, and the node itself. The paired negative
+     is free and should be recorded from the same bench: on an **updated** unit
+     the log must instead carry `the npu device-tree node is disabled on this
+     unit; a reflash is required`. Both messages exist so that the next person
+     does not debug the module when the answer is the device tree.
+   - ~~**j — stunnel's benign bind line is gone** (item 16).~~ **CLOSED
+     2026-08-21**, on two releases: `grep -c 'Address already in use'` = 0 with
+     a positive control of 18 stunnel lines on 2026.08.12, and again after the
+     flash, with `netstat`/`ss` showing both consoles bound once on `0.0.0.0`
+     and owned by stunnel. `sshd` (`:::22`) and the OPC UA server (`:::4840`)
+     remain dual-stack, which is what both fact sheets already say — this is the
+     first evidence for it on a current release. *(Original text:)*
+     `grep -c 'Address already in use' /var/log/messages` must be **0** on both
+     products after a boot on a release carrying the IPv4-explicit `accept` —
+     preceded by the positive control that stunnel reaches that log at all,
+     since a count of zero is also what a missing log produces. That fix merged
+     2026-08-19 and has never been observed on a unit; it is one grep on any
+     bench session.
+   - ~~**k — nothing regressed by the strip.**~~ **CLOSED 2026-08-21,
+     operator-confirmed.** Console, OPC UA, CAN and SSH exercised on the unit
+     flashed from the stripped image. Recorded as an operator confirmation
+     rather than as captured output: the console and UaExpert halves are
+     interactive and produce nothing quotable, and inventing a transcript for
+     them would be worse than naming the evidence for what it is.
 
    *(Per-leg detail, kept as written:)*
    - ~~a. the downgrade refusal~~ — **CLOSED 2026-08-19**, both outcomes
@@ -3067,19 +3364,37 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
     the packer's own verification was rebuilt to be independent of the list it
     applies and put behind `test-image-ownership.sh`. Three things are left, in
     order of what would block a shipment:
-    - **The other 14 configs are un-hardened stock BSP profiles** — no
-      `luckfox-hardening-post.sh`, four with `RK_ENABLE_WIFI=y`, and
-      `luckfox_pico_defconfig` still carrying `BR2_PACKAGE_WGET=y`. Any of them
-      would have to be brought up to the Ultra profile before an image built
-      from it could ship, which is a larger job than a build pass.
-    - **ubifs still packs build-user ownership** and cannot be fully fixed with
-      the bundled mtd-utils 2.0.1: `--squash-uids` leaves the root inode at uid
-      1000 and the device table refuses `/`. Blocks any SPI_NAND profile.
-      (erofs was fixed and measured on 08-19; ext4 on 08-15.)
+    - ~~**The other 14 configs are un-hardened stock BSP profiles**~~ —
+      **CLOSED 2026-08-21** (see the dated entry). All 16 profiles now take
+      `luckfox-hardening-post.sh`, made portable rather than copied; Wi-Fi is
+      off everywhere — **seven** profiles had `RK_ENABLE_WIFI=y`, not the four
+      this bullet claimed — and `luckfox_pico_defconfig` loses eight packages
+      including `BR2_PACKAGE_WGET`. The bullet also understated what was there:
+      two profiles served `::respawn:-/bin/sh`, a root shell on the console with
+      no authentication at all. Gated by `./build.sh hardening`, verified by
+      injecting six kinds of drift.
+    - ~~**ubifs still packs build-user ownership**~~ — **CLOSED 2026-08-21**,
+      and the reasoning in this bullet was the thing that was wrong, not the
+      measurement. `--squash-uids` does leave the root inode at uid 1000, and
+      the device table does refuse `/`. But `fakeroot` fails on these packers
+      only because it is an `LD_PRELOAD` shim against statically linked
+      binaries, and an unprivileged **user namespace** is a kernel-level uid
+      mapping that a static binary cannot escape. Inside `unshare -r` every
+      inode packs 0:0, root inode included — measured by parsing the raw image,
+      and asserted on every ubi build by `check-ubifs-ownership.py`, which
+      fails the build otherwise. The same pass found `--all-root` missing from
+      the erofs invocation **inside** `mkfs_ubi.sh` (the standalone
+      `mkfs_erofs.sh` got it on 08-19; this second copy did not) — the SPI_NAND
+      block is gone.
     - **No boot pass**, and none is possible for 15 of the 16 configs without
-      the boards. The nine `luckfox_pico_defconfig` boards also have their
-      tree-content half unverified, since that defconfig has never been built
-      here.
+      the boards. **This is now the whole of item 13.** The nine
+      `luckfox_pico_defconfig` boards have their tree-content half verified at
+      the *configure* level since 2026-08-21 — `make luckfox_pico_defconfig` in
+      a scratch output directory resolves cleanly, with the eight removals gone
+      and the kept packages present — and unverified at the *build* level,
+      since that defconfig has still never been packed here. Doing so would
+      clobber the shared buildroot output the product image is built from,
+      which is a deliberate not-yet rather than an oversight.
 14. **SatiSense: a root daemon's library path lives on the one partition the
     updater cannot write** (found 2026-08-19 on the bench, see the dated entry).
     `intelligence_edge_opcua` needs `librknnmrt.so`, which ships only in `oem`;
@@ -3106,10 +3421,21 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       trees: units flashed before 2026-08-15 keep a build-user-owned `oem`
       permanently and only a reflash clears it, stated next to the existing
       pre-2026-08-12 firewall caveat.
-    - **Reconsider `RK_BUILD_APP_TO_OEM_PARTITION=y`**, which is also putting a
-      stale divergent copy of the console (different `assets/index-*` bundle,
-      differing `cgi-bin/*.sh`) on `oem` where nothing serves it. Dead code on a
-      device is evidence that has to be explained.
+    - ~~**Reconsider `RK_BUILD_APP_TO_OEM_PARTITION=y`**~~ — **CLOSED
+      2026-08-21, and the answer was not the flag.** Setting it to `n` would
+      have moved the payload INTO the rootfs, which is worse: the same 21 MB, in
+      both A/B slots, in the SBOM's blind spot no longer but in the update
+      payload instead. The flag stays; the payload is emptied at the point it is
+      staged, and the two modules that are used move to the rootfs where an
+      update can reach them.
+
+      This bullet also understated the finding by an order of magnitude. The
+      stale console copy was one of **198 files / 21 MB** (252 / 73 MB when
+      staged fresh) — the Rockchip IPC demo suite, the camera pipeline, the
+      AIC8800 Wi-Fi driver and firmware for a radio dropped from the build in
+      August, sensor and ISP modules. See the dated entry; the runtime half
+      (`S22oemclean`) is what takes this off the "reflash only" list for units
+      already in the field.
 
 15. **The four findings from the 2026-08-19/20 bench session** (see the dated
     entry above for how each was found). None was visible in a code read; three
@@ -3231,16 +3557,32 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       server certificate, which is the whole of what the fix buys and now the
       whole of what it claims.
 
-      *Scope of that evidence, stated because the first draft of this paragraph
-      over-reached.* It asserted that the OPC UA client "reconnected without
-      re-trusting". That was not observed — the operator reported a trust
-      prompt after the 08.12 update, and whether it was raised by the
-      reconstruction reinstall (where a new certificate is minted deliberately)
-      or by the first presentation of a certificate never previously accepted
-      is **unresolved at the time of writing**. What is measured is the
-      fingerprint on the device, twice, by the device. The client-side half —
-      that a pinned client reconnects silently — is not yet evidence and must
-      not be cited as though it were.
+      *Scope of that evidence, because the first draft of this paragraph
+      over-reached and the correction is the useful part.* It asserted that the
+      OPC UA client "reconnected without re-trusting". A trust prompt WAS
+      raised after the 08.12 update, and the explanation is benign: the
+      operator had observed the 08.11 fingerprint change without ever accepting
+      the new certificate, so 08.12 was simply the first time that certificate
+      was presented to a client. Nothing about the update caused it.
+
+      **The client-side half was then closed too, 2026-08-20.** It had been
+      the last inference in this row: at no earlier point had a client holding
+      an *accepted* certificate been carried across an update, so "a pinned
+      client reconnects silently" was reasoning from the device-side
+      fingerprint rather than something anyone had seen. Arranged deliberately
+      — the operator accepted the running certificate (`4C:7F:36:F1…`) in
+      UaExpert and completed a session, then the release was reinstalled
+      (`order=same`, which still swaps the rootfs slot, so it tests the same
+      condition as an upgrade without inventing an empty release). After the
+      reboot the fingerprint was unchanged and **UaExpert reconnected with no
+      trust prompt**.
+
+      That is the form the claim takes when a customer meets it, and it is what
+      row #7 should cite. Getting there took three attempts, and the two failed
+      ones are the reason it is worth citing: the first update changed the
+      certificate (the delivering-update limit), and the second raised a prompt
+      for a certificate the client had never accepted. Neither was the claim
+      failing; both were the claim not yet having been tested.
 
       **The ordering fix is confirmed too, and the assertion was sharp:** the
       pre-state was reconstructed (files on the rootfs, config naming `/etc`)
@@ -3303,26 +3645,37 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       of audit lines that contradict each other is worse than one that is
       terse.
 
-16. **stunnel logs a benign bind failure that is indistinguishable from a real
-    one** (found 2026-08-19 while disproving finding C, see item 15). Both
-    products write a bare `accept = <port>`, so stunnel attempts the bind in
-    both address families; with `bindv6only=0` the `::` socket already serves
-    IPv4 and the `0.0.0.0` attempt necessarily fails with `EADDRINUSE`. The
-    console works, and every start logs what reads as an error.
+16. ~~**stunnel logs a benign bind failure that is indistinguishable from a real
+    one**~~ — **ALREADY FIXED WHEN THIS ITEM WAS WRITTEN AS OPEN, and closed in
+    both trees on 2026-08-19.** Found 2026-08-19 while disproving finding C: both
+    products wrote a bare `accept = <port>`, stunnel resolved it through
+    `getaddrinfo` with `AI_PASSIVE`/`AF_UNSPEC` and attempted both families, the
+    `::` bind covered IPv4 under `bindv6only=0`, and the following `0.0.0.0`
+    bind necessarily failed with `EADDRINUSE`. The console worked and every
+    start logged what read as an error — byte-identical to a genuine port
+    conflict, so the one case where the message matters is the one case it
+    cannot be seen in.
 
-    Two costs, both small and both real. An operator who sees it at every boot
-    learns to ignore stunnel errors — the same "cries wolf" problem as the SSH
-    host keys, one layer down. And because the benign message is byte-identical
-    to a genuine port conflict, the one case where it would matter is the one
-    case it cannot be seen in.
+    The fix is what this item asked for, and it landed the same day it was
+    filed: `accept = 0.0.0.0:<port>` in `S60intelligence-edge`'s generated
+    `stunnel-web.conf` (satisense-edge `a3ee855`) and in media-gateway's
+    `src/main.c` `start_stunnel()` (t1s-media-gateway PR #40, `1d57b1b`). Both
+    are merged on each product's `main`/`master` and pinned by the superproject.
+    `:::PORT` was considered and **rejected** in the shipped comment: it would
+    serve IPv6 only if `net.ipv6.bindv6only` were ever 1, and `ip6tables.conf`
+    is `INPUT DROP`, so the console would become unreachable rather than merely
+    noisy. It also makes the Annex II fact sheets true at the socket rather than
+    only at the firewall — until 2026-08-19 both consoles were bound to
+    dual-stack `::` sockets that ip6tables happened to shield.
 
-    The fix is to attempt one bind rather than two, by naming the address family
-    in the `accept` spec — in `S60intelligence-edge`'s generated
-    `stunnel-web.conf` and in the equivalent `fprintf` in media-gateway's
-    `src/main.c`, which must stay in step. **Verify the syntax against the
-    packaged stunnel before changing it**: guessing at it would trade a
-    cosmetic log line for a console that does not listen, which is a far worse
-    trade than the one it fixes.
+    **Why this row is worth keeping rather than deleting.** It sat here as open
+    work for two days while the fix was already merged in both products, which
+    is the same defect as item 8d's — a roll-up that disagrees with the tree —
+    only in the harmless direction, and found the same way: by reading the code
+    before starting the work. What is genuinely left is one bench observation,
+    added to item 8: the benign line should be **absent** from a flashed unit's
+    log, which nobody has looked for.
+
 
 ## Default network exposure (Annex II facts, current truth)
 

@@ -44,12 +44,42 @@ need no build and should fail before you spend eight minutes on one:
 ```sh
 ./build.sh cited                             # do the documents describe what ships?
 ./build.sh partitions                        # does everything still agree on the frozen layout?
+./build.sh hardening                         # is every board profile hardened, or its exception written down?
+./build.sh oem                               # is the oem payload still stripped? (image half needs a build)
+./build.sh doccmds                           # does every documented command exist on the device?
 scripts/compliance/test-root-credential.sh   # is the shipped root credential still ours?
 scripts/compliance/test-security-txt.sh      # can a reporter still reach us?
 scripts/compliance/test-cve-mitigations.sh   # do the config-level triage decisions still hold?
 scripts/compliance/test-image-ownership.sh   # does the packer still hand every inode to root?
 scripts/compliance/test-ssh-host-persistence.sh  # does a unit keep its identity across an update?
+scripts/compliance/test-board-hardening.sh   # does the hardening script still do what it claims, per profile?
+scripts/compliance/test-oem-payload.sh       # do the two init scripts clean /oem and load the NPU?
 ```
+
+`./build.sh hardening` and `./build.sh oem` are new on 2026-08-21 and both come
+from the same finding: the checks written before them all looked at the ROOTFS
+of the ONE profile Joral ships. Fourteen other board profiles were building
+unhardened images from the same `lunch` menu, and the `oem` partition — the one
+partition an A/B update cannot write — was shipping 21 MB of Rockchip demo
+binaries that nothing on the product runs. Neither was a build failure, because
+nothing had ever declared what either should contain.
+
+`./build.sh doccmds` (2026-08-21) asks the **packed rootfs** whether the
+commands our documents tell people to run actually exist. It was written after
+`logread` — absent from this image since BusyBox is built without
+`CONFIG_LOGREAD` and `CONFIG_FEATURE_IPC_SYSLOG` — failed on the bench for the
+second time in five days, having been documented as absent in
+`bench-backlog-runbook.md` §6 in between. The same command was also sitting in
+**both customer manuals**. Read syslog as `/var/log/messages` (a symlink into
+tmpfs, so it does not survive a reboot); the durable trail is the audit log on
+`/userdata`.
+
+`test-image-ownership.sh` now also drives the **ubifs** packer, which the
+2026-08-15 ext4 ownership fix never reached. Its no-namespace case is the one to
+read: the fix is an unprivileged user namespace (fakeroot is an LD_PRELOAD shim
+and every packer under `sysdrv/tools/pc/mtd-utils` is statically linked), so the
+test asserts that a host WITHOUT user namespaces fails the build rather than
+quietly emitting an image whose root inode is owned by the build user.
 
 `test-image-ownership.sh` needs no build at all — it packs its own throwaway
 trees with the tracked SDK e2fsprogs. It is the guard on shared tooling that
