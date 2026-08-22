@@ -155,11 +155,63 @@ image** before it is called a release artifact.
 
 ```sh
 ./build.sh oem && ./build.sh partitions && ./build.sh hardening \
-  && ./build.sh doccmds && ./build.sh cited && ./build.sh cve
+  && ./build.sh doccmds && ./build.sh cited && ./build.sh cve \
+  && ./build.sh sbom
 ```
 
-All six must pass. `cve` is the one to record per release — the 5.10.252
-refresh moved the kernel from 5155 matched records to 2867.
+All seven must pass. `cve` and `sbom` are the two to record per release — the
+5.10.252 refresh moved the kernel from 5155 matched records to 2867.
+
+**`sbom` was not on this line until 2026-08-22, and its absence was the whole
+of the defect.** The other gates fail a build; the SBOM only *produces* a
+document, so leaving it out of the list cost nothing at build time and meant
+the CVE report was regenerated per release while the bill of materials was not.
+The tree carried a CVE report for build `177-g5a6f91d6a` next to an SBOM for
+build `155-g98cd1a5ff`, two releases and a kernel migration apart, and Annex I
+Part II §1 asks for an SBOM *per release*. Run it last: it needs the packed
+image's Buildroot output, and it now fails outright if `platform-extra.csv` and
+`cpe-extra.csv` disagree about what is in the image.
+
+## Step 6 — archive the release evidence, then tag
+
+The gate outputs land in `output/compliance/`, which is **gitignored**. Until
+2026-08-22 that was the only copy: the mapping from release `2026.08.17` to
+commit `5a6f91d6a` existed nowhere but a filename on one workstation, and no
+release was tagged, so a shipped unit's version could not be resolved back to a
+tree state at all. Annex II asks for the version and build-ID scheme; Part II
+§2 asks which builds an advisory affects. Both need this step.
+
+```sh
+scripts/compliance/archive-release.sh          # copies + writes provenance.md
+git add media/joral/releases/$(sed -n '/^[0-9]/{p;q}' media/joral/RELEASE_VERSION)
+git commit -m "docs(release): archived the compliance evidence for <version>"
+git tag -a release/<version> -m "<version>"
+```
+
+The script refuses to archive artifacts whose build IDs disagree with each
+other, refuses a `-dirty` build ID, and refuses a build ID that is not an
+ancestor of `HEAD` — an archive that cannot be traced back to a commit is the
+problem it exists to solve, not a smaller version of it. Tag **after** the
+commit so the tag covers the evidence.
+
+### Archiving a release that was cut before this step existed
+
+`2026.08.17` is one: it has a CVE report at its build ID and no SBOM at all,
+because `sbom` was not on the gate line when it was cut. The image is still
+packed and the Buildroot output behind it has not been rebuilt, so the bill of
+materials can be reconstructed — but only with the reconstruction stated:
+
+```sh
+git commit ...                       # the tree must be clean first
+./build.sh sbom --reuse --image-id v1.0.0-177-g5a6f91d6a
+scripts/compliance/archive-release.sh 2026.08.17
+```
+
+The generated SBOM says its build ID was **declared** rather than derived, and
+`archive-release.sh` copies that fact into `provenance.md` as a *Build ID
+provenance* row. Do this only when the packed image really is the one that
+build produced; a reconstruction presented as an as-built record is the failure
+this whole step exists to prevent.
 
 ## The kernel/module cross-version hazard — read before shipping a `.swu`
 
