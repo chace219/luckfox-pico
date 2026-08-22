@@ -161,6 +161,43 @@ together, plus `ls /sys/bus/nvmem/devices/` for the OTP device itself. Full
 procedure in [`release-build-runbook.md`](release-build-runbook.md).
 
 
+
+### Bench result, 2026-08-22: PASS
+
+Read off a flashed 5.10.252 unit:
+
+```
+# uname -r
+5.10.252
+# ls /sys/bus/nvmem/devices/
+rockchip-otp0
+# dmesg | grep -i otp
+                                  (no output — no probe or clk_bulk_get failure)
+# hexdump -C /sys/bus/nvmem/devices/rockchip-otp0/nvmem | head -1
+00000000  52 56 11 06 02 00 fe 67  08 00 4d 41 52 38 31 36  |RV.....g..MAR816|
+# grep -o '"secrets_at_rest":{[^}]*}' /var/run/intelligence-edge/diagnostics.json
+"secrets_at_rest":{"mode":"encrypted","binding":"soc-otp+emmc-cid"}
+```
+
+`binding` contains `soc-otp`, so the OTP is live and keying the sidecar. The
+OTP content is device-unique — `52 56 11 06` is the RV1106 part ID, followed
+by a lot marking and serial — so it passes `bytes_are_unique()` rather than
+being an unprogrammed all-`00`/all-`ff` part.
+
+**And it proves more than presence.** The sidecar
+(`/userdata/satisense/state/gateway.json.secrets`, 283 bytes, mtime 2026-08-21
+15:49) was sealed under **5.10.160** and survived the reflash on `/userdata`.
+Unsealing it names `soc-otp+emmc-cid`, and `build_ikm` refuses to derive from
+a subset, so the key comes from the actual OTP bytes; `SECRETBOX_ENCRYPTED` is
+set only after `EVP_DecryptFinal_ex` verifies the GCM tag over an AAD that
+includes the binding string. A tag that verifies means the 5.10.252 driver
+returned **byte-identical OTP content** to the 5.10.160 one. Had the new
+driver read a different offset or length, the derived key would differ and the
+mode would have come back `unreadable`.
+
+That is the whole OTP risk closed, on hardware, by the strongest of the three
+shapes this check can take.
+
 ## Executed, confirmed on hardware, and migrated in-tree
 
 The procedure above has been run end to end, **confirmed on hardware**, and

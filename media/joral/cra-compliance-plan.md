@@ -3126,21 +3126,19 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       including the `.swu`, is
       [`release-build-runbook.md`](release-build-runbook.md).
 
-      **One assertion still outstanding:** the OTP binding, read off a
-      5.10.252 unit. The hardware pass covered the networking and protocol
-      stacks but not this, and it is what the OTP clock-list finding makes
-      load-bearing — the host suite fakes the binding providers, so only the
-      device can answer it.
+      **The OTP binding was read off a 5.10.252 unit on 2026-08-22, and it
+      passes:** `"secrets_at_rest":{"mode":"encrypted","binding":"soc-otp+emmc-cid"}`,
+      with `rockchip-otp0` present, no OTP errors in `dmesg`, and
+      device-unique OTP content. The row's last host-side assumption is now a
+      hardware fact.
 
-      Note the assertion is **not** `secrets_at_rest.mode = encrypted` alone,
-      as first recorded. `secretbox_seal` derives from every provider that
-      works, so on a unit provisioned after the port a dead OTP binds to
-      `emmc-cid` alone and still reports `encrypted`. The check is
-      **`binding` must contain `soc-otp`**, together with `mode` (which
-      catches the other shape — a unit provisioned before the port stores
-      `soc-otp+emmc-cid` in its envelope and fails the unseal outright,
-      reporting `unreadable`). Procedure in
-      [`release-build-runbook.md`](release-build-runbook.md).
+      It is the strongest of the three shapes the check could take. The
+      sidecar was sealed under **5.10.160** and survived the reflash on
+      `/userdata`; unsealing it names `soc-otp+emmc-cid`, `build_ikm` refuses
+      to derive from a subset, and `SECRETBOX_ENCRYPTED` is set only after the
+      GCM tag verifies. So the 5.10.252 driver returned **byte-identical OTP
+      content** to the old one — not merely a readable OTP. A different offset
+      or length would have produced `unreadable`.
 
       **Delivery constraint, unchanged:** the kernel travels in the
       single-copy `boot` FIT, so 5.10.252 reaches a unit only by reflash. A

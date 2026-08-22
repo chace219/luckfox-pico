@@ -206,8 +206,12 @@ There is no scaffolding to undo: the migration replaced the tree in place and
 
 ## Bench checks that are not optional after a kernel change
 
-Confirmed on hardware for 5.10.252 on 2026-08-21: **T1S link, OPC UA server,
-CAN gateway.**
+Confirmed on hardware for 5.10.252: **T1S link, OPC UA server, CAN gateway**
+(2026-08-21) and the **OTP binding** (2026-08-22 —
+`mode=encrypted`, `binding=soc-otp+emmc-cid`, `rockchip-otp0` present, no OTP
+errors in `dmesg`). Run the checks below after any future kernel change; they
+are written as a procedure precisely because the answer is not inferable from
+the build host.
 
 What is left is the OTP binding, and it needs three checks rather than the one
 this document first claimed. **`mode = encrypted` on its own does not prove
