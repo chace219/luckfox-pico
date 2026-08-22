@@ -57,6 +57,7 @@ pass=0; fail=0
 ok()   { echo "ok   — $1"; pass=$((pass+1)); }
 bad()  { echo "FAIL — $1"; fail=$((fail+1)); }
 note() { [ $VERBOSE -eq 1 ] && echo "       $1"; return 0; }
+skip() { echo "skip — $1"; return 0; }
 
 excepted() {
 	local f=$1 e
@@ -105,6 +106,56 @@ if [ -n "$wifibt" ]; then
 	bad "Wi-Fi/BT firmware blobs still overlaid by: $(echo "$wifibt" | xargs -n1 basename | tr '\n' ' ')"
 else
 	ok "no profile overlays Wi-Fi/BT firmware blobs"
+fi
+
+# RK_ENABLE_WIFI=n does NOT keep the Wi-Fi userspace out of the image, and
+# assuming it did is how this gate passed for ten days while every image
+# shipped the stack. project/app/wifi_app/ installs rkwifi_server, three
+# wpa_supplicant builds, wpa_cli, hostapd and librkwifibt unconditionally --
+# the flag governs the DRIVER, not the app layer. The compliance plan recorded
+# them as "dropped from the build" on 2026-08-12; they were still in
+# rootfs.img on 2026-08-22, found by reading the image rather than the claim.
+#
+# So assert the removal exists, and then assert the image.
+if grep -q 'remove_wifi_stack' "$CFGDIR/$HARDENING" 2>/dev/null; then
+	ok "$HARDENING declares remove_wifi_stack"
+	if grep -qE '^remove_wifi_stack$' "$CFGDIR/$HARDENING" 2>/dev/null; then
+		ok "remove_wifi_stack is actually called, not just defined"
+	else
+		bad "remove_wifi_stack is defined but never called — the stack would ship"
+	fi
+else
+	bad "$HARDENING has no remove_wifi_stack — the wifi_app userspace ships on every image"
+fi
+
+WIFI_BINARIES="
+	/usr/bin/rkwifi_server
+	/usr/bin/wifi_start.sh
+	/usr/bin/wpa_supplicant
+	/usr/bin/wpa_supplicant_rtk
+	/usr/bin/wpa_supplicant_nl80211_rtk
+	/usr/bin/wpa_cli
+	/usr/bin/wpa_cli_rtk
+	/usr/bin/hostapd
+	/usr/lib/librkwifibt.so
+	/usr/lib/libwpa_client.so
+	/etc/wpa_supplicant.conf
+"
+IMAGEDIR=${HARDENING_IMAGEDIR:-output/image}
+if [ -f "$IMAGEDIR/rootfs.img" ] && command -v debugfs >/dev/null 2>&1; then
+	shipped=""
+	for wf in $WIFI_BINARIES; do
+		if debugfs -R "stat $wf" "$IMAGEDIR/rootfs.img" 2>/dev/null | grep -q 'Inode:'; then
+			shipped="$shipped $wf"
+		fi
+	done
+	if [ -n "$shipped" ]; then
+		bad "rootfs.img still ships the Wi-Fi userspace:$shipped — prebuilt, statically linked crypto, outside the SBOM and the CVE gate"
+	else
+		ok "rootfs.img ships none of the wifi_app userspace"
+	fi
+else
+	skip "rootfs.img Wi-Fi check — no build present, or debugfs unavailable"
 fi
 
 echo

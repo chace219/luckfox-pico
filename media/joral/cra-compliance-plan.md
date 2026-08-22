@@ -47,8 +47,8 @@ was found by executing, not by reading. Per-product detail lives in each tree's
 |---|---|---|---|---|
 | 1 Secure by default | **met** — HTTPS on 443 by default, per-unit cert, factory credential buys only a password change | **met** — `signencrypt` + `web.tls` by default, same credential gate | ✅ 08-09/08-12 | first-use trust is a self-signed fingerprint; **anonymous OPC UA closed 2026-08-19** — factory `allow_anonymous: false`, no shipped OPC UA credential, not yet on a unit |
 | 2 No known CVEs at shipment | **met at the gate** — `./build.sh cve` **0 blocking**, OpenSSL 3.5.7 LTS | same (shared rootfs) | ✅ 08-12 | kernel (5155) + U-Boot (41) are report-only. the GNU wget accepted-risk was **resolved 08-16 by dropping the package**, leaving **python3 ×5** as the only accepted-risk. **dhcpcd was reclassified `not-affected` 2026-08-19** — it had been mis-filed `fixed-pending-release` for a mitigation that was ours and had already shipped, so it would have expired 2026-11-12 into a blocking finding for an unreachable code path; the config it rests on is now guarded by a test. **python3 removal was staged the same day and then reversed** — the interpreter is **kept** and the fix is a version bump, 3.11.6 → **3.11.16** (12 Aug 2026), carried as a tracked package replacement. **CVE-2020-29396 was reclassified `not-affected` 2026-08-19** — it is an Odoo sandbox escape with python listed only as the running-with platform, so it was never a CPython defect and no bump could ever have retired it. **BUILT AND GATED 2026-08-19**: the image carries 3.11.16 (read out of `rootfs.img`), `./build.sh cve` **0 blocking**. The bump retired **two** of the four — CVE-2024-6232 and CVE-2024-7592 now match nothing and their triage rows were deleted — and did **not** retire **CVE-2026-15308 and CVE-2026-4519**, which still match 3.11.16 and remain accepted-risk on the unchanged reachability argument. So: python3 ×2, not ×0 |
-| 3 Confidentiality / integrity | **met** for the console path | **met** — secrets in a 0600 sidecar, **encrypted at rest and bound to the board since 08-16**, never served to the browser; MQTT TLS verification proven enforced | ✅ 08-12/13, ⚠️ sealing not yet on a unit | the sealing protects the stored file, **not** a running unit against root (no secure element); MQTT mutual TLS unexercised; **`/oem` still carries build-user ownership on every fielded unit and no update can fix it — only a reflash** (item 14). Nothing loads from it any more: the daemon since 2026.08.5 (`ldd`-confirmed on a unit), interactive root shells since 2026.08.6 (`RkEnv.sh` removed) |
-| 4 Minimise attack surface | **met** — BSP daemons and 118 packages gone, default-deny IPv4+IPv6 firewall, `wifi_app` dropped, image inodes root-owned, and since **2026-08-21** the `oem` partition ships **empty** (198 files / 21 MB of Rockchip demo suite, a Wi-Fi driver for a removed radio, and a divergent copy of the console — none of it in the SBOM or the CVE gate, both of which read the rootfs) | same (shared rootfs) | ✅ 08-12/08-16, **oem strip and board hardening confirmed on a unit 08-21** | httpd + CGIs run as root; root password is off the **published** vendor default since 08-16 (`$6$`, undocumented to customers) but is still one short shared value — unreachable over the network, serial-console login withdrawn with the getty. **All 16 board profiles are hardened since 08-21** (14 were not; two served an unauthenticated root shell) — but 15 of them have never been booted here |
+| 3 Confidentiality / integrity | **met** for the console path | **met** — secrets in a 0600 sidecar, **encrypted at rest and bound to the board since 08-16**, never served to the browser; MQTT TLS verification proven enforced | ✅ 08-12/13, **sealing confirmed on a unit 2026-08-22** (`mode=encrypted`, `binding=soc-otp+emmc-cid`) | the sealing protects the stored file, **not** a running unit against root (no secure element); MQTT mutual TLS unexercised; **`/oem` still carries build-user ownership on every fielded unit and no update can fix it — only a reflash** (item 14). Nothing loads from it any more: the daemon since 2026.08.5 (`ldd`-confirmed on a unit), interactive root shells since 2026.08.6 (`RkEnv.sh` removed) |
+| 4 Minimise attack surface | **met** — BSP daemons and 118 packages gone, default-deny IPv4+IPv6 firewall, **`wifi_app` userspace dropped 2026-08-22 (claimed 08-12, never true until now — see the correction below)**, image inodes root-owned, and since **2026-08-21** the `oem` partition ships **empty** (198 files / 21 MB of Rockchip demo suite, a Wi-Fi driver for a removed radio, and a divergent copy of the console — none of it in the SBOM or the CVE gate, both of which read the rootfs) | same (shared rootfs) | ✅ 08-12/08-16, **oem strip and board hardening confirmed on a unit 08-21** | ~~httpd + CGIs run as root~~ — **console dropped to `www-data` 2026-08-22** (setuid `privop` dispatcher for the few root verbs); root password is off the **published** vendor default since 08-16 (`$6$`, undocumented to customers) but is still one short shared value — unreachable over the network, serial-console login withdrawn with the getty. **All 16 board profiles are hardened since 08-21** (14 were not; two served an unauthenticated root shell) — but 15 of them have never been booted here |
 | 5 Access control | **met** for the console | **met** for the console and, since 2026-08-19, the OPC UA endpoint | ✅ 08-09, OPC UA identity ⚠️ not on a unit | CAN :8001 unauthenticated by protocol design |
 | 6 Security-event logging | **met** — console trail complete, and CAN peer identity is recorded on **both** transports since the 08-18 recovery (`50ec9b9`) | **met** | ✅ 08-12 (IE) | the UDP peer record has not been exercised on a unit (`grep can_udp_peer_seen /var/log/messages` after sending from two hosts); no off-device forwarding on either |
 | 7 Update mechanism | **met** — signed A/B SWUpdate, ordered releases, downgrade gate | same | ⚠️ partial | DEV signing key only; downgrade **refusal** never run on hardware. Partition layout **frozen 2026-08-19** (gated by `./build.sh partitions`) |
@@ -69,6 +69,59 @@ what remains is a Workspace group and a web upload, in that order.
 ## Closed since the audit
 
 *Appended as items land. The table above stays a snapshot of the 2026-07-26 audit.*
+
+- **2026-08-22 — Platform, Annex I #4: the `wifi_app` userspace is dropped from
+  the image, and the claim that it already had been is withdrawn.**
+
+  *The correction first.* The 2026-08-12 entry below states that "the
+  unscannable `wifi_app` binaries are dropped from the build", and the status
+  table has carried `wifi_app dropped` under a **met** row ever since. **It was
+  never done.** No commit ever removed them — every commit touching
+  `project/app/wifi_app/` is upstream LuckfoxTECH — and
+  `luckfox-hardening-post.sh` never mentioned Wi-Fi. Twelve files shipped in
+  every image built since: `rkwifi_server`, three `wpa_supplicant` builds, two
+  `wpa_cli`, `hostapd`, `librkwifibt.so`, `libwpa_client.so`,
+  `wpa_supplicant.conf`, `wifi_start.sh` and dhcpcd's `10-wpa_supplicant` hook.
+
+  Found by reading `rootfs.img` with `debugfs` while answering an unrelated
+  question about which customisations survived the 5.10.252 kernel migration.
+
+  *Why the gate agreed with the document.* `check-board-hardening.sh` had a
+  section headed "No profile enables the unSBOM'd Wi-Fi stack" — and it checked
+  `RK_ENABLE_WIFI`, a **driver** flag, then wrote its failure message about
+  binaries. `project/app/wifi_app/` installs those binaries regardless of that
+  flag. The gate tested the setting and asserted the consequence, so a true
+  reading of a false claim held for ten days. **A gate that infers is a gate
+  that can agree with a document instead of with the image.**
+
+  *Why it matters beyond tidiness.* These are prebuilt vendor binaries that
+  carry their own static crypto (recorded during the OpenSSL 3 migration), so
+  they are invisible to `./build.sh cve` and absent from the SBOM — the two
+  artefacts that describe what ships. On a product with `RK_ENABLE_WIFI=n` and
+  no radio, `hostapd` is an access-point daemon that cannot be reached and
+  cannot be scanned. Same shape as the `oem` payload emptied on 2026-08-21 and
+  the 118 buildroot packages removed on 2026-08-10.
+
+  *The fix.* `remove_wifi_stack` in `luckfox-hardening-post.sh`, conditional on
+  `RK_ENABLE_WIFI != y` so a future radio-bearing profile keeps its stack —
+  the script's standing rule that hardening must not break a board's declared
+  function. The `xtables/libebt_*.so` firewall extensions and the udev
+  `rc_keymaps` are explicitly **not** removed; both match a naive `*bt*` search
+  and neither is Bluetooth.
+
+  *Gated three ways, since the failure here was a claim outliving reality:* the
+  script declares `remove_wifi_stack`, it is actually **called** and not merely
+  defined, and `rootfs.img` ships none of the twelve. The image assertion was
+  confirmed to FAIL against the pre-fix image before it was made to pass.
+  `./build.sh hardening` 26/26.
+
+- **2026-08-22 — Platform, Annex I #3: the secrets sidecar's device binding is
+  confirmed on hardware**, closing the last item the 5.10.252 kernel migration
+  left open. `diagnostics.json` on a flashed 5.10.252 unit reports
+  `mode=encrypted` with `binding=soc-otp+emmc-cid`, `rockchip-otp0` present and
+  no OTP errors in `dmesg`. The sidecar was sealed under 5.10.160 and survived
+  the reflash, so a verifying GCM tag proves the new driver returns
+  **byte-identical** OTP content — see item 5d and `kernel-currency-plan.md`.
 
 - **2026-07-31 — SatiSense Edge, Annex I #4 (minimise attack surface):** the OPC UA
   server advertised the OPC Foundation-deprecated `Basic128Rsa15` (SHA-1 + PKCS#1 v1.5)

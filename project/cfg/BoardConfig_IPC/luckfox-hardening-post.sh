@@ -190,8 +190,76 @@ function remove_serial_getty() {
 	fi
 }
 
+function remove_wifi_stack() {
+	# ONLY where the board profile declares no radio. RK_ENABLE_WIFI is that
+	# declaration, and build.sh already tests it the same way ("= y"), so an
+	# unset value means no Wi-Fi — which is every profile in this SDK today.
+	# A future Pico Ultra W profile that sets it to y keeps the whole stack,
+	# because removing it there WOULD break a declared function.
+	if [ "$RK_ENABLE_WIFI" = "y" ]; then
+		echo "luckfox-hardening-post.sh: RK_ENABLE_WIFI=y, keeping the Wi-Fi stack"
+		return 0
+	fi
+
+	# WHY. project/app/wifi_app/ installs a Wi-Fi/BT userspace onto every
+	# image regardless of whether the board has a radio: rkwifi_server, three
+	# wpa_supplicant builds, hostapd, and librkwifibt. On this product
+	# RK_ENABLE_WIFI=n, no driver is built and no radio exists, so not one of
+	# these can do anything — nothing in either daemon references them, no
+	# shipped binary links librkwifibt, and nothing in /etc calls them.
+	#
+	# It is not merely unused. The wifi_app binaries are PREBUILT and carry
+	# their own static crypto (recorded during the OpenSSL 3 migration), so
+	# they are invisible to ./build.sh cve and absent from the SBOM — the two
+	# things that describe what ships. That is Annex I #4 in the same shape as
+	# the oem payload emptied on 2026-08-21 and the 118 buildroot packages
+	# removed on 2026-08-10: inherited defaults rather than product
+	# requirements, and unscannable ones.
+	#
+	# hostapd is the sharpest of them: an access-point daemon on an industrial
+	# gateway with no radio.
+	#
+	# The compliance plan recorded these as "dropped from the build" on
+	# 2026-08-12. They never were — no commit ever removed them and this
+	# script never mentioned Wi-Fi. Found 2026-08-22 by reading the packed
+	# rootfs.img instead of the claim. This function is that claim made true.
+	local wifi_files="
+		usr/bin/rkwifi_server
+		usr/bin/wifi_start.sh
+		usr/bin/wpa_supplicant
+		usr/bin/wpa_supplicant_rtk
+		usr/bin/wpa_supplicant_nl80211_rtk
+		usr/bin/wpa_cli
+		usr/bin/wpa_cli_rtk
+		usr/bin/hostapd
+		usr/bin/hostapd_cli
+		usr/lib/librkwifibt.so
+		usr/lib/libwpa_client.so
+		etc/wpa_supplicant.conf
+		usr/share/dhcpcd/hooks/10-wpa_supplicant
+	"
+	# NOT removed, and deliberately: usr/lib/xtables/libebt_*.so are ebtables
+	# match/target extensions used by the default-deny firewall, and
+	# lib/udev/rc_keymaps/*.toml are remote-control keymaps. Both match a
+	# naive "*bt*" search and neither has anything to do with Bluetooth.
+	local f removed=0
+	for f in $wifi_files; do
+		if [ -e "$RK_PROJECT_PACKAGE_ROOTFS_DIR/$f" ]; then
+			rm -fv "$RK_PROJECT_PACKAGE_ROOTFS_DIR/$f"
+			removed=$((removed + 1))
+		fi
+	done
+	echo "luckfox-hardening-post.sh: removed $removed Wi-Fi/BT userspace file(s)"
+
+	# Leave no empty hook directory behind to suggest dhcpcd still has one.
+	rmdir "$RK_PROJECT_PACKAGE_ROOTFS_DIR/usr/share/dhcpcd/hooks" 2>/dev/null
+	rmdir "$RK_PROJECT_PACKAGE_ROOTFS_DIR/usr/share/dhcpcd" 2>/dev/null
+	return 0
+}
+
 echo "luckfox-hardening-post.sh: applying image hardening"
 remove_stray_stunnel
 remove_oem_loader_path
 remove_serial_getty
 remove_superseded_files
+remove_wifi_stack
