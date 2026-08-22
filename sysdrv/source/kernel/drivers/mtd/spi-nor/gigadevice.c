@@ -58,6 +58,9 @@ static const struct flash_info gigadevice_parts[] = {
 	{ "gd25lq255", INFO(0xc86019, 0, 64 * 1024, 512,
 			    SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ |
 			    SPI_NOR_4B_OPCODES | SPI_NOR_HAS_LOCK) },
+	{ "gd25lb256", INFO(0xc86719, 0, 64 * 1024, 512,
+			    SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ |
+			    SPI_NOR_4B_OPCODES | SPI_NOR_HAS_LOCK) },
 	{ "gd25lb512m", INFO(0xc8671a, 0, 64 * 1024, 1024,
 			    SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ |
 			    SPI_NOR_4B_OPCODES | SPI_NOR_HAS_LOCK) },
@@ -67,6 +70,15 @@ static const struct flash_info gigadevice_parts[] = {
 	{ "gd55b01ge", INFO(0xc8471b, 0, 64 * 1024, 2048,
 			    SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ |
 			    SPI_NOR_4B_OPCODES | SPI_NOR_HAS_LOCK) },
+	{ "gd55lb01ge", INFO(0xc8671b, 0, 64 * 1024, 2048,
+			     SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ |
+			     SPI_NOR_4B_OPCODES | SPI_NOR_HAS_LOCK) },
+	{ "gd55lb02ge", INFO(0xc8671c, 0, 64 * 1024, 4096,
+			     SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ |
+			     SPI_NOR_4B_OPCODES | SPI_NOR_HAS_LOCK) },
+	{ "gd25lt512m", INFO(0xc8661a, 0, 64 * 1024, 1024,
+			     SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ |
+			     SPI_NOR_4B_OPCODES | SPI_NOR_HAS_LOCK) },
 };
 
 const struct spi_nor_manufacturer spi_nor_gigadevice = {

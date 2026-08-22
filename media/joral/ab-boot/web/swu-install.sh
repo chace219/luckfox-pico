@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: LicenseRef-Joral-Proprietary
+# Copyright (c) 2026 Joral LLC. All rights reserved.
 # swu-install.sh — detached A/B install worker for api-update.sh.
 #
 # The console CGI starts this with setsid and returns at once; the install
@@ -11,6 +13,17 @@
 # Installed beside webauth.sh (same lib dir), so it sources it by $0's dir —
 # no path substitution needed. Args:
 #   $1 staged .swu   $2 target slot (a|b)   $3 misc device   $4 acting user
+#   $5 running version   $6 staged version
+#
+# $5/$6 exist so the COMPLETION record names the transition, not just the slot.
+# It used to log `target=b` alone, which cannot answer "was this unit ever
+# running an affected build" — the question an advisory forces, and the one the
+# `started` record was written to answer. Half of that was undone by the record
+# one line later reporting only a slot. They are passed rather than re-derived
+# here so both records are guaranteed to name the same two releases: reading the
+# staged package again could disagree with what the gate actually ordered if the
+# file changed underneath us, and a pair of audit lines that disagree is worse
+# than one that is terse.
 set -u
 
 . "$(dirname "$0")/webauth.sh"   # audit_log + its config
@@ -19,6 +32,8 @@ STAGED=$1
 TARGET=$2
 MISC=$3
 AUSER=$4
+FROM=${5:-unknown}
+TO=${6:-unknown}
 
 PCT=/tmp/swu-apply.pct
 STATE=/tmp/swu-apply.state
@@ -58,15 +73,18 @@ if swupdate -i "$STAGED" -e "stable,$TARGET" > "$LOG" 2>&1; then
 	if misc_ab mark-active "$MISC" "$TARGET"; then
 		echo 100 > "$PCT"
 		echo "done target=$TARGET" > "$STATE"
-		audit_log fw_apply success "$AUSER" "target=$TARGET"
+		audit_log fw_apply success "$AUSER" \
+			"target=$TARGET from=$FROM to=$TO"
 	else
 		echo "fail could not mark slot active" > "$STATE"
-		audit_log fw_apply fail "$AUSER" "target=$TARGET reason=mark_active"
+		audit_log fw_apply fail "$AUSER" \
+			"target=$TARGET from=$FROM to=$TO reason=mark_active"
 	fi
 else
 	ERR=$({ grep -iE "error|fail" "$LOG" | head -n4; tail -n1 "$LOG"; } | tr '\n' ' ')
 	echo "fail $ERR" > "$STATE"
-	audit_log fw_apply fail "$AUSER" "target=$TARGET reason=install"
+	audit_log fw_apply fail "$AUSER" \
+		"target=$TARGET from=$FROM to=$TO reason=install"
 fi
 
 kill "$PROG" 2>/dev/null

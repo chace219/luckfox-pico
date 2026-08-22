@@ -1,0 +1,52 @@
+diff --git a/sysdrv/source/kernel/arch/arm/configs/luckfox_rv1106_linux_defconfig b/sysdrv/source/kernel/arch/arm/configs/luckfox_rv1106_linux_defconfig
+index 203ce2997..3d0442ac4 100755
+--- a/sysdrv/source/kernel/arch/arm/configs/luckfox_rv1106_linux_defconfig
++++ b/sysdrv/source/kernel/arch/arm/configs/luckfox_rv1106_linux_defconfig
+@@ -52,6 +52,11 @@ CONFIG_NET=y
+ CONFIG_PACKET=y
+ CONFIG_UNIX=y
+ CONFIG_INET=y
++CONFIG_BRIDGE=y
++CONFIG_VLAN_8021Q=y
++CONFIG_LLC=y
++CONFIG_STP=y
++CONFIG_IP_MULTICAST=y
+ CONFIG_IP_ADVANCED_ROUTER=y
+ CONFIG_IP_FIB_TRIE_STATS=y
+ CONFIG_IP_MULTIPLE_TABLES=y
+@@ -245,12 +250,16 @@ CONFIG_VETH=y
+ # CONFIG_NET_VENDOR_SOLARFLARE is not set
+ # CONFIG_NET_VENDOR_SMSC is not set
+ # CONFIG_NET_VENDOR_SOCIONEXT is not set
++CONFIG_NET_VENDOR_MICROCHIP=y
++CONFIG_OA_TC6=y
++CONFIG_LAN865X=y
+ CONFIG_STMMAC_ETH=y
+ # CONFIG_DWMAC_GENERIC is not set
+ # CONFIG_NET_VENDOR_SYNOPSYS is not set
+ # CONFIG_NET_VENDOR_VIA is not set
+ # CONFIG_NET_VENDOR_WIZNET is not set
+ # CONFIG_NET_VENDOR_XILINX is not set
++CONFIG_MICROCHIP_T1S_PHY=y
+ CONFIG_RK630_PHY=y
+ # CONFIG_USB_NET_DRIVERS is not set
+ # CONFIG_WLAN_VENDOR_ADMTEK is not set
+@@ -302,6 +311,18 @@ CONFIG_SPI_SPIDEV=y
+ CONFIG_SPI_SLAVE=y
+ # CONFIG_PTP_1588_CLOCK is not set
+ CONFIG_GPIO_SYSFS=y
++# CAN bus support
++CONFIG_CAN=y
++CONFIG_CAN_RAW=y
++CONFIG_CAN_BCM=y
++CONFIG_CAN_GW=y
++# In-kernel J1939 stack (transport reassembly + address claiming) for the
++# satisense-edge acquisition driver (Epic 10 / satisense ADR-140 / gateway ADR-019)
++CONFIG_CAN_J1939=y
++# Virtual CAN for software-only J1939 bring-up tests (no bus ACK needed)
++CONFIG_CAN_VCAN=y
++CONFIG_CAN_DEV=y
++CONFIG_CAN_MCP251XFD=y
+ CONFIG_POWER_RESET=y
+ CONFIG_POWER_RESET_RESTART=y
+ CONFIG_SYSCON_REBOOT_MODE=y

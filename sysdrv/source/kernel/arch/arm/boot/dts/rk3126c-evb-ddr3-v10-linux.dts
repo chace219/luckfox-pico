@@ -17,7 +17,7 @@
 	compatible = "rockchip,rk3126";
 
 	chosen {
-		bootargs = "root=PARTUUID=614e0000-0000-4b53-8000-1d28000054a9 rootwait";
+		bootargs = "earlycon=uart8250,mmio32,0x20068000 console=ttyFIQ0 root=PARTUUID=614e0000-0000-4b53-8000-1d28000054a9 rootwait";
 	};
 
 	adc-keys {
@@ -126,6 +126,13 @@
 		clock-frequency = <32768>;
 		clock-output-names = "xin32k";
 		#clock-cells = <0>;
+	};
+
+	/* This node is useless for RK3126C EVB without bluetooth.
+	 * It's just for compatibility with SDK script checks.
+	 */
+	wireless-bluetooth {
+		status = "disabled";
 	};
 
 	wireless-wlan {
@@ -719,7 +726,6 @@
 				regulator-name= "ldo5";
 				regulator-min-microvolt = <3000000>;
 				regulator-max-microvolt = <3000000>;
-				regulator-boot-on;
 				regulator-state-mem {
 					regulator-off-in-suspend;
 				};

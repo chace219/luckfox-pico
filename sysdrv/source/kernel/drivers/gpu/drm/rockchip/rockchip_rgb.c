@@ -120,6 +120,7 @@ struct rockchip_mcu_panel {
 
 	struct gpio_desc *enable_gpio;
 	struct gpio_desc *reset_gpio;
+	struct gpio_desc *te_gpio;
 
 	struct device_node *np_crtc;
 
@@ -141,6 +142,7 @@ struct rockchip_rgb {
 	struct regmap *grf;
 	bool data_sync_bypass;
 	bool phy_enabled;
+	bool support_psr;
 	const struct rockchip_rgb_funcs *funcs;
 	struct rockchip_drm_sub_dev sub_dev;
 };
@@ -210,15 +212,44 @@ rockchip_rgb_connector_best_encoder(struct drm_connector *connector)
 	return &rgb->encoder;
 }
 
+static int
+rockchip_rgb_connector_atomic_check(struct drm_connector *connector,
+				    struct drm_atomic_state *state)
+{
+	struct rockchip_rgb *rgb = connector_to_rgb(connector);
+	struct drm_connector_state *conn_state;
+
+	conn_state = drm_atomic_get_new_connector_state(state, connector);
+	if (WARN_ON(!conn_state))
+		return -ENODEV;
+
+	conn_state->self_refresh_aware = rgb->support_psr;
+
+	return 0;
+}
+
 static const
 struct drm_connector_helper_funcs rockchip_rgb_connector_helper_funcs = {
 	.get_modes = rockchip_rgb_connector_get_modes,
 	.best_encoder = rockchip_rgb_connector_best_encoder,
+	.atomic_check = rockchip_rgb_connector_atomic_check,
 };
 
-static void rockchip_rgb_encoder_enable(struct drm_encoder *encoder)
+static void rockchip_rgb_encoder_atomic_enable(struct drm_encoder *encoder,
+					       struct drm_atomic_state *state)
 {
 	struct rockchip_rgb *rgb = encoder_to_rgb(encoder);
+	struct drm_crtc *new_crtc;
+	struct drm_crtc_state *old_crtc_state;
+
+	new_crtc = rockchip_drm_encoder_get_new_crtc(encoder, state);
+	if (!new_crtc)
+		return;
+
+	old_crtc_state = drm_atomic_get_old_crtc_state(state, new_crtc);
+	/* Coming back from self refresh, nothing to do */
+	if (old_crtc_state && old_crtc_state->self_refresh_active)
+		return;
 
 	pinctrl_pm_select_default_state(rgb->dev);
 
@@ -236,9 +267,23 @@ static void rockchip_rgb_encoder_enable(struct drm_encoder *encoder)
 	}
 }
 
-static void rockchip_rgb_encoder_disable(struct drm_encoder *encoder)
+static void rockchip_rgb_encoder_atomic_disable(struct drm_encoder *encoder,
+						struct drm_atomic_state *state)
 {
 	struct rockchip_rgb *rgb = encoder_to_rgb(encoder);
+	struct drm_crtc *old_crtc, *new_crtc;
+	struct rockchip_crtc_state *s;
+	struct drm_crtc_state *new_crtc_state = NULL;
+
+	new_crtc = rockchip_drm_encoder_get_new_crtc(encoder, state);
+	/* No crtc means we're doing a full shutdown */
+	if (!new_crtc)
+		return;
+
+	new_crtc_state = drm_atomic_get_new_crtc_state(state, new_crtc);
+	/* Entering self-refresh, do nothing */
+	if (new_crtc_state && new_crtc_state->self_refresh_active)
+		return;
 
 	if (rgb->panel) {
 		drm_panel_disable(rgb->panel);
@@ -254,6 +299,13 @@ static void rockchip_rgb_encoder_disable(struct drm_encoder *encoder)
 		rgb->funcs->disable(rgb);
 
 	pinctrl_pm_select_sleep_state(rgb->dev);
+
+	old_crtc = rockchip_drm_encoder_get_old_crtc(encoder, state);
+	if (old_crtc && old_crtc != new_crtc) {
+		s = to_rockchip_crtc_state(old_crtc->state);
+
+		s->output_if &= ~(VOP_OUTPUT_IF_RGB | VOP_OUTPUT_IF_BT656 | VOP_OUTPUT_IF_BT1120);
+	}
 }
 
 static int
@@ -262,6 +314,8 @@ rockchip_rgb_encoder_atomic_check(struct drm_encoder *encoder,
 				   struct drm_connector_state *conn_state)
 {
 	struct rockchip_crtc_state *s = to_rockchip_crtc_state(crtc_state);
+	struct rockchip_rgb *rgb = encoder_to_rgb(encoder);
+	struct rockchip_mcu_panel *mcu_panel = to_rockchip_mcu_panel(rgb->panel);
 	struct drm_connector *connector = conn_state->connector;
 	struct drm_display_info *info = &connector->display_info;
 
@@ -277,6 +331,15 @@ rockchip_rgb_encoder_atomic_check(struct drm_encoder *encoder,
 		break;
 	case MEDIA_BUS_FMT_RGB565_1X16:
 		s->output_mode = ROCKCHIP_OUT_MODE_P565;
+		s->output_if = VOP_OUTPUT_IF_RGB;
+		break;
+	case MEDIA_BUS_FMT_RGB565_2X8_LE:
+	case MEDIA_BUS_FMT_BGR565_2X8_LE:
+		s->output_mode = ROCKCHIP_OUT_MODE_S565;
+		s->output_if = VOP_OUTPUT_IF_RGB;
+		break;
+	case MEDIA_BUS_FMT_RGB666_3X6:
+		s->output_mode = ROCKCHIP_OUT_MODE_S666;
 		s->output_if = VOP_OUTPUT_IF_RGB;
 		break;
 	case MEDIA_BUS_FMT_RGB888_3X8:
@@ -316,6 +379,8 @@ rockchip_rgb_encoder_atomic_check(struct drm_encoder *encoder,
 	s->tv_state = &conn_state->tv;
 	s->eotf = HDMI_EOTF_TRADITIONAL_GAMMA_SDR;
 	s->color_space = V4L2_COLORSPACE_DEFAULT;
+	if (rgb->np_mcu_panel)
+		s->soft_te = mcu_panel->te_gpio ? true : false;
 
 	return 0;
 }
@@ -359,7 +424,6 @@ rockchip_rgb_encoder_mode_valid(struct drm_encoder *encoder,
 				 const struct drm_display_mode *mode)
 {
 	struct rockchip_rgb *rgb = encoder_to_rgb(encoder);
-	struct device *dev = rgb->dev;
 	struct drm_display_info *info = &rgb->connector.display_info;
 	u32 request_clock = mode->clock;
 	u32 max_clock = rgb->max_dclk_rate;
@@ -378,8 +442,8 @@ rockchip_rgb_encoder_mode_valid(struct drm_encoder *encoder,
 				 (rgb->mcu_pix_total + 1);
 
 	if (max_clock != 0 && request_clock > max_clock) {
-		DRM_DEV_ERROR(dev, "mode [%dx%d] clock %d is higher than max_clock %d\n",
-			      mode->hdisplay, mode->vdisplay, request_clock, max_clock);
+		DRM_DEBUG_DRIVER("mode [%dx%d] clock %d is higher than max_clock %d\n",
+				 mode->hdisplay, mode->vdisplay, request_clock, max_clock);
 		return MODE_CLOCK_HIGH;
 	}
 
@@ -388,8 +452,8 @@ rockchip_rgb_encoder_mode_valid(struct drm_encoder *encoder,
 
 static const
 struct drm_encoder_helper_funcs rockchip_rgb_encoder_helper_funcs = {
-	.enable = rockchip_rgb_encoder_enable,
-	.disable = rockchip_rgb_encoder_disable,
+	.atomic_enable = rockchip_rgb_encoder_atomic_enable,
+	.atomic_disable = rockchip_rgb_encoder_atomic_disable,
 	.atomic_check = rockchip_rgb_encoder_atomic_check,
 	.mode_valid = rockchip_rgb_encoder_mode_valid,
 };
@@ -457,6 +521,17 @@ static int rockchip_mcu_panel_parse_cmd_seq(struct device *dev,
 	return 0;
 }
 
+static irqreturn_t rockchip_mcu_te_irq_handler(int irq, void *dev_id)
+{
+	struct rockchip_rgb *rgb = (struct rockchip_rgb *)dev_id;
+	struct drm_encoder *encoder = &rgb->encoder;
+
+	if (encoder->crtc)
+		rockchip_drm_te_handle(encoder->crtc);
+
+	return IRQ_HANDLED;
+}
+
 static int rockchip_mcu_panel_init(struct rockchip_rgb *rgb)
 {
 	struct device *dev = rgb->dev;
@@ -484,6 +559,22 @@ static int rockchip_mcu_panel_init(struct rockchip_rgb *rgb)
 	if (IS_ERR(mcu_panel->reset_gpio)) {
 		DRM_DEV_ERROR(dev, "failed to find mcu panel reset GPIO\n");
 		return PTR_ERR(mcu_panel->reset_gpio);
+	}
+
+	mcu_panel->te_gpio = devm_fwnode_gpiod_get_index(dev, &np_mcu_panel->fwnode,
+							 "te", 0, GPIOD_IN,
+							 fwnode_get_name(&np_mcu_panel->fwnode));
+	if (IS_ERR(mcu_panel->te_gpio)) {
+		mcu_panel->te_gpio = NULL;
+	} else {
+		ret = devm_request_threaded_irq(dev, gpiod_to_irq(mcu_panel->te_gpio),
+						rockchip_mcu_te_irq_handler, NULL,
+						IRQF_TRIGGER_RISING | IRQF_ONESHOT,
+						"MCU-PANEL-TE", rgb);
+		if (ret) {
+			DRM_DEV_ERROR(dev, "failed to request TE IRQ: %d\n", ret);
+			return ret;
+		}
 	}
 
 	mcu_panel->desc = devm_kzalloc(dev, sizeof(*mcu_panel->desc), GFP_KERNEL);
@@ -559,6 +650,8 @@ static int rockchip_mcu_panel_init(struct rockchip_rgb *rgb)
 				if (remote) {
 					np_crtc = of_get_next_parent(remote);
 					mcu_panel->np_crtc = np_crtc;
+
+					of_node_put(np_crtc);
 					break;
 				}
 			}
@@ -577,16 +670,22 @@ static int rockchip_mcu_panel_init(struct rockchip_rgb *rgb)
 
 			if (!np_mcu_timing) {
 				DRM_DEV_ERROR(dev, "failed to find timing config for mcu panel\n");
+				of_node_put(np_crtc);
 				return -EINVAL;
 			}
+
+			of_node_put(np_crtc);
 		}
 
 		ret = of_property_read_u32(np_mcu_timing, "mcu-pix-total", &val);
 		if (ret || val == 0) {
 			DRM_DEV_ERROR(dev, "failed to parse mcu_pix_total config\n");
+			of_node_put(np_mcu_timing);
 			return -EINVAL;
 		}
 		rgb->mcu_pix_total = val;
+
+		of_node_put(np_mcu_timing);
 	}
 
 	return 0;
@@ -802,7 +901,8 @@ static int rockchip_rgb_bind(struct device *dev, struct device *master,
 	struct rockchip_rgb *rgb = dev_get_drvdata(dev);
 	struct drm_device *drm_dev = data;
 	struct drm_encoder *encoder = &rgb->encoder;
-	struct drm_connector *connector;
+	struct drm_connector *connector = NULL;
+	struct rockchip_drm_private *private = drm_dev->dev_private;
 	int ret;
 
 	if (rgb->np_mcu_panel) {
@@ -854,8 +954,6 @@ static int rockchip_rgb_bind(struct device *dev, struct device *master,
 	drm_encoder_helper_add(encoder, &rockchip_rgb_encoder_helper_funcs);
 
 	if (rgb->panel) {
-		struct rockchip_drm_private *private = drm_dev->dev_private;
-
 		connector = &rgb->connector;
 		connector->interlace_allowed = true;
 		ret = drm_connector_init(drm_dev, connector,
@@ -877,12 +975,9 @@ static int rockchip_rgb_bind(struct device *dev, struct device *master,
 				      "failed to attach encoder: %d\n", ret);
 			goto err_free_connector;
 		}
-		rgb->sub_dev.connector = &rgb->connector;
-		rgb->sub_dev.of_node = rgb->dev->of_node;
-		rgb->sub_dev.loader_protect = rockchip_rgb_encoder_loader_protect;
-		drm_object_attach_property(&connector->base, private->connector_id_prop, 0);
-		rockchip_drm_register_sub_dev(&rgb->sub_dev);
 	} else {
+		struct list_head *connector_list;
+
 		rgb->bridge->encoder = encoder;
 		ret = drm_bridge_attach(encoder, rgb->bridge, NULL, 0);
 		if (ret) {
@@ -890,6 +985,19 @@ static int rockchip_rgb_bind(struct device *dev, struct device *master,
 				      "failed to attach bridge: %d\n", ret);
 			goto err_free_encoder;
 		}
+		connector_list = &rgb->bridge->dev->mode_config.connector_list;
+
+		list_for_each_entry(connector, connector_list, head)
+			if (drm_connector_has_possible_encoder(connector, &rgb->encoder))
+				break;
+	}
+
+	if (connector) {
+		rgb->sub_dev.connector = connector;
+		rgb->sub_dev.of_node = rgb->dev->of_node;
+		rgb->sub_dev.loader_protect = rockchip_rgb_encoder_loader_protect;
+		drm_object_attach_property(&connector->base, private->connector_id_prop, rgb->id);
+		rockchip_drm_register_sub_dev(&rgb->sub_dev);
 	}
 
 	return 0;
@@ -938,8 +1046,10 @@ static int rockchip_rgb_probe(struct platform_device *pdev)
 	rgb->data_sync_bypass = of_property_read_bool(dev->of_node, "rockchip,data-sync-bypass");
 
 	fwnode_mcu_panel = device_get_named_child_node(dev, "mcu-panel");
-	if (fwnode_mcu_panel)
+	if (fwnode_mcu_panel) {
 		rgb->np_mcu_panel = to_of_node(fwnode_mcu_panel);
+		rgb->support_psr = of_property_read_bool(dev->of_node, "support-psr");
+	}
 
 	rgb_data = of_device_get_match_data(dev);
 	if (rgb_data) {

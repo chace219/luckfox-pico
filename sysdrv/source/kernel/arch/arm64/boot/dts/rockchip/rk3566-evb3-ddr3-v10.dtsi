@@ -44,6 +44,13 @@
 	};
 };
 
+&bt_sound {
+	status = "disabled";
+	simple-audio-card,cpu {
+		sound-dai = <&i2s2_2ch>;
+	};
+};
+
 &combphy1_usq {
 	status = "okay";
 };
@@ -181,6 +188,10 @@
 	power-supply = <&vcc3v3_lcd0_n>;
 };
 
+&hynitron {
+	power-supply = <&vcc3v3_lcd0_n>;
+};
+
 &i2c2 {
 	status = "okay";
 	pinctrl-0 = <&i2c2m1_xfer>;
@@ -263,6 +274,12 @@
 };
 
 &i2s1_8ch {
+	status = "disabled";
+};
+
+&i2s2_2ch {
+	pinctrl-0 = <&i2s2m0_sclktx &i2s2m0_lrcktx &i2s2m0_sdi &i2s2m0_sdo>;
+	rockchip,bclk-fs = <32>;
 	status = "disabled";
 };
 

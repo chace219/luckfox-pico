@@ -115,6 +115,7 @@ static const struct of_device_id blacklist[] __initconst = {
 	{ .compatible = "nvidia,tegra30", },
 	{ .compatible = "nvidia,tegra124", },
 	{ .compatible = "nvidia,tegra210", },
+	{ .compatible = "nvidia,tegra234", },
 
 	{ .compatible = "qcom,apq8096", },
 	{ .compatible = "qcom,msm8996", },
@@ -145,6 +146,7 @@ static const struct of_device_id blacklist[] __initconst = {
 	{ .compatible = "rockchip,rk3528", },
 	{ .compatible = "rockchip,rk3562", },
 	{ .compatible = "rockchip,rk3566", },
+	{ .compatible = "rockchip,rk3567", },
 	{ .compatible = "rockchip,rk3568", },
 	{ .compatible = "rockchip,rk3588", },
 	{ .compatible = "rockchip,rv1103", },
@@ -176,7 +178,7 @@ static bool __init cpu0_node_has_opp_v2_prop(void)
 	struct device_node *np = of_cpu_device_node_get(0);
 	bool ret = false;
 
-	if (of_get_property(np, "operating-points-v2", NULL))
+	if (of_property_present(np, "operating-points-v2"))
 		ret = true;
 
 	of_node_put(np);

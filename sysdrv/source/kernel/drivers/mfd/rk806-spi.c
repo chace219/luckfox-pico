@@ -12,12 +12,6 @@
 #include <linux/regmap.h>
 #include <linux/spi/spi.h>
 
-static const struct of_device_id rk806_spi_of_match_table[] = {
-	{ .compatible = "rockchip,rk806", },
-	{ }
-};
-MODULE_DEVICE_TABLE(of, rk806_spi_of_match_table);
-
 static int rk806_spi_write(struct spi_device *spi,
 			   char addr,
 			   const char *data,
@@ -63,20 +57,37 @@ static int rk806_spi_bus_read(void *context,
 {
 	struct device *dev = context;
 	struct spi_device *spi = to_spi_device(dev);
+	struct rk806 *rk806 = spi_get_drvdata(spi);
+	char txbuf[2] = { 0 };
+	int status;
+	u8 *local_buf;
 	char addr;
-	char txbuf[3] = { 0 };
 
 	if (reg_size != sizeof(char) || val_size < 1)
 		return -EINVAL;
 
+	if (val_size >= RK806_READ_BUFFER_SIZE) {
+		local_buf = kmalloc(1 + val_size, GFP_KERNEL);
+		if (!local_buf)
+			return -ENOMEM;
+	} else {
+		local_buf = rk806->read_buf;
+	}
 	/* Copy address to read from into first element of SPI buffer. */
 	memcpy(&addr, reg, sizeof(char));
 
 	txbuf[0] = RK806_CMD_READ | (val_size - 1);
 	txbuf[1] = addr;
-	txbuf[2] = RK806_REG_H;
 
-	return spi_write_then_read(spi, txbuf, 3, val, val_size);
+	status = spi_write_then_read(spi, txbuf, 2, local_buf, val_size + 1);
+
+	if (status == 0)
+		memcpy(val, &local_buf[1], val_size);
+
+	if (val_size >= RK806_READ_BUFFER_SIZE)
+		kfree(local_buf);
+
+	return status;
 }
 
 static const struct regmap_bus rk806_regmap_bus_spi = {
@@ -101,7 +112,7 @@ static int rk806_spi_probe(struct spi_device *spi)
 	rk806->regmap = devm_regmap_init(&spi->dev,
 					 &rk806_regmap_bus_spi,
 					 &spi->dev,
-					 &rk806_regmap_config_spi);
+					 &rk806_regmap_config);
 	if (IS_ERR(rk806->regmap)) {
 		dev_err(rk806->dev, "Failed to initialize register map\n");
 		return PTR_ERR(rk806->regmap);
@@ -127,7 +138,7 @@ static struct spi_driver rk806_spi_driver = {
 	.driver		= {
 		.name	= "rk806",
 		.owner = THIS_MODULE,
-		.of_match_table = rk806_spi_of_match_table,
+		.of_match_table = of_match_ptr(rk806_of_match),
 	},
 	.probe		= rk806_spi_probe,
 	.remove		= rk806_spi_remove,

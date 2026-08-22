@@ -265,7 +265,6 @@ static const struct rk808_reg_data rk805_pre_init_reg[] = {
 	{RK805_BUCK4_CONFIG_REG, BUCK_ILMIN_MASK, BUCK_ILMIN_400MA},
 	{RK805_GPIO_IO_POL_REG, SLP_SD_MSK, SLEEP_FUN},
 	{RK805_THERMAL_REG, TEMP_HOTDIE_MSK, TEMP115C},
-	{RK808_RTC_CTRL_REG, RTC_STOP, RTC_STOP},
 };
 
 static struct rk808_reg_data rk805_suspend_reg[] = {
@@ -283,7 +282,6 @@ static const struct rk808_reg_data rk808_pre_init_reg[] = {
 	{ RK808_BUCK1_CONFIG_REG, BUCK1_RATE_MASK,  BUCK_ILMIN_200MA },
 	{ RK808_BUCK2_CONFIG_REG, BUCK2_RATE_MASK,  BUCK_ILMIN_200MA },
 	{ RK808_DCDC_UV_ACT_REG,  BUCK_UV_ACT_MASK, BUCK_UV_ACT_DISABLE},
-	{ RK808_RTC_CTRL_REG, RTC_STOP, RTC_STOP},
 	{ RK808_VB_MON_REG,       MASK_ALL,         VB_LO_ACT |
 						    VB_LO_SEL_3500MV },
 };
@@ -317,7 +315,6 @@ static const struct rk808_reg_data rk816_pre_init_reg[] = {
 
 static const struct rk808_reg_data rk817_pre_init_reg[] = {
 	{RK817_SYS_CFG(3), RK817_SLPPOL_MSK, RK817_SLPPOL_L},
-	{RK817_RTC_CTRL_REG, RTC_STOP, RTC_STOP},
 	{RK817_GPIO_INT_CFG, RK817_INT_POL_MSK, RK817_INT_POL_L},
 	{RK817_SYS_CFG(1), RK817_HOTDIE_TEMP_MSK | RK817_TSD_TEMP_MSK,
 					   RK817_HOTDIE_105 | RK817_TSD_140},
@@ -337,7 +334,6 @@ static const struct rk808_reg_data rk818_pre_init_reg[] = {
 	{ RK818_H5V_EN_REG,	  BIT(1),	    RK818_REF_RDY_CTRL },
 	/* enable HDMI 5V */
 	{ RK818_H5V_EN_REG,	  BIT(0),	    RK818_H5V_EN },
-	{ RK808_RTC_CTRL_REG, RTC_STOP, RTC_STOP},
 	{ RK808_VB_MON_REG,	  MASK_ALL,	    VB_LO_ACT |
 						    VB_LO_SEL_3500MV },
 	{RK808_CLK32OUT_REG, CLK32KOUT2_FUNC_MASK, CLK32KOUT2_FUNC},
@@ -735,6 +731,12 @@ static void rk817_shutdown_prepare(void)
 		if (ret)
 			pr_info("%s:failed to activate pwroff state\n",
 				__func__);
+		ret = regmap_update_bits(rk808->regmap,
+					 RK817_SYS_CFG(3),
+					 RK817_SLPPIN_FUNC_MSK,
+					 SLPPIN_DN_FUN);
+		if (ret)
+			pr_err("shutdown: config SLPPIN_DN_FUN error!\n");
 	}
 
 	/* pmic sleep shutdown function */
@@ -902,29 +904,8 @@ out:
 
 static int rk817_pinctrl_init(struct device *dev, struct rk808 *rk808)
 {
-	int ret;
-	struct platform_device	*pinctrl_dev;
 	struct pinctrl_state *default_st;
-
-	pinctrl_dev = platform_device_alloc("rk805-pinctrl", -1);
-	if (!pinctrl_dev) {
-		dev_err(dev, "Alloc pinctrl dev failed!\n");
-		return -ENOMEM;
-	}
-
-	pinctrl_dev->dev.parent = dev;
-
-	ret = platform_device_add(pinctrl_dev);
-
-	if (ret) {
-		platform_device_put(pinctrl_dev);
-		dev_err(dev, "Add rk805-pinctrl dev failed!\n");
-		return ret;
-	}
-	if (dev->pins && !IS_ERR(dev->pins->p)) {
-		dev_info(dev, "had get a pinctrl!\n");
-		return 0;
-	}
+	int ret, value;
 
 	rk808->pins = devm_kzalloc(dev, sizeof(struct rk808_pin_info),
 				   GFP_KERNEL);
@@ -973,11 +954,39 @@ static int rk817_pinctrl_init(struct device *dev, struct rk808 *rk808)
 		dev_dbg(dev, "no reset-setting pinctrl state\n");
 		return 0;
 	}
+	ret = regmap_update_bits(rk808->regmap,
+				 RK817_SYS_CFG(3),
+				 RK817_SLPPIN_FUNC_MSK,
+				 SLPPIN_NULL_FUN);
+	if (ret) {
+		dev_err(dev, "init: config SLPPIN_NULL_FUN error!\n");
+		return ret;
+	}
 
+	ret = regmap_update_bits(rk808->regmap,
+				 RK817_SYS_CFG(3),
+				 RK817_SLPPOL_MSK,
+				 RK817_SLPPOL_L);
+	if (ret) {
+		dev_err(dev, "init: config RK817_SLPPOL_L error!\n");
+		return ret;
+	}
+
+	/* pmic need the SCL clock to synchronize register */
+	regmap_read(rk808->regmap, RK817_SYS_STS, &value);
+	mdelay(2);
 	ret = pinctrl_select_state(rk808->pins->p, rk808->pins->reset);
-
 	if (ret)
 		dev_dbg(dev, "failed to activate reset-setting pinctrl state\n");
+
+	ret = regmap_update_bits(rk808->regmap,
+				 RK817_SYS_CFG(3),
+				 RK817_SLPPIN_FUNC_MSK,
+				 SLPPIN_RST_FUN);
+	if (ret) {
+		dev_err(dev, "init: config SLPPIN_RST_FUN error!\n");
+		return ret;
+	}
 
 	return 0;
 }
@@ -1366,7 +1375,6 @@ static int rk808_remove(struct i2c_client *client)
 	struct rk808 *rk808 = i2c_get_clientdata(client);
 
 	regmap_del_irq_chip(client->irq, rk808->irq_data);
-	mfd_remove_devices(&client->dev);
 
 	/**
 	 * pm_power_off may points to a function from another module.
@@ -1442,6 +1450,15 @@ static int __maybe_unused rk8xx_suspend(struct device *dev)
 				dev_err(dev, "failed to act slp pinctrl state\n");
 				return ret;
 			}
+
+			ret = regmap_update_bits(rk808->regmap,
+						 RK817_SYS_CFG(3),
+						 RK817_SLPPIN_FUNC_MSK,
+						 SLPPIN_SLP_FUN);
+			if (ret) {
+				dev_err(dev, "suspend: config SLPPIN_SLP_FUN error!\n");
+				return ret;
+			}
 		}
 		break;
 	default:
@@ -1497,6 +1514,15 @@ static int __maybe_unused rk8xx_resume(struct device *dev)
 			ret = pinctrl_select_state(rk808->pins->p, rk808->pins->reset);
 			if (ret)
 				dev_dbg(dev, "failed to act reset pinctrl state\n");
+
+			ret = regmap_update_bits(rk808->regmap,
+						 RK817_SYS_CFG(3),
+						 RK817_SLPPIN_FUNC_MSK,
+						 SLPPIN_RST_FUN);
+			if (ret) {
+				dev_err(dev, "resume: config SLPPIN_RST_FUN error!\n");
+				return ret;
+			}
 		}
 		break;
 	default:

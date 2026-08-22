@@ -9,7 +9,7 @@
 #include <linux/rk-isp2-config.h>
 
 #define ROCKIT_BUF_NUM_MAX	20
-#define ROCKIT_ISP_NUM_MAX	3
+#define ROCKIT_ISP_NUM_MAX	5
 #define ROCKIT_STREAM_NUM_MAX	12
 
 #define ROCKIT_VICAP_NUM_MAX	6
@@ -55,6 +55,25 @@ struct ISP_VIDEO_FRAMES {
 
 	u64	u64PrivateData;
 	u32	u32FrameFlag;     /* FRAME_FLAG_E, can be OR operation. */
+	u8	ispEncCnt;
+
+	u32	hdr;
+	u32	rolling_shutter_skew;
+	/* linear or hdr short frame */
+	u32	sensor_exposure_time;
+	u32	sensor_analog_gain;
+	u32	sensor_digital_gain;
+	u32	isp_digital_gain;
+	/* hdr mid-frame */
+	u32	sensor_exposure_time_m;
+	u32	sensor_analog_gain_m;
+	u32	sensor_digital_gain_m;
+	u32	isp_digital_gain_m;
+	/* hdr long frame */
+	u32	sensor_exposure_time_l;
+	u32	sensor_analog_gain_l;
+	u32	sensor_digital_gain_l;
+	u32	isp_digital_gain_l;
 };
 
 struct rkisp_dev_cfg {
@@ -124,7 +143,7 @@ struct rockit_rkcif_cfg {
 	int (*rkcif_rockit_mpibuf_done)(struct rockit_rkcif_cfg *rockit_cif_cfg);
 };
 
-#if IS_ENABLED(CONFIG_VIDEO_ROCKCHIP_ISP_VERSION_V32)
+#if IS_ENABLED(CONFIG_VIDEO_ROCKCHIP_ISP_VERSION_V32) || IS_ENABLED(CONFIG_VIDEO_ROCKCHIP_ISP_VERSION_V33)
 
 void *rkisp_rockit_function_register(void *function, int cmd);
 int rkisp_rockit_get_ispdev(char **name);

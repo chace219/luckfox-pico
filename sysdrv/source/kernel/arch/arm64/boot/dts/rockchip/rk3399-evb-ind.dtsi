@@ -175,6 +175,7 @@
 		wifi_chip_type = "ap6354";
 		sdio_vref = <1800>;
 		WIFI,host_wake_irq = <&gpio0 3 GPIO_ACTIVE_HIGH>; /* GPIO0_a3 */
+		WIFI,poweren_gpio = <&gpio0 10 GPIO_ACTIVE_HIGH>;
 		status = "okay";
 	};
 
@@ -204,6 +205,11 @@
 		status = "okay";
 	};
 
+	dummy_codec: dummy-codec {
+		compatible = "rockchip,dummy-codec";
+		#sound-dai-cells = <0>;
+	};
+
 	tc358749x_sound:tc358749x-sound {
 		status = "okay";
 		compatible = "simple-audio-card";
@@ -212,10 +218,10 @@
 		simple-audio-card,bitclock-master = <&sound0_master>;
 		simple-audio-card,frame-master = <&sound0_master>;
 		simple-audio-card,cpu {
-				sound-dai = <&i2s0>;
+			sound-dai = <&i2s0>;
 		};
 		sound0_master: simple-audio-card,codec {
-				sound-dai = <&tc358749x>;
+			sound-dai = <&dummy_codec>;
 		};
 	};
 

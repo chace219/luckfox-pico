@@ -504,6 +504,118 @@
  * 17.add ioctl to get bay3d buf
  * 18.fix isp32 lite frame buffer data read
  * 19.support 8k for isp32 lite
+ *
+ * v2.5.1
+ * 1.rockit buf add offset
+ * 2.support multi wrap channel
+ * 3.fix waiting for isp end
+ * 4.fix isp32 bp no output if suspend
+ * 5.fix params buffersize for tb case
+ * 6.skip s_stream of sensor while connect to vicap sditf
+ * 7.open to wait thunderboot ready
+ * 8.default readback mode for multi sensor
+ * 9.rdbk_auto mode stop to clean buf list
+ * 10.fix dmarx deadlock
+ * 11.fix dmatx config
+ * 12.fix cac repeat enable
+ * 13.skip mbus if link to vicap
+ * 14.fix rockit switch resolution
+ * 15.fix cmsk mp can't disable
+ * 16.fix cac for multi sensor
+ *
+ * v2.7.0 (AIQ v6.7.1)
+ * 1.add stats log for isp21 and isp30
+ * 2.dvbm: modify api to adapt rv1103b
+ * 3.add isp33
+ * 4.add rv1103b config
+ * 5.support mirror for wrap mode
+ * 6.add isp2enc frame count to rockit
+ * 7.more mode for vicap to isp
+ * 8.support two sensor online for isp33
+ * 9.support unite online for isp33
+ * 10.dvbm deinit/init if switch resolution
+ * 11.support online hdr wrap for isp33
+ * 12.fix isp2enc wrap for isp33 fast
+ * 13.fix fast stop no to clean flag
+ * 14.fix rd_mode for vicap to send buf
+ * 15.resume early for isp33
+ * 16.fix buf update for multi online mode
+ * 17.fix hist for isp33 unite mode
+ * 18.frame start irq to send dvbm event
+ * 19.fix 4k unite effect
+ * 20.fix resume for multi online mode
+ * 21.add api for raw buf cnt and hdr wrap
+ * 22.enable bay3d FST_FRAME if change bypass
+ * 23.fix awb resume error
+ * 24.fix hold at register irq if mcu still running
+ * 25.limit bp crop and scl for isp33
+ * 26.add sync for multi online mode
+ * 27.fix memory leak
+ * 28.config bls1 and bls2 black level
+ * 29.clear isp force update bit
+ * 30.fix isp33 params sram config
+ * 31.w3a overflow check for isp33
+ * 32.fix isp33 multi sensor resume
+ * 33.fix isp33 unite switch online for fast
+ * 34.isp33 add api to get params
+ * 35.disable isp33 dma write gather
+ * 36.drop 2 frame if rockit switch resolution
+ * 37.fix isp33 unite error for fastboot
+ * 38.fix isp33 multi online resume
+ * 39.support bytesperline set by user for rawrd video
+ * 40.isp33 change input to 4 align
+ * 41.vicap support rtt stream on
+ *
+ * v2.8.0 (AIQ v6.8.0)
+ * 1.fix multi switch to online no work for fast
+ * 2.rawrd format sync with isp input format change
+ * 3.fix rawrd bytesperline
+ * 4.wait aiq params for isp33 fast
+ *
+ * v2.9.0 (AIQ v6.9.0)
+ * 1.fix free bay3d buf fd to get again fail
+ * 2.write burst adjust to 8 for isp33
+ * 3.add iqtool video for isp32 isp33
+ * 4.fix lsc switch for isp30
+ * 5.add fpn function
+ * 6.output stream burst 16 for isp33
+ * 7.wait mcu done
+ * 8.fix buf config for isp20 and isp21
+ * 9.fix unite mode for fast
+ * 10.512 extended pixel for rv1103b
+ * 11.fix unite mode for isp32
+ * 12,remove graph_mutex
+ * 13.add raw filter to procfs debug
+ * 14.fix multi sensor with unite mode
+ * 15.fix group aov no working for isp32
+ * 16.fix bay3d if two readback for isp32
+ * 17.fix isp30 unite mode for rk3588
+ * 18.add RKISP_VICAP_CMD_SOF cmd
+ * 19.add sensor exposure for isp30 and isp39
+ * 20.support frame information attach to image tail
+ * 21.fix isp30 stream buf size if enable attach information
+ *
+ * v2.9.1
+ * 1.fix multi online for fast mode
+ * 2.fix fast multi online
+ * 3.max hardware size change to 2880x3240 for isp33
+ * 4.fix CTRL_SWS_CFG config error
+ * 5.fix drc and dhaz two readback for isp32
+ * 6.fix bilinear scale no output if unite mode
+ * 7.multi-sensor online info to vicap
+ * 8.max unite resolution 4736x3240 for isp33
+ * 9.support to adjust sof_cnt according to vicap sof
+ * 10.fix isp33 sharp/gic noise curve if resume
+ * 11.fix stats error when fast switch to online for single sensor
+ * 12.fix hsv resume error for isp33
+ * 13.fix rawrd bytesperline
+ * 14.default to NO_HDR if sensor Unimplemented RKMODULE_GET_HDR_CFG
+ * 15.fix bls2
+ * 16.fix mipi overflow for isp21
+ * 17.unite no support wrap
+ * 18.support more online for isp33
+ * 19.fix 4k unite fast stats error
+ * 20.fix only isp_vir1 index error
  */
 
 #define RKISP_DRIVER_VERSION RKISP_API_VERSION

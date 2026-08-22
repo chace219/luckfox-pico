@@ -2,9 +2,10 @@
 /*
  * os03b10 driver
  *
- * Copyright (C) 2020 Rockchip Electronics Co., Ltd.
+ * Copyright (C) 2024 Rockchip Electronics Co., Ltd.
  *
  * V0.0X01.0X01 first version.
+ * v0.0X01.0X02 update sensor setting
  */
 
 //define DEBUG
@@ -28,7 +29,7 @@
 #include <linux/rk-preisp.h>
 #include "../platform/rockchip/isp/rkisp_tb_helper.h"
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x01)
+#define DRIVER_VERSION KERNEL_VERSION(0, 0x01, 0x03)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
@@ -124,6 +125,8 @@ struct os03b10_mode {
 	const struct regval *reg_list;
 	u32 hdr_mode;
 	u32 vc[PAD_MAX];
+	u32 link_freq_idx;
+	u32 bpp;
 };
 
 struct os03b10 {
@@ -268,17 +271,18 @@ static const struct regval os03b10_linear10bit_1152x648_regs[] = {
 	{0xf1, 0x40},
 	{0xf2, 0x40},
 	{0xf3, 0x40},
-	{0xfa, 0x5c},
-	{0xfb, 0x6b},
+	{0xf4, 0x00},
+	{0xfa, 0x1c},
+	{0xfb, 0x69},
 	{0xf6, 0x00},
 	{0xf7, 0xc0},
 	{0xfc, 0x00},
 	{0xfe, 0xc0},
 	{0xff, 0xcc},
-	{0xc4, 0x70},
-	{0xc5, 0x70},
-	{0xc6, 0x70},
-	{0xc7, 0x70},
+	{0xc4, 0x73},
+	{0xc5, 0x73},
+	{0xc6, 0x73},
+	{0xc7, 0x73},
 	{0xfd, 0x01},
 	{0xb1, 0x01},
 	{0xce, 0x5c},
@@ -302,11 +306,20 @@ static const struct regval os03b10_linear10bit_1152x648_regs[] = {
 	{REG_NULL, 0x00},
 };
 
+/*
+ * Xclk 24Mhz
+ * max_framerate 30fps
+ * mipi_datarate per lane 540Mbps, 2lane
+ * raw 10
+ * 2304x1296 normal
+ */
 static const struct regval os03b10_linear10bit_2304x1296_regs[] = {
 	{0xfd, 0x00},
 	{0x20, 0x00},
+	{REG_DELAY, 0x05},
 	{0xfd, 0x00},
-	{0x36, 0x01},
+	{0xfd, 0x00},
+	{0x36, 0x01},//pwd pll
 	{0xfd, 0x00},
 	{0x2e, 0x2d},
 	{0x2f, 0x01},
@@ -314,19 +327,13 @@ static const struct regval os03b10_linear10bit_2304x1296_regs[] = {
 	{0x36, 0x00},
 	{0xfd, 0x00},
 	{0xfd, 0x00},
-	{0xfd, 0x00},
-	{0xfd, 0x00},
-	{REG_DELAY, 0x05},
-	{0xfd, 0x00},
-	{0xfd, 0x00},
 	{0x44, 0x40},
 	{0x38, 0x21},
 	{0x45, 0x04},
 	{0xfd, 0x01},
 	{0x03, 0x00},
-	{0x04, 0x04},
-	{0x06, 0x00},
-	{0x24, 0xff},
+	{0x04, 0x24},
+	{0x24, 0x18},
 	{0x01, 0x01},
 	{0x18, 0x2f},
 	{0x1a, 0x06},
@@ -334,39 +341,43 @@ static const struct regval os03b10_linear10bit_2304x1296_regs[] = {
 	{0x1b, 0x3c},
 	{0x2e, 0x03},
 	{0x2f, 0x02},
-	{0x30, 0x52},
+	{0x30, 0x5f},
 	{0x3c, 0xca},
 	{0xfd, 0x03},
 	{0x01, 0x0e},
 	{0xfd, 0x01},
 	{0x51, 0x0e},
-	{0x52, 0x0b},
+	{0x52, 0x04},
 	{0x57, 0x0b},
-	{0x5a, 0xe0},
+	{0x5a, 0xde},
 	{0x66, 0xd0},
 	{0x6e, 0x26},
 	{0x71, 0x80},
 	{0x73, 0x2b},
 	{0xb8, 0x1c},
-	{0xd0, 0x20},
-	{0xd2, 0x8e},
+	{0xb9, 0x22},
+	{0xba, 0x22},
+	{0xd0, 0x21},
+	{0xd2, 0x8f},
 	{0xd3, 0x1a},
+	{0xd4, 0x20},
+	{0xd5, 0x20},
 	{0xfd, 0x01},
 	{0xbd, 0x00},
-	{0xd7, 0xbe},
+	{0xd7, 0xad},
 	{0xd8, 0xef},
-	{0xe8, 0x09},
+	{0xe8, 0x0a},
 	{0xe9, 0x05},
 	{0xea, 0x08},
-	{0xeb, 0x06},
+	{0xeb, 0x07},
 	{0xfd, 0x03},
-	{0x00, 0x5c},
+	{0x00, 0x53},
 	{0x03, 0xcd},
 	{0x06, 0x07},
 	{0x07, 0x78},
 	{0x08, 0x36},
 	{0x09, 0x28},
-	{0x0a, 0x0c},
+	{0x0a, 0x0d},
 	{0x0b, 0x06},
 	{0x0f, 0x13},
 	{0xfd, 0x01},
@@ -386,18 +397,20 @@ static const struct regval os03b10_linear10bit_2304x1296_regs[] = {
 	{0xf1, 0x40},
 	{0xf2, 0x40},
 	{0xf3, 0x40},
-	{0xfa, 0x5c},
-	{0xfb, 0x6b},
+	{0xf4, 0x00},
+	{0xfa, 0x1c},
+	{0xfb, 0x69},
 	{0xf6, 0x00},
 	{0xf7, 0xc0},
 	{0xfc, 0x00},
 	{0xfe, 0xc0},
-	{0xff, 0x88},
-	{0xc4, 0x70},
-	{0xc5, 0x70},
-	{0xc6, 0x70},
-	{0xc7, 0x70},
+	{0xff, 0xcc},
+	{0xc4, 0x73},
+	{0xc5, 0x73},
+	{0xc6, 0x73},
+	{0xc7, 0x73},
 	{0xfd, 0x01},
+	{0xb1, 0x01},
 	{0xce, 0x7c},
 	{0x8f, 0x00},
 	{0x91, 0x10},
@@ -407,9 +420,11 @@ static const struct regval os03b10_linear10bit_2304x1296_regs[] = {
 	{0x98, 0x55},
 	{0x9d, 0x03},
 	{0x9e, 0x5f},
+	{0xa1, 0x05},
 	{0xa4, 0x13},
 	{0xa5, 0xff},
 	{0xa6, 0xff},
+	// {0xb1, 0x03},//mipi en
 	{0x01, 0x02},
 	{0x14, 0x03},
 	{REG_NULL, 0x00},
@@ -437,7 +452,7 @@ static const struct os03b10_mode supported_modes[] = {
 			.denominator = 300000,
 		},
 		.exp_def = 0x044c,
-		.hts_def = 0x054e * 2,
+		.hts_def = 0x054e,
 		.vts_def = 0x052d,
 		.reg_list = os03b10_linear10bit_2304x1296_regs,
 		.hdr_mode = NO_HDR,
@@ -458,6 +473,10 @@ static const struct os03b10_mode supported_modes[] = {
 		.hdr_mode = NO_HDR,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
 	},
+};
+
+static const u32 bus_code[] = {
+	MEDIA_BUS_FMT_SBGGR10_1X10,
 };
 
 static const s64 link_freq_menu_items[] = {
@@ -496,11 +515,12 @@ static int os03b10_write_array(struct i2c_client *client,
 	int i, ret = 0;
 
 	for (i = 0; ret == 0 && regs[i].addr != REG_NULL; i++) {
+		if (regs[i].addr == REG_DELAY) {
+			usleep_range(regs[i].val * 1000, regs[i].val * 1000 + 1000);
+			continue;
+		}
 
 		ret = os03b10_write_reg(client, regs[i].addr, regs[i].val);
-		if (regs[i].addr == REG_DELAY)
-			usleep_range(5 * 1000, 6 * 1000);
-
 		if (ret) {
 			dev_err(&client->dev, "%s failed !\n", __func__);
 			break;
@@ -559,10 +579,13 @@ os03b10_find_best_fit(struct os03b10 *os03b10, struct v4l2_subdev_format *fmt)
 
 	for (i = 0; i < os03b10->cfg_num; i++) {
 		dist = os03b10_get_reso_dist(&supported_modes[i], framefmt);
-		if ((cur_best_fit_dist == -1 || dist <= cur_best_fit_dist) &&
-			(supported_modes[i].bus_fmt == framefmt->code)) {
+		if (cur_best_fit_dist == -1 || dist < cur_best_fit_dist) {
 			cur_best_fit_dist = dist;
 			cur_best_fit = i;
+		} else if (dist == cur_best_fit_dist &&
+			   framefmt->code == supported_modes[i].bus_fmt) {
+			cur_best_fit = i;
+			break;
 		}
 	}
 
@@ -643,11 +666,9 @@ static int os03b10_enum_mbus_code(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_pad_config *cfg,
 				  struct v4l2_subdev_mbus_code_enum *code)
 {
-	struct os03b10 *os03b10 = to_os03b10(sd);
-
-	if (code->index != 0)
+	if (code->index >= ARRAY_SIZE(bus_code))
 		return -EINVAL;
-	code->code = os03b10->cur_mode->bus_fmt;
+	code->code = bus_code[code->index];
 
 	return 0;
 }
@@ -682,6 +703,77 @@ static int os03b10_g_frame_interval(struct v4l2_subdev *sd,
 		fi->interval = os03b10->cur_fps;
 	else
 		fi->interval = mode->max_fps;
+
+	return 0;
+}
+
+static const struct os03b10_mode *os03b10_find_mode(struct os03b10 *os03b10, int fps)
+{
+	const struct os03b10_mode *mode = NULL;
+	const struct os03b10_mode *match = NULL;
+	int cur_fps = 0;
+	int i = 0;
+
+	for (i = 0; i < ARRAY_SIZE(supported_modes); i++) {
+		mode = &supported_modes[i];
+		if (mode->width == os03b10->cur_mode->width &&
+		    mode->height == os03b10->cur_mode->height &&
+		    mode->hdr_mode == os03b10->cur_mode->hdr_mode &&
+		    mode->bus_fmt == os03b10->cur_mode->bus_fmt) {
+			cur_fps = DIV_ROUND_CLOSEST(mode->max_fps.denominator, mode->max_fps.numerator);
+			if (cur_fps == fps) {
+				match = mode;
+				break;
+			}
+		}
+	}
+	return match;
+}
+
+static int os03b10_s_frame_interval(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_frame_interval *fi)
+{
+	struct os03b10 *os03b10 = to_os03b10(sd);
+	const struct os03b10_mode *mode = NULL;
+	struct v4l2_fract *fract = &fi->interval;
+	s64 h_blank, vblank_def;
+	u64 pixel_rate = 0;
+	u32 lane_num = OS03B10_LANES;
+	int fps;
+
+	if (os03b10->streaming)
+		return -EBUSY;
+
+	if (fi->pad != 0)
+		return -EINVAL;
+
+	if (fract->numerator == 0) {
+		v4l2_err(sd, "error param, check interval param\n");
+		return -EINVAL;
+	}
+	fps = DIV_ROUND_CLOSEST(fract->denominator, fract->numerator);
+	mode = os03b10_find_mode(os03b10, fps);
+	if (mode == NULL) {
+		v4l2_err(sd, "couldn't match fi\n");
+		return -EINVAL;
+	}
+
+	os03b10->cur_mode = mode;
+
+	h_blank = mode->hts_def - mode->width;
+	__v4l2_ctrl_modify_range(os03b10->hblank, h_blank,
+				 h_blank, 1, h_blank);
+	vblank_def = mode->vts_def - mode->height;
+	__v4l2_ctrl_modify_range(os03b10->vblank, vblank_def,
+				 OS03B10_VTS_MAX - mode->height,
+				 1, vblank_def);
+	pixel_rate = (u32)link_freq_menu_items[mode->link_freq_idx] / mode->bpp * 2 * lane_num;
+
+	__v4l2_ctrl_s_ctrl_int64(os03b10->pixel_rate,
+				 pixel_rate);
+	__v4l2_ctrl_s_ctrl(os03b10->link_freq,
+			   mode->link_freq_idx);
+	os03b10->cur_fps = mode->max_fps;
 
 	return 0;
 }
@@ -1115,6 +1207,7 @@ static const struct v4l2_subdev_core_ops os03b10_core_ops = {
 static const struct v4l2_subdev_video_ops os03b10_video_ops = {
 	.s_stream = os03b10_s_stream,
 	.g_frame_interval = os03b10_g_frame_interval,
+	.s_frame_interval = os03b10_s_frame_interval,
 };
 
 static const struct v4l2_subdev_pad_ops os03b10_pad_ops = {
@@ -1234,10 +1327,10 @@ static int os03b10_set_ctrl(struct v4l2_ctrl *ctrl)
 					OS03B10_REG_PAGE_SELECT, 0x01);
 		ret |= os03b10_write_reg(os03b10->client,
 					 OS03B10_REG_VBLANK_H,
-					 (ctrl->val >> 8) & 0xFF);
+					 ((ctrl->val - 29) >> 8) & 0xFF);
 		ret |= os03b10_write_reg(os03b10->client,
 					 OS03B10_REG_VBLANK_L,
-					 ctrl->val & 0xFF);
+					 (ctrl->val - 29) & 0xFF);//fixed internal val 29
 		ret |= os03b10_write_reg(os03b10->client,
 					 OS03B10_REG_RESTART, 0x01);
 		os03b10->cur_vts = ctrl->val + os03b10->cur_mode->height;
@@ -1305,7 +1398,6 @@ static int os03b10_initialize_controls(struct os03b10 *os03b10)
 {
 	const struct os03b10_mode *mode;
 	struct v4l2_ctrl_handler *handler;
-	struct v4l2_ctrl *ctrl;
 	s64 exposure_max, vblank_def;
 	u32 h_blank;
 	int ret;
@@ -1317,17 +1409,17 @@ static int os03b10_initialize_controls(struct os03b10 *os03b10)
 		return ret;
 	handler->lock = &os03b10->mutex;
 
-	ctrl = v4l2_ctrl_new_int_menu(handler, NULL,
-				      V4L2_CID_LINK_FREQ,
-				      0, 0,
-				      link_freq_menu_items);
-	if (ctrl)
-		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	os03b10->link_freq = v4l2_ctrl_new_int_menu(handler, NULL,
+						    V4L2_CID_LINK_FREQ,
+						    0, 0,
+						    link_freq_menu_items);
+	if (os03b10->link_freq)
+		os03b10->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
-	v4l2_ctrl_new_std(handler, NULL,
-			  V4L2_CID_PIXEL_RATE,
-			  0, PIXEL_RATE_WITH_270M,
-			  1, PIXEL_RATE_WITH_270M);
+	os03b10->pixel_rate = v4l2_ctrl_new_std(handler, NULL,
+						V4L2_CID_PIXEL_RATE,
+						0, PIXEL_RATE_WITH_270M,
+						1, PIXEL_RATE_WITH_270M);
 
 	h_blank = mode->hts_def - mode->width;
 	os03b10->hblank = v4l2_ctrl_new_std(handler, NULL, V4L2_CID_HBLANK,
@@ -1621,7 +1713,11 @@ static void __exit sensor_mod_exit(void)
 	i2c_del_driver(&os03b10_i2c_driver);
 }
 
+#if defined(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP) && !defined(CONFIG_INITCALL_ASYNC)
+subsys_initcall(sensor_mod_init);
+#else
 device_initcall_sync(sensor_mod_init);
+#endif
 module_exit(sensor_mod_exit);
 
 MODULE_DESCRIPTION("OmniVision os03b10 sensor driver");

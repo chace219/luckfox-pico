@@ -80,6 +80,8 @@ static struct rv1106_sleep_ddr_data ddr_data;
 
 static const struct rk_sleep_config *slp_cfg;
 
+static u32 rv1106_chip_version;
+
 static void __iomem *pmucru_base;
 static void __iomem *cru_base;
 static void __iomem *pvtpllcru_base;
@@ -205,6 +207,9 @@ static struct reg_region vd_log_reg_rgns[] = {
 	{ REG_REGION(0x020, 0x030, 4, &perisgrf_base, WMSK_VAL)},
 	{ REG_REGION(0x080, 0x0a4, 4, &perisgrf_base, WMSK_VAL)},
 	{ REG_REGION(0x0b8, 0x0bc, 4, &perisgrf_base, WMSK_VAL)},
+
+	/* vi_grf */
+	{ REG_REGION(0x000, 0x000, 4, &vigrf_base, 0x00400000)}, /* rtc_clamp_en */
 
 	/* vi_cru */
 	{ REG_REGION(0x300, 0x30c, 4, &vicru_base, WMSK_VAL)},
@@ -645,7 +650,9 @@ static void pvtm_32k_config(void)
 	ddr_data.pmucru_sel_con7 =
 		readl_relaxed(pmucru_base + RV1106_PMUCRU_CLKSEL_CON(7));
 
-	if (slp_cfg->mode_config & RKPM_SLP_32K_EXT) {
+	/* We can use clk-32k from rtc when chip_version > 0 only */
+	if ((slp_cfg->mode_config & RKPM_SLP_32K_EXT) &&
+	    (rv1106_chip_version > 0)) {
 		writel_relaxed(BITS_WITH_WMASK(0x3, 0x3, 14),
 			       pmugrf_base + RV1106_PMUGRF_SOC_CON(1));
 		writel_relaxed(BITS_WITH_WMASK(0x1, 0x3, 0),
@@ -779,7 +786,7 @@ static void pmu_sleep_config(void)
 		/* BIT(RV1106_PMU_WAKEUP_CPU_INT_EN) | */
 		BIT(RV1106_PMU_WAKEUP_GPIO_INT_EN) |
 		0;
-	if (IS_ENABLED(CONFIG_RV1106_PMU_WAKEUP_TIMEOUT))
+	if (readl_relaxed(pmu_base + RV1106_PMU_WAKEUP_TIMEOUT_CNT) != 0)
 		pmu_wkup_con |= BIT(RV1106_PMU_WAKEUP_TIMEOUT_EN);
 
 	pmu_pwr_con =
@@ -1154,7 +1161,18 @@ static int rockchip_lpmode_enter(unsigned long arg)
 
 	cpu_do_idle();
 
-	pr_err("%s: Failed to suspend\n", __func__);
+#if RV1106_WAKEUP_TO_SYSTEM_RESET
+	/* If reaches here, it means wakeup source cames before cpu enter wfi.
+	 * So we should do system reset if RV1106_WAKEUP_TO_SYSTEM_RESET.
+	 */
+	writel_relaxed(0x000c000c, cru_base + RV1106_CRU_GLB_RST_CON);
+	writel_relaxed(0xffff0000, pmugrf_base + RV1106_PMUGRF_SOC_CON(4));
+	writel_relaxed(0xffff0000, pmugrf_base + RV1106_PMUGRF_SOC_CON(5));
+	dsb(sy);
+	writel_relaxed(0xfdb9, cru_base + RV1106_CRU_GLB_SRST_FST);
+#endif
+
+	rkpm_printstr("Failed to suspend\n");
 
 	return 1;
 }
@@ -1314,6 +1332,8 @@ static int __init rv1106_suspend_init(struct device_node *np)
 
 	rv1106_bootram_base = dev_reg_base + RV1106_PMUSRAM_OFFSET;
 
+	rv1106_chip_version = readl_relaxed(pmugrf_base + RV1106_PMUGRF_OS_REG(1)) & 0x7;
+
 	rv1106_config_bootdata();
 
 	/* copy resume code and data to bootsram */
@@ -1332,6 +1352,9 @@ static int __init rv1106_suspend_init(struct device_node *np)
 	/* gpio0_a3 activelow, gpio0_a4 active high, select sleep func */
 	writel_relaxed(BITS_WITH_WMASK(0x5, 0x7, 0),
 		       pmugrf_base + RV1106_PMUGRF_SOC_CON(1));
+
+	/* PMU_WAKEUP_TIMEOUT_CNT = 0, disable TIMEOUT_WAKEUP by default */
+	writel_relaxed(0x0, pmu_base + RV1106_PMU_WAKEUP_TIMEOUT_CNT);
 
 	rkpm_region_mem_init(RV1106_PM_REG_REGION_MEM_SIZE);
 	rkpm_reg_rgns_init();

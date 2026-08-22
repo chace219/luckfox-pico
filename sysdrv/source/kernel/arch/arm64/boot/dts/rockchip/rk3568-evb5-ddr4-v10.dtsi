@@ -52,7 +52,7 @@
 		vin-supply = <&vcc3v3_sys>;
 	};
 
-	vcc3v3_pcie: gpio-regulator {
+	vcc3v3_pcie: vcc3v3-pcie {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc3v3_pcie";
 		regulator-min-microvolt = <3300000>;
@@ -81,6 +81,13 @@
 		enable-active-high;
 		regulator-always-on;
 		regulator-boot-on;
+	};
+};
+
+&bt_sound {
+	status = "disabled";
+	simple-audio-card,cpu {
+		sound-dai = <&i2s2_2ch>;
 	};
 };
 
@@ -257,6 +264,10 @@
 	power-supply = <&vcc3v3_lcd0_n>;
 };
 
+&hynitron {
+	power-supply = <&vcc3v3_lcd0_n>;
+};
+
 &i2c3 {
 	clock-frequency = <400000>;
 	status = "okay";
@@ -297,6 +308,7 @@
 		clock-names = "xvclk";
 		pinctrl-names = "default";
 		pinctrl-0 = <&cif_clk>;
+		power-domains = <&power RK3568_PD_VI>;
 		reset-gpios = <&gpio3 RK_PB6 GPIO_ACTIVE_LOW>;
 		pwdn-gpios = <&gpio4 RK_PB4 GPIO_ACTIVE_LOW>;
 		rockchip,grf = <&grf>;
@@ -357,6 +369,12 @@
 };
 
 &i2c5 {
+	status = "disabled";
+};
+
+&i2s2_2ch {
+	pinctrl-0 = <&i2s2m0_sclktx &i2s2m0_lrcktx &i2s2m0_sdi &i2s2m0_sdo>;
+	rockchip,bclk-fs = <32>;
 	status = "disabled";
 };
 

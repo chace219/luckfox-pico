@@ -166,6 +166,16 @@ struct stream_config {
 	struct {
 		u32 ctrl;
 		u32 ctrl_shd;
+		u32 update;
+		u32 src_size;
+		u32 dst_size;
+		u32 scale_hy_offs_mi;
+		u32 scale_hc_offs_mi;
+		u32 scale_in_crop_offs;
+		u32 scale_hy_offs;
+		u32 scale_hc_offs;
+		u32 scale_hy_size;
+		u32 scale_hc_size;
 		u32 scale_hy;
 		u32 scale_hcr;
 		u32 scale_hcb;
@@ -289,6 +299,8 @@ struct rkisp_stream {
 	bool is_crop_upd;
 	bool is_using_resmem;
 	bool frame_early;
+	bool is_attach_info;
+	bool is_async_cfg;
 	wait_queue_head_t done;
 	unsigned int burst;
 	atomic_t sequence;
@@ -331,6 +343,7 @@ extern struct stream_config rkisp_mp_stream_config;
 extern struct stream_config rkisp_sp_stream_config;
 extern struct rockit_isp_ops rockit_isp_ops;
 
+void rkisp_stream_vir_cpy_image(struct work_struct *work);
 void rkisp_stream_buf_done_early(struct rkisp_device *dev);
 void rkisp_stream_buf_done(struct rkisp_stream *stream,
 			   struct rkisp_buffer *buf);

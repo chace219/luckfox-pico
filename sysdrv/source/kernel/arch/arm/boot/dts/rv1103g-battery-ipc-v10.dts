@@ -314,20 +314,3 @@
 &thunder_boot_service {
 	status = "okay";
 };
-
-&rkisp_thunderboot {
-	/* reg's offset MUST match with RTOS */
-	/*
-	 * vicap, capture raw10, ceil(w*10/8/256)*256*h *5(buf num)
-	 * e.g. 1920x1080: 0xd2f000
-	 */
-	reg = <0x00860000 0xd2f000>;
-};
-
-&ramdisk_r {
-	reg = <0x158f000 (10 * 0x00100000)>;
-};
-
-&ramdisk_c {
-	reg = <0x1f8f000 (5 * 0x00100000)>;
-};

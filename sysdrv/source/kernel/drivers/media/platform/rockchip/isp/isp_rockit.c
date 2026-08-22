@@ -52,6 +52,10 @@ static struct rkisp_stream *rkisp_rockit_get_stream(struct rockit_cfg *input_roc
 		return NULL;
 	}
 
+	if (ispdev->isp_ver == ISP_V33 &&
+	    (input_rockit_cfg->nick_id == 3 || input_rockit_cfg->nick_id == 4))
+		return NULL;
+
 	switch (input_rockit_cfg->nick_id) {
 	case 0:
 		stream = &ispdev->cap_dev.stream[RKISP_STREAM_MP];
@@ -157,11 +161,11 @@ int rkisp_rockit_buf_queue(struct rockit_cfg *input_rockit_cfg)
 		} else {
 			isprk_buf->buff_addr = *((u32 *)g_ops->cookie(mem));
 		}
-		if (rkisp_buf_dbg) {
-			u64 *data;
 
-			isprk_buf->vaddr = g_ops->vaddr(mem);
-			data = isprk_buf->vaddr;
+		isprk_buf->vaddr = g_ops->vaddr(mem);
+		if (rkisp_buf_dbg) {
+			u64 *data = isprk_buf->vaddr;
+
 			if (data)
 				*data = RKISP_DATA_CHECK;
 		}
@@ -230,6 +234,11 @@ int rkisp_rockit_buf_queue(struct rockit_cfg *input_rockit_cfg)
 		}
 		isprk_buf->isp_buf.buff_addr[0] = dma_addr + y_offs;
 		isprk_buf->isp_buf.buff_addr[1] = dma_addr + offset;
+		if (isprk_buf->vaddr) {
+			isprk_buf->isp_buf.vaddr[0] = isprk_buf->vaddr + y_offs;
+			isprk_buf->isp_buf.vaddr[1] = isprk_buf->vaddr + offset;
+		}
+		isprk_buf->isp_buf.vb.vb2_buf.planes[0].mem_priv = isprk_buf->mpi_mem;
 	}
 
 	v4l2_dbg(2, rkisp_debug, &ispdev->v4l2_dev,
@@ -243,7 +252,7 @@ int rkisp_rockit_buf_queue(struct rockit_cfg *input_rockit_cfg)
 	return 0;
 }
 
-int rkisp_rockit_buf_done(struct rkisp_stream *stream, int cmd)
+int rkisp_rockit_buf_done(struct rkisp_stream *stream, int cmd, struct rkisp_buffer *curr_buf)
 {
 	struct rkisp_device *dev = stream->ispdev;
 	struct rkisp_rockit_buffer *isprk_buf = NULL;
@@ -259,33 +268,36 @@ int rkisp_rockit_buf_done(struct rkisp_stream *stream, int cmd)
 	stream_cfg = &rockit_cfg->rkisp_dev_cfg[dev_id].rkisp_stream_cfg[stream->id];
 	if (cmd == ROCKIT_DVBM_END) {
 		isprk_buf =
-			container_of(stream->curr_buf, struct rkisp_rockit_buffer, isp_buf);
+			container_of(curr_buf, struct rkisp_rockit_buffer, isp_buf);
 
 		rockit_cfg->mpibuf = isprk_buf->mpi_buf;
 
-		rockit_cfg->frame.u64PTS = stream->curr_buf->vb.vb2_buf.timestamp;
+		rockit_cfg->frame.u64PTS = curr_buf->vb.vb2_buf.timestamp;
 
-		rockit_cfg->frame.u32TimeRef = stream->curr_buf->vb.sequence;
+		rockit_cfg->frame.u32TimeRef = curr_buf->vb.sequence;
 		v4l2_dbg(2, rkisp_debug, &dev->v4l2_dev,
 			 "stream:%d seq:%d rockit buf done:0x%x\n",
 			 stream->id,
-			 stream->curr_buf->vb.sequence,
-			 stream->curr_buf->buff_addr[0]);
+			 curr_buf->vb.sequence,
+			 curr_buf->buff_addr[0]);
 		if (rkisp_buf_dbg) {
 			u64 *data = isprk_buf->vaddr;
 
 			if (data && *data == RKISP_DATA_CHECK)
 				v4l2_info(&dev->v4l2_dev,
 					  "rockit seq:%d data no update:%llx %llx\n",
-					  stream->curr_buf->vb.sequence,
+					  curr_buf->vb.sequence,
 					  *data, *(data + 1));
 		}
 	} else {
 		if (stream->ispdev->cap_dev.wrap_line &&
 		    stream->id == RKISP_STREAM_MP) {
-			if (dev->is_first_double || stream_cfg->is_discard ||
-			    stream->ops->is_stream_stopped(stream))
+			if (dev->skip_frame || stream_cfg->is_discard ||
+			    stream->skip_frame || stream->ops->is_stream_stopped(stream)) {
+				if (stream->skip_frame)
+					stream->skip_frame--;
 				return 0;
+			}
 		} else if (stream_cfg->dst_fps) {
 			if (!stream_cfg->is_discard && !stream->curr_buf) {
 				rockit_cfg->is_qbuf = true;
@@ -305,6 +317,35 @@ int rkisp_rockit_buf_done(struct rkisp_stream *stream, int cmd)
 		rockit_cfg->frame.u64PTS = ns;
 
 		rockit_cfg->frame.u32TimeRef = seq;
+		if (dev->isp_ver == ISP_V33)
+			rockit_cfg->frame.ispEncCnt =
+				ISP33_ISP2ENC_FRM_CNT(rkisp_read(dev, ISP3X_ISP_DEBUG1, true));
+	}
+
+	if (stream->is_attach_info) {
+		struct sensor_exposure_cfg *exp = &dev->params_vdev.exposure;
+
+		if (!IS_HDR_RDBK(dev->rd_mode))
+			rockit_cfg->frame.u64PTS = dev->vicap_sof.timestamp;
+		rockit_cfg->frame.hdr = dev->params_vdev.is_hdr;
+		rockit_cfg->frame.rolling_shutter_skew = exp->linear_exp.rolling_shutter_skew;
+		rockit_cfg->frame.sensor_exposure_time = exp->linear_exp.coarse_integration_time;
+		rockit_cfg->frame.sensor_analog_gain = exp->linear_exp.analog_gain_code_global;
+		rockit_cfg->frame.sensor_digital_gain = exp->linear_exp.digital_gain_global;
+		rockit_cfg->frame.isp_digital_gain = exp->linear_exp.isp_digital_gain;
+		if (rockit_cfg->frame.hdr) {
+			rockit_cfg->frame.rolling_shutter_skew = exp->hdr_exp[0].rolling_shutter_skew;
+
+			rockit_cfg->frame.sensor_exposure_time = exp->hdr_exp[0].coarse_integration_time;
+			rockit_cfg->frame.sensor_analog_gain = exp->hdr_exp[0].analog_gain_code_global;
+			rockit_cfg->frame.sensor_digital_gain = exp->hdr_exp[0].digital_gain_global;
+			rockit_cfg->frame.isp_digital_gain = exp->hdr_exp[0].isp_digital_gain;
+
+			rockit_cfg->frame.sensor_exposure_time_l = exp->hdr_exp[1].coarse_integration_time;
+			rockit_cfg->frame.sensor_analog_gain_l = exp->hdr_exp[1].analog_gain_code_global;
+			rockit_cfg->frame.sensor_digital_gain_l = exp->hdr_exp[1].digital_gain_global;
+			rockit_cfg->frame.isp_digital_gain_l = exp->hdr_exp[1].isp_digital_gain;
+		}
 	}
 
 	rockit_cfg->is_color = !rkisp_read(dev, ISP3X_IMG_EFF_CTRL, true);
@@ -347,8 +388,12 @@ int rkisp_rockit_pause_stream(struct rockit_cfg *input_rockit_cfg)
 		return -EINVAL;
 	}
 
-	rockit_isp_ops.rkisp_stream_stop(stream);
+	v4l2_dbg(1, rkisp_debug, &stream->ispdev->v4l2_dev,
+		 "%s stream:%d\n", __func__, stream->id);
 
+	rockit_isp_ops.rkisp_stream_stop(stream);
+	if (stream->ispdev->cap_dev.wrap_line && stream->id == RKISP_STREAM_MP)
+		rkisp_dvbm_deinit(stream->ispdev);
 	return 0;
 }
 EXPORT_SYMBOL(rkisp_rockit_pause_stream);
@@ -368,6 +413,11 @@ int rkisp_rockit_config_stream(struct rockit_cfg *input_rockit_cfg,
 		pr_err("the stream is NULL");
 		return -EINVAL;
 	}
+
+	v4l2_dbg(1, rkisp_debug, &stream->ispdev->v4l2_dev,
+		 "%s stream:%d %dx%d wrap:%d\n",
+		 __func__, stream->id, width, height, wrap_line);
+
 	stream->ispdev->cap_dev.wrap_line = wrap_line;
 	stream->out_fmt.width = width;
 	stream->out_fmt.height = height;
@@ -405,8 +455,6 @@ int rkisp_rockit_config_stream(struct rockit_cfg *input_rockit_cfg,
 		struct rkisp_rockit_buffer *isprk_buf =
 			container_of(isp_buf, struct rkisp_rockit_buffer, isp_buf);
 
-		if (!isprk_buf)
-			break;
 		if (stream->out_isp_fmt.mplanes == 1) {
 			u32 y_offs = input_rockit_cfg->y_offset;
 			u32 u_offs = input_rockit_cfg->u_offset;
@@ -451,12 +499,15 @@ int rkisp_rockit_resume_stream(struct rockit_cfg *input_rockit_cfg)
 		return -EINVAL;
 	}
 
-	stream->streaming = true;
+	v4l2_dbg(1, rkisp_debug, &stream->ispdev->v4l2_dev,
+		 "%s stream:%d\n", __func__, stream->id);
+
 	ret = rockit_isp_ops.rkisp_stream_start(stream);
 	if (ret < 0) {
 		pr_err("stream id %d start failed\n", stream->id);
 		return -EINVAL;
 	}
+	stream->skip_frame = 2;
 	if (stream->ispdev->isp_state == ISP_STOP) {
 		stream->ispdev->isp_state = ISP_START;
 		rkisp_rdbk_trigger_event(stream->ispdev, T_CMD_QUEUE, NULL);
@@ -750,7 +801,7 @@ void rkisp_rockit_frame_start(struct rkisp_device *dev)
 		stream = &dev->cap_dev.stream[i];
 		if (!stream->streaming)
 			continue;
-		rkisp_rockit_buf_done(stream, ROCKIT_DVBM_START);
+		rkisp_rockit_buf_done(stream, ROCKIT_DVBM_START, stream->curr_buf);
 		rkisp_rockit_ctrl_fps(stream);
 	}
 }

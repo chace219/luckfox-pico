@@ -572,26 +572,27 @@ static int gt1x_ts_probe(struct i2c_client *client, const struct i2c_device_id *
 	if (client->dev.of_node) {
 		ret = gt1x_parse_dt(&client->dev);
 		if (ret)
-			return ret;
+			goto probe_err;
 	}
 #endif
 
 	ret = gt1x_request_io_port();
 	if (ret < 0) {
 		GTP_ERROR("GTP request IO port failed.");
-		return ret;
+		goto probe_err;
 	}
 
 	ret = gt1x_init();
 	if (ret != 0) {
 		GTP_ERROR("GTP init failed!!!");
-		return ret;
+		goto probe_err;
 	}
 
 	gt1x_wq = create_singlethread_workqueue("gt1x_wq");
 	if (!gt1x_wq) {
 		GTP_ERROR("Creat workqueue failed.");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto probe_err;
 	}
 
 	INIT_WORK(&gt1x_work, gt1x_ts_work_func);
@@ -629,6 +630,15 @@ static int gt1x_ts_probe(struct i2c_client *client, const struct i2c_device_id *
 #endif
 	gt1x_register_powermanger();
 	return 0;
+
+probe_err:
+	if (gpio_is_valid(gt1x_int_gpio))
+		gpio_free(gt1x_int_gpio);
+
+	if (gpio_is_valid(gt1x_rst_gpio))
+		gpio_free(gt1x_rst_gpio);
+
+	return ret;
 }
 
 /**
@@ -656,6 +666,18 @@ static int gt1x_ts_remove(struct i2c_client *client)
 }
 
 #if defined(CONFIG_FB)
+#include <linux/async.h>
+
+static void gt1x_resume_async(void *data, async_cookie_t cookie)
+{
+	gt1x_resume();
+}
+
+static void gt1x_suspend_async(void *data, async_cookie_t cookie)
+{
+	gt1x_suspend();
+}
+
 /* frame buffer notifier block control the suspend/resume procedure */
 static struct notifier_block gt1x_fb_notifier;
 static int tp_status;
@@ -686,7 +708,7 @@ static int gtp_fb_notifier_callback(struct notifier_block *noti, unsigned long e
 		if (*blank == FB_BLANK_UNBLANK) {
 			tp_status = *blank;
 			GTP_DEBUG("Resume by fb notifier.");
-			gt1x_resume();
+			async_schedule(gt1x_resume_async, NULL);
 		}
 	}
 #endif
@@ -697,7 +719,7 @@ static int gtp_fb_notifier_callback(struct notifier_block *noti, unsigned long e
 		if (*blank == FB_BLANK_POWERDOWN) {
 			tp_status = *blank;
 			GTP_DEBUG("Suspend by fb notifier.");
-			gt1x_suspend();
+			async_schedule(gt1x_suspend_async, NULL);
 		}
 	}
 
@@ -798,7 +820,9 @@ static struct i2c_driver gt1x_ts_driver = {
 #if !defined(CONFIG_FB) && defined(CONFIG_PM)
 		   .pm = &gt1x_ts_pm_ops,
 #endif
+#if !IS_REACHABLE(CONFIG_TOUCHSCREEN_HYN)
 		   .probe_type = PROBE_PREFER_ASYNCHRONOUS,
+#endif
 		   },
 };
 

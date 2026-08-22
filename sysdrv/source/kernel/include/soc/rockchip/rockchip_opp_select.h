@@ -78,6 +78,9 @@ struct rockchip_opp_info {
 	u32 low_rm;
 	u32 current_rm;
 	u32 target_rm;
+	u32 pvtpll_clk_id;
+	bool pvtpll_smc;
+	bool pvtpll_low_temp;
 };
 
 #if IS_ENABLED(CONFIG_ROCKCHIP_OPP)
@@ -87,8 +90,10 @@ void rockchip_of_get_lkg_sel(struct device *dev, struct device_node *np,
 			     int *volt_sel, int *scale_sel);
 void rockchip_pvtpll_calibrate_opp(struct rockchip_opp_info *info);
 void rockchip_pvtpll_add_length(struct rockchip_opp_info *info);
+int rockchip_pvtpll_set_volt_sel(struct rockchip_opp_info *info, int volt_sel);
+void rockchip_init_pvtpll_table(struct rockchip_opp_info *info, int bin);
 void rockchip_of_get_pvtm_sel(struct device *dev, struct device_node *np,
-			      char *reg_name, int process,
+			      char *reg_name, int bin, int process,
 			      int *volt_sel, int *scale_sel);
 void rockchip_of_get_bin_sel(struct device *dev, struct device_node *np,
 			     int bin, int *scale_sel);
@@ -102,11 +107,16 @@ int rockchip_get_volt_rm_table(struct device *dev, struct device_node *np,
 			       char *porp_name, struct volt_rm_table **table);
 void rockchip_get_opp_data(const struct of_device_id *matches,
 			   struct rockchip_opp_info *info);
+int rockchip_get_soc_info(struct device *dev, struct device_node *np, int *bin,
+			  int *process);
 void rockchip_get_scale_volt_sel(struct device *dev, char *lkg_name,
 				 char *reg_name, int bin, int process,
 				 int *scale, int *volt_sel);
 struct opp_table *rockchip_set_opp_prop_name(struct device *dev, int process,
 					     int volt_sel);
+struct opp_table *rockchip_set_opp_supported_hw(struct device *dev,
+						struct device_node *np,
+						int bin, int volt_sel);
 int rockchip_adjust_power_scale(struct device *dev, int scale);
 int rockchip_get_read_margin(struct device *dev,
 			     struct rockchip_opp_info *opp_info,
@@ -125,6 +135,8 @@ int rockchip_set_intermediate_rate(struct device *dev,
 int rockchip_init_opp_table(struct device *dev,
 			    struct rockchip_opp_info *info,
 			    char *lkg_name, char *reg_name);
+void rockchip_uninit_opp_table(struct device *dev,
+			       struct rockchip_opp_info *info);
 #else
 static inline int rockchip_of_get_leakage(struct device *dev, char *lkg_name,
 					  int *leakage)
@@ -147,9 +159,20 @@ static inline void rockchip_pvtpll_add_length(struct rockchip_opp_info *info)
 {
 }
 
+static inline int rockchip_pvtpll_set_volt_sel(struct rockchip_opp_info *info,
+					       int volt_sel)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline void rockchip_init_pvtpll_table(struct rockchip_opp_info *info,
+					      int bin)
+{
+}
+
 static inline void rockchip_of_get_pvtm_sel(struct device *dev,
 					    struct device_node *np,
-					    char *reg_name, int process,
+					    char *reg_name, int bin, int process,
 					    int *volt_sel, int *scale_sel)
 {
 }
@@ -191,6 +214,12 @@ static inline void rockchip_get_opp_data(const struct of_device_id *matches,
 					 struct rockchip_opp_info *info)
 {
 }
+static inline int rockchip_get_soc_info(struct device *dev,
+					struct device_node *np, int *bin,
+					int *process)
+{
+	return -EOPNOTSUPP;
+}
 
 static inline void rockchip_get_scale_volt_sel(struct device *dev,
 					       char *lkg_name, char *reg_name,
@@ -202,6 +231,13 @@ static inline void rockchip_get_scale_volt_sel(struct device *dev,
 static inline struct opp_table *rockchip_set_opp_prop_name(struct device *dev,
 							   int process,
 							   int volt_sel)
+{
+	return ERR_PTR(-EOPNOTSUPP);
+}
+
+static inline struct opp_table *rockchip_set_opp_supported_hw(struct device *dev,
+							      struct device_node *np,
+							      int bin, int volt_sel)
 {
 	return ERR_PTR(-EOPNOTSUPP);
 }
@@ -246,6 +282,11 @@ static inline int rockchip_init_opp_table(struct device *dev,
 					  char *lkg_name, char *reg_name)
 {
 	return -EOPNOTSUPP;
+}
+
+static inline void rockchip_uninit_opp_table(struct device *dev,
+					     struct rockchip_opp_info *info)
+{
 }
 
 #endif /* CONFIG_ROCKCHIP_OPP */

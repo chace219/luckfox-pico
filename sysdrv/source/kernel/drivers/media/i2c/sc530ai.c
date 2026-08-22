@@ -6,6 +6,8 @@
  *
  * V0.0X01.0X00 first version.
  * V0.0X01.0X01 fix set vflip/hflip failed bug.
+ * V0.0X01.0X02 add support thunder boot and aov mode
+ * V0.0X01.0X03 add support light-ctl
  */
 
 //#define DEBUG
@@ -44,7 +46,11 @@
 
 #include <linux/rk-camera-module.h>
 #include "../platform/rockchip/isp/rkisp_tb_helper.h"
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x01)
+#include "cam-tb-setup.h"
+#include "cam-sleep-wakeup.h"
+#include "light_ctl.h"
+
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x03)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
@@ -69,6 +75,9 @@
 #define SC530AI_MODE_SW_STANDBY		0x0
 #define SC530AI_MODE_STREAMING		BIT(0)
 
+#define SC530AI_REG_MIPI_CTRL		0x3019
+#define SC530AI_MIPI_CTRL_ON		0x0c
+#define SC530AI_MIPI_CTRL_OFF		0x0f
 #define SC530AI_REG_EXPOSURE_H		0x3e00
 #define SC530AI_REG_EXPOSURE_M		0x3e01
 #define SC530AI_REG_EXPOSURE_L		0x3e02
@@ -195,10 +204,14 @@ struct sc530ai {
 	const char		*module_facing;
 	const char		*module_name;
 	const char		*len_name;
+	u32			standby_hw;
 	bool			has_init_exp;
 	bool			is_thunderboot;
 	bool			is_first_streamoff;
+	bool			is_standby;
 	struct preisp_hdrae_exp_s init_hdrae_exp;
+	struct cam_sw_info	*cam_sw_inf;
+	struct rk_light_param light_ctl_param;
 };
 
 #define to_sc530ai(sd) container_of(sd, struct sc530ai, subdev)
@@ -226,6 +239,7 @@ static const struct regval sc530ai_linear_10_30fps_2880x1620_4lane_regs[] = {
 	{0x330a, 0x00},
 	{0x330b, 0xd8},
 	{0x330d, 0x10},
+	{0x330e, 0x42},
 	{0x331e, 0x41},
 	{0x331f, 0x61},
 	{0x3333, 0x10},
@@ -264,7 +278,7 @@ static const struct regval sc530ai_linear_10_30fps_2880x1620_4lane_regs[] = {
 	{0x34f9, 0x30},
 	{0x3632, 0x48},
 	{0x3633, 0x32},
-	{0x3637, 0x29},
+	{0x3637, 0x27},
 	{0x3638, 0xc1},
 	{0x363b, 0x20},
 	{0x363d, 0x02},
@@ -378,6 +392,7 @@ static const struct regval sc530ai_hdr_10_30fps_2880x1620_4lane_regs[] = {
 	{0x330a, 0x01},
 	{0x330b, 0x10},
 	{0x330d, 0x10},
+	{0x330e, 0x42},
 	{0x331e, 0x49},
 	{0x331f, 0x41},
 	{0x3333, 0x10},
@@ -417,7 +432,7 @@ static const struct regval sc530ai_hdr_10_30fps_2880x1620_4lane_regs[] = {
 	{0x34f9, 0x04},
 	{0x3632, 0x48},
 	{0x3633, 0x32},
-	{0x3637, 0x29},
+	{0x3637, 0x27},
 	{0x3638, 0xc1},
 	{0x363b, 0x20},
 	{0x363d, 0x02},
@@ -531,6 +546,8 @@ static const struct regval sc530ai_10_30fps_2880x1620_2lane_regs[] = {
 	{0x320f, 0xbc},
 	{0x3250, 0x40},
 	{0x3251, 0x98},
+	{0x3028, 0x36},
+	{0x3251, 0x90},
 	{0x3253, 0x0c},
 	{0x325f, 0x20},
 	{0x3301, 0x08},
@@ -541,6 +558,7 @@ static const struct regval sc530ai_10_30fps_2880x1620_2lane_regs[] = {
 	{0x330a, 0x00},
 	{0x330b, 0xf8},
 	{0x330d, 0x10},
+	{0x330e, 0x42},
 	{0x331e, 0x41},
 	{0x331f, 0x61},
 	{0x3333, 0x10},
@@ -579,7 +597,7 @@ static const struct regval sc530ai_10_30fps_2880x1620_2lane_regs[] = {
 	{0x34f9, 0x08},
 	{0x3632, 0x48},
 	{0x3633, 0x32},
-	{0x3637, 0x29},
+	{0x3637, 0x27},
 	{0x3638, 0xc1},
 	{0x363b, 0x20},
 	{0x363d, 0x02},
@@ -671,6 +689,8 @@ static const struct regval sc530ai_10_30fps_2880x1620_2lane_regs[] = {
 	{0x5afd, 0x3c},
 	{0x5afe, 0x30},
 	{0x5aff, 0x28},
+	{0x3021, 0x87}, // make sure last frame output completed
+	{0x3223, 0xd0}, // delay the first frame output time
 	{0x36e9, 0x44},
 	{0x37f9, 0x44},
 	{REG_NULL, 0x00},
@@ -734,6 +754,10 @@ static const struct sc530ai_mode supported_modes_2lane[] = {
 		.hdr_mode = NO_HDR,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
 	},
+};
+
+static const u32 bus_code[] = {
+	MEDIA_BUS_FMT_SBGGR10_1X10,
 };
 
 static const s64 link_freq_items[] = {
@@ -841,6 +865,10 @@ sc530ai_find_best_fit(struct sc530ai *sc530ai, struct v4l2_subdev_format *fmt)
 		if (cur_best_fit_dist == -1 || dist < cur_best_fit_dist) {
 			cur_best_fit_dist = dist;
 			cur_best_fit = i;
+		} else if (dist == cur_best_fit_dist &&
+			   framefmt->code == sc530ai->support_modes[i].bus_fmt) {
+			cur_best_fit = i;
+			break;
 		}
 	}
 
@@ -929,11 +957,9 @@ static int sc530ai_enum_mbus_code(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_pad_config *cfg,
 				  struct v4l2_subdev_mbus_code_enum *code)
 {
-	struct sc530ai *sc530ai = to_sc530ai(sd);
-
-	if (code->index != 0)
+	if (code->index >= ARRAY_SIZE(bus_code))
 		return -EINVAL;
-	code->code = sc530ai->cur_mode->bus_fmt;
+	code->code = bus_code[code->index];
 
 	return 0;
 }
@@ -968,6 +994,76 @@ static int sc530ai_g_frame_interval(struct v4l2_subdev *sd,
 		fi->interval = sc530ai->cur_fps;
 	else
 		fi->interval = mode->max_fps;
+
+	return 0;
+}
+
+static const struct sc530ai_mode *sc530ai_find_mode(struct sc530ai *sc530ai, int fps)
+{
+	const struct sc530ai_mode *mode = NULL;
+	const struct sc530ai_mode *match = NULL;
+	int cur_fps = 0;
+	int i = 0;
+
+	for (i = 0; i < sc530ai->support_modes_num; i++) {
+		mode = &sc530ai->support_modes[i];
+		if (mode->width == sc530ai->cur_mode->width &&
+		    mode->height == sc530ai->cur_mode->height &&
+		    mode->hdr_mode == sc530ai->cur_mode->hdr_mode &&
+		    mode->bus_fmt == sc530ai->cur_mode->bus_fmt) {
+			cur_fps = DIV_ROUND_CLOSEST(mode->max_fps.denominator, mode->max_fps.numerator);
+			if (cur_fps == fps) {
+				match = mode;
+				break;
+			}
+		}
+	}
+	return match;
+}
+
+static int sc530ai_s_frame_interval(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_frame_interval *fi)
+{
+	struct sc530ai *sc530ai = to_sc530ai(sd);
+	const struct sc530ai_mode *mode = NULL;
+	struct v4l2_fract *fract = &fi->interval;
+	s64 h_blank, vblank_def;
+	u64 pixel_rate = 0;
+	int fps;
+
+	if (sc530ai->streaming)
+		return -EBUSY;
+
+	if (fi->pad != 0)
+		return -EINVAL;
+
+	if (fract->numerator == 0) {
+		v4l2_err(sd, "error param, check interval param\n");
+		return -EINVAL;
+	}
+	fps = DIV_ROUND_CLOSEST(fract->denominator, fract->numerator);
+	mode = sc530ai_find_mode(sc530ai, fps);
+	if (mode == NULL) {
+		v4l2_err(sd, "couldn't match fi\n");
+		return -EINVAL;
+	}
+
+	sc530ai->cur_mode = mode;
+
+	h_blank = mode->hts_def - mode->width;
+	__v4l2_ctrl_modify_range(sc530ai->hblank, h_blank,
+				 h_blank, 1, h_blank);
+	vblank_def = mode->vts_def - mode->height;
+	__v4l2_ctrl_modify_range(sc530ai->vblank, vblank_def,
+				 SC530AI_VTS_MAX - mode->height,
+				 1, vblank_def);
+	pixel_rate = (u32)link_freq_items[mode->mipi_freq_idx] /
+			     mode->bpp * 2 * sc530ai->lane_num;
+	__v4l2_ctrl_s_ctrl_int64(sc530ai->pixel_rate, pixel_rate);
+	__v4l2_ctrl_s_ctrl(sc530ai->link_freq,
+			   mode->mipi_freq_idx);
+	sc530ai->cur_vts = mode->vts_def;
+	sc530ai->cur_fps = mode->max_fps;
 
 	return 0;
 }
@@ -1161,11 +1257,15 @@ static long sc530ai_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	struct rkmodule_hdr_cfg *hdr;
 	const struct sc530ai_mode *mode;
 	struct rkmodule_channel_info *ch_info;
-
 	long ret = 0;
 	u32 i, h = 0, w;
 	u32 stream = 0;
+	int rt = 0;
 	int pixel_rate = 0;
+	int cur_best_fit = -1;
+	int cur_best_fit_dist = -1;
+	int cur_dist, cur_fps, dst_fps;
+	struct rk_light_param *light_param;
 
 	switch (cmd) {
 	case RKMODULE_GET_MODULE_INFO:
@@ -1178,22 +1278,36 @@ static long sc530ai_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		break;
 	case RKMODULE_SET_HDR_CFG:
 		hdr = (struct rkmodule_hdr_cfg *)arg;
+		if (hdr->hdr_mode == sc530ai->cur_mode->hdr_mode)
+			return 0;
 		w = sc530ai->cur_mode->width;
 		h = sc530ai->cur_mode->height;
+		dst_fps = DIV_ROUND_CLOSEST(sc530ai->cur_mode->max_fps.denominator,
+			sc530ai->cur_mode->max_fps.numerator);
 		for (i = 0; i < sc530ai->support_modes_num; i++) {
 			if (w == sc530ai->support_modes[i].width &&
-				h == sc530ai->support_modes[i].height &&
-				sc530ai->support_modes[i].hdr_mode == hdr->hdr_mode) {
-				sc530ai->cur_mode = &sc530ai->support_modes[i];
-				break;
+			    h == sc530ai->support_modes[i].height &&
+			    sc530ai->support_modes[i].hdr_mode == hdr->hdr_mode &&
+			    sc530ai->support_modes[i].bus_fmt == sc530ai->cur_mode->bus_fmt) {
+				cur_fps = DIV_ROUND_CLOSEST(sc530ai->support_modes[i].max_fps.denominator,
+					sc530ai->support_modes[i].max_fps.numerator);
+				cur_dist = abs(cur_fps - dst_fps);
+				if (cur_best_fit_dist == -1 || cur_dist < cur_best_fit_dist) {
+					cur_best_fit_dist = cur_dist;
+					cur_best_fit = i;
+				} else if (cur_dist == cur_best_fit_dist) {
+					cur_best_fit = i;
+					break;
+				}
 			}
 		}
-		if (i == sc530ai->support_modes_num) {
+		if (cur_best_fit == -1) {
 			dev_err(&sc530ai->client->dev,
 				"not find hdr mode:%d %dx%d config\n",
 				hdr->hdr_mode, w, h);
 			ret = -EINVAL;
 		} else {
+			sc530ai->cur_mode = &sc530ai->support_modes[cur_best_fit];
 			mode = sc530ai->cur_mode;
 			w = sc530ai->cur_mode->hts_def -
 					sc530ai->cur_mode->width;
@@ -1222,23 +1336,113 @@ static long sc530ai_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	case PREISP_CMD_SET_HDRAE_EXP:
 		if (sc530ai->cur_mode->hdr_mode == HDR_X2)
 			ret = sc530ai_set_hdrae(sc530ai, arg);
+		if (sc530ai->cam_sw_inf)
+			memcpy(&sc530ai->cam_sw_inf->hdr_ae, (struct preisp_hdrae_exp_s *)(arg),
+				sizeof(struct preisp_hdrae_exp_s));
 		break;
 	case RKMODULE_SET_QUICK_STREAM:
 		stream = *((u32 *)arg);
-		if (stream)
-			ret = sc530ai_write_reg(sc530ai->client,
-						SC530AI_REG_CTRL_MODE,
-						SC530AI_REG_VALUE_08BIT,
-						SC530AI_MODE_STREAMING);
-		else
-			ret = sc530ai_write_reg(sc530ai->client,
-						SC530AI_REG_CTRL_MODE,
-						SC530AI_REG_VALUE_08BIT,
-						SC530AI_MODE_SW_STANDBY);
+		dev_info(&sc530ai->client->dev, "%s: quick_stream = %d\n",
+			__func__, stream);
+		// light control
+		if (stream) {
+			sc530ai->light_ctl_param.light_enable = true;
+			rt = light_ctl_write(sc530ai->module_index,
+					     &sc530ai->light_ctl_param);
+		} else {
+			sc530ai->light_ctl_param.light_enable = false;
+			rt = light_ctl_write(sc530ai->module_index,
+					     &sc530ai->light_ctl_param);
+		}
+
+		dev_info(&sc530ai->client->dev, "%s: light_ctl_write ret:%d\n",
+			__func__, rt);
+
+
+		if (sc530ai->standby_hw) { // hardware standby
+			if (stream) {
+				if (!IS_ERR(sc530ai->pwdn_gpio))
+					gpiod_set_value_cansleep(sc530ai->pwdn_gpio, 1);
+
+				sc530ai->is_standby = false;
+				#if IS_REACHABLE(CONFIG_VIDEO_CAM_SLEEP_WAKEUP)
+				if (__v4l2_ctrl_handler_setup(&sc530ai->ctrl_handler))
+					dev_err(&sc530ai->client->dev, "__v4l2_ctrl_handler_setup fail!");
+				if (sc530ai->cur_mode->hdr_mode != NO_HDR) {
+					if (sc530ai->cam_sw_inf) {
+						ret = sc530ai_ioctl(&sc530ai->subdev,
+								    PREISP_CMD_SET_HDRAE_EXP,
+								    &sc530ai->cam_sw_inf->hdr_ae);
+						if (ret) {
+							dev_err(&sc530ai->client->dev,
+								"init exp fail in hdr mode\n");
+							return ret;
+						}
+					}
+				}
+				#endif
+
+				/* PowerOn Delay(xx ms) Before Exposure, Contact Sensor FAE for modification */
+				ret = sc530ai_write_reg(sc530ai->client, 0x3028,
+					SC530AI_REG_VALUE_08BIT, 0x27);
+
+				ret |= sc530ai_write_reg(sc530ai->client, SC530AI_REG_MIPI_CTRL,
+							 SC530AI_REG_VALUE_08BIT,
+							 SC530AI_MIPI_CTRL_ON);
+
+				ret |= sc530ai_write_reg(sc530ai->client, SC530AI_REG_CTRL_MODE,
+							 SC530AI_REG_VALUE_08BIT,
+							 SC530AI_MODE_STREAMING);
+
+				dev_info(&sc530ai->client->dev, "quickstream, streaming on: exit standby mode\n");
+			} else {
+				ret = sc530ai_write_reg(sc530ai->client, SC530AI_REG_CTRL_MODE,
+							SC530AI_REG_VALUE_08BIT,
+							SC530AI_MODE_SW_STANDBY);
+
+				ret |= sc530ai_write_reg(sc530ai->client, SC530AI_REG_MIPI_CTRL,
+							SC530AI_REG_VALUE_08BIT,
+							SC530AI_MIPI_CTRL_OFF);
+
+				if (!IS_ERR(sc530ai->pwdn_gpio))
+					gpiod_set_value_cansleep(sc530ai->pwdn_gpio, 0);
+
+				sc530ai->is_standby = true;
+				dev_info(&sc530ai->client->dev, "quickstream, streaming off: enter standby mode\n");
+			}
+		} else {	// software standby
+			if (stream) {
+				ret = sc530ai_write_reg(sc530ai->client, SC530AI_REG_MIPI_CTRL,
+							SC530AI_REG_VALUE_08BIT,
+							SC530AI_MIPI_CTRL_ON);
+				ret |= sc530ai_write_reg(sc530ai->client, SC530AI_REG_CTRL_MODE,
+							 SC530AI_REG_VALUE_08BIT,
+							 SC530AI_MODE_STREAMING);
+			} else {
+				ret = sc530ai_write_reg(sc530ai->client, SC530AI_REG_CTRL_MODE,
+							SC530AI_REG_VALUE_08BIT,
+							SC530AI_MODE_SW_STANDBY);
+				ret |= sc530ai_write_reg(sc530ai->client, SC530AI_REG_CTRL_MODE,
+							 SC530AI_REG_VALUE_08BIT,
+							 SC530AI_MODE_SW_STANDBY);
+			}
+		}
 		break;
 	case RKMODULE_GET_CHANNEL_INFO:
 		ch_info = (struct rkmodule_channel_info *)arg;
 		ret = sc530ai_get_channel_info(sc530ai, ch_info);
+		break;
+
+	case RKCIS_CMD_FLASH_LIGHT_CTRL:
+		light_param = (struct rk_light_param *)arg;
+		dev_info(&sc530ai->client->dev,
+			"%s: RKCIS_CMD_FLASH_LIGHT_CTRL type: %s enable: %s\n",
+			__func__,
+			light_param->light_type == LIGHT_PWM ? "pwm" : "gpio",
+			light_param->light_enable ? "enable" : "disable");
+
+		memcpy(&sc530ai->light_ctl_param, light_param, sizeof(*light_param));
+
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -1250,7 +1454,7 @@ static long sc530ai_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 
 #ifdef CONFIG_COMPAT
 static long sc530ai_compat_ioctl32(struct v4l2_subdev *sd,
-					unsigned int cmd, unsigned long arg)
+				   unsigned int cmd, unsigned long arg)
 {
 	void __user *up = compat_ptr(arg);
 	struct rkmodule_inf *inf;
@@ -1259,6 +1463,7 @@ static long sc530ai_compat_ioctl32(struct v4l2_subdev *sd,
 	struct rkmodule_channel_info *ch_info;
 	long ret = 0;
 	u32 stream = 0;
+	struct rk_light_param *light_param;
 
 	switch (cmd) {
 	case RKMODULE_GET_MODULE_INFO:
@@ -1342,6 +1547,19 @@ static long sc530ai_compat_ioctl32(struct v4l2_subdev *sd,
 		}
 		kfree(ch_info);
 		break;
+	case RKCIS_CMD_FLASH_LIGHT_CTRL:
+		light_param = kzalloc(sizeof(*light_param), GFP_KERNEL);
+		if (!light_param) {
+			ret = -ENOMEM;
+			return ret;
+		}
+		ret = copy_from_user(light_param, up, sizeof(*light_param));
+		if (!ret)
+			ret = sc530ai_ioctl(sd, cmd, light_param);
+		else
+			ret = -EFAULT;
+		kfree(light_param);
+		break;
 	default:
 		ret = -ENOIOCTLCMD;
 		break;
@@ -1386,6 +1604,10 @@ static int __sc530ai_stop_stream(struct sc530ai *sc530ai)
 		sc530ai->is_first_streamoff = true;
 		pm_runtime_put(&sc530ai->client->dev);
 	}
+	sc530ai->light_ctl_param.duty_cycle = 0;
+	sc530ai->light_ctl_param.light_enable = false;
+	light_ctl_write(sc530ai->module_index,
+			&sc530ai->light_ctl_param);
 	return sc530ai_write_reg(sc530ai->client, SC530AI_REG_CTRL_MODE,
 				 SC530AI_REG_VALUE_08BIT,
 				 SC530AI_MODE_SW_STANDBY);
@@ -1495,6 +1717,8 @@ static int __sc530ai_power_on(struct sc530ai *sc530ai)
 		return ret;
 	}
 
+	cam_sw_regulator_bulk_init(sc530ai->cam_sw_inf, sc530ai_NUM_SUPPLIES, sc530ai->supplies);
+
 	if (sc530ai->is_thunderboot)
 		return 0;
 
@@ -1551,6 +1775,61 @@ static void __sc530ai_power_off(struct sc530ai *sc530ai)
 	regulator_bulk_disable(sc530ai_NUM_SUPPLIES, sc530ai->supplies);
 }
 
+#if IS_REACHABLE(CONFIG_VIDEO_CAM_SLEEP_WAKEUP)
+static int __maybe_unused sc530ai_resume(struct device *dev)
+{
+	int ret;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct sc530ai *sc530ai = to_sc530ai(sd);
+
+	if (sc530ai->standby_hw) {
+		dev_info(dev, "resume standby!");
+		return 0;
+	}
+
+	cam_sw_prepare_wakeup(sc530ai->cam_sw_inf, dev);
+
+	usleep_range(4000, 5000);
+	cam_sw_write_array(sc530ai->cam_sw_inf);
+
+	if (__v4l2_ctrl_handler_setup(&sc530ai->ctrl_handler))
+		dev_err(dev, "__v4l2_ctrl_handler_setup fail!");
+
+	if (sc530ai->has_init_exp && sc530ai->cur_mode != NO_HDR) {	// hdr mode
+		ret = sc530ai_ioctl(&sc530ai->subdev, PREISP_CMD_SET_HDRAE_EXP,
+				    &sc530ai->cam_sw_inf->hdr_ae);
+		if (ret) {
+			dev_err(&sc530ai->client->dev, "set exp fail in hdr mode\n");
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
+static int __maybe_unused sc530ai_suspend(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct sc530ai *sc530ai = to_sc530ai(sd);
+
+	if (sc530ai->standby_hw) {
+		dev_info(dev, "suspend standby!");
+		return 0;
+	}
+
+	cam_sw_write_array_cb_init(sc530ai->cam_sw_inf, client,
+		(void *)sc530ai->cur_mode->reg_list,
+		(sensor_write_array)sc530ai_write_array);
+	cam_sw_prepare_sleep(sc530ai->cam_sw_inf);
+
+	return 0;
+}
+#else
+#define sc530ai_resume NULL
+#define sc530ai_suspend NULL
+#endif
 static int __maybe_unused sc530ai_runtime_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
@@ -1639,6 +1918,9 @@ static int sc530ai_enum_frame_interval(struct v4l2_subdev *sd,
 static const struct dev_pm_ops sc530ai_pm_ops = {
 	SET_RUNTIME_PM_OPS(sc530ai_runtime_suspend,
 	sc530ai_runtime_resume, NULL)
+#ifdef CONFIG_VIDEO_CAM_SLEEP_WAKEUP
+	SET_LATE_SYSTEM_SLEEP_PM_OPS(sc530ai_suspend, sc530ai_resume)
+#endif
 };
 
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
@@ -1658,6 +1940,7 @@ static const struct v4l2_subdev_core_ops sc530ai_core_ops = {
 static const struct v4l2_subdev_video_ops sc530ai_video_ops = {
 	.s_stream = sc530ai_s_stream,
 	.g_frame_interval = sc530ai_g_frame_interval,
+	.s_frame_interval = sc530ai_s_frame_interval,
 };
 
 static const struct v4l2_subdev_pad_ops sc530ai_pad_ops = {
@@ -1704,6 +1987,11 @@ static int sc530ai_set_ctrl(struct v4l2_ctrl *ctrl)
 					 sc530ai->exposure->step,
 					 sc530ai->exposure->default_value);
 		break;
+	}
+
+	if (sc530ai->standby_hw && sc530ai->is_standby) {
+		dev_err(&client->dev, "%s: is_standby = true, will return\n", __func__);
+		return 0;
 	}
 
 	if (!pm_runtime_get_if_in_use(&client->dev))
@@ -1824,7 +2112,7 @@ static int sc530ai_parse_of(struct sc530ai *sc530ai)
 	fwnode = of_fwnode_handle(endpoint);
 	rval = fwnode_property_read_u32_array(fwnode, "data-lanes", NULL, 0);
 	if (rval <= 0) {
-		dev_err(dev, " Get mipi lane num failed!\n");
+		dev_err(dev, "Get mipi lane num failed!\n");
 		return -EINVAL;
 	}
 
@@ -1921,7 +2209,8 @@ static int sc530ai_initialize_controls(struct sc530ai *sc530ai)
 	sc530ai->has_init_exp = false;
 	sc530ai->cur_vts = mode->vts_def;
 	sc530ai->cur_fps = mode->max_fps;
-
+	sc530ai->is_standby = false;
+	sc530ai->light_ctl_param.duty_cycle = 0;
 	return 0;
 
 err_free_handler:
@@ -1993,6 +2282,9 @@ static int sc530ai_probe(struct i2c_client *client,
 				       &sc530ai->module_name);
 	ret |= of_property_read_string(node, RKMODULE_CAMERA_LENS_NAME,
 				       &sc530ai->len_name);
+	/* Compatible with non-standby mode if this attribute is not configured in dts*/
+	of_property_read_u32(node, RKMODULE_CAMERA_STANDBY_HW,
+			     &sc530ai->standby_hw);
 	if (ret) {
 		dev_err(dev, "could not get module information!\n");
 		return -EINVAL;
@@ -2073,6 +2365,12 @@ static int sc530ai_probe(struct i2c_client *client,
 		goto err_power_off;
 #endif
 
+	if (!sc530ai->cam_sw_inf) {
+		sc530ai->cam_sw_inf = cam_sw_init();
+		cam_sw_clk_init(sc530ai->cam_sw_inf, sc530ai->xvclk, SC530AI_XVCLK_FREQ);
+		cam_sw_reset_pin_init(sc530ai->cam_sw_inf, sc530ai->reset_gpio, 0);
+		cam_sw_pwdn_pin_init(sc530ai->cam_sw_inf, sc530ai->pwdn_gpio, 1);
+	}
 	memset(facing, 0, sizeof(facing));
 	if (strcmp(sc530ai->module_facing, "back") == 0)
 		facing[0] = 'b';
@@ -2124,6 +2422,8 @@ static int sc530ai_remove(struct i2c_client *client)
 	v4l2_ctrl_handler_free(&sc530ai->ctrl_handler);
 	mutex_destroy(&sc530ai->mutex);
 
+	cam_sw_deinit(sc530ai->cam_sw_inf);
+
 	pm_runtime_disable(&client->dev);
 	if (!pm_runtime_status_suspended(&client->dev))
 		__sc530ai_power_off(sc530ai);
@@ -2166,7 +2466,11 @@ static void __exit sensor_mod_exit(void)
 	i2c_del_driver(&sc530ai_i2c_driver);
 }
 
+#if defined(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP) && !defined(CONFIG_INITCALL_ASYNC)
+subsys_initcall(sensor_mod_init);
+#else
 device_initcall_sync(sensor_mod_init);
+#endif
 module_exit(sensor_mod_exit);
 
 MODULE_DESCRIPTION("smartsens sc530ai sensor driver");

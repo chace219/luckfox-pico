@@ -126,7 +126,7 @@ endif
 
 # Need -Uarm for gcc < 3.x
 KBUILD_CFLAGS	+=$(CFLAGS_ABI) $(CFLAGS_ISA) $(arch-y) $(tune-y) $(call cc-option,-mshort-load-bytes,$(call cc-option,-malignment-traps,)) -msoft-float -Uarm
-KBUILD_AFLAGS	+=$(CFLAGS_ABI) $(AFLAGS_ISA) $(arch-y) $(tune-y) -include asm/unified.h -msoft-float
+KBUILD_AFLAGS	+=$(CFLAGS_ABI) $(AFLAGS_ISA) $(arch-y) $(tune-y) -include $(srctree)/arch/arm/include/asm/unified.h -msoft-float
 
 CHECKFLAGS	+= -D__arm__
 
@@ -154,6 +154,7 @@ textofs-$(CONFIG_ARCH_MESON) := 0x00208000
 textofs-$(CONFIG_ARCH_AXXIA) := 0x00308000
 textofs-$(CONFIG_CPU_RK3308) := 0x00058000
 ifeq ($(CONFIG_ROCKCHIP_THUNDER_BOOT),y)
+textofs-$(CONFIG_CPU_RV1103B) := 0x00208000
 textofs-$(CONFIG_CPU_RV1106) := 0x00208000
 textofs-$(CONFIG_CPU_RV1126) := 0x00608000
 endif
@@ -376,5 +377,4 @@ else
 endif
 	$(Q)$(srctree)/scripts/mkimg --dtb $*.dtb
 
-CLEAN_DIRS += out
-CLEAN_FILES += boot.img kernel.img resource.img zboot.img
+CLEAN_FILES += out boot.img kernel.img resource.img zboot.img

@@ -14,6 +14,7 @@
 #include "isp_params_v21.h"
 #include "isp_params_v3x.h"
 #include "isp_params_v32.h"
+#include "isp_params_v33.h"
 #include "regs.h"
 
 #define PARAMS_NAME DRIVER_NAME "-input-params"
@@ -92,6 +93,35 @@ static int rkisp_params_unsubs_evt(struct v4l2_fh *fh,
 	return v4l2_event_unsubscribe(fh, sub);
 }
 
+static int rkisp_get_params(struct rkisp_isp_params_vdev *params_vdev, void *arg)
+{
+	int ret = -EINVAL;
+
+	if (params_vdev->dev->isp_ver == ISP_V33)
+		ret = rkisp_get_params_v33(params_vdev, arg);
+	return ret;
+}
+
+static long rkisp_params_ioctl_default(struct file *file, void *fh,
+				       bool valid_prio, unsigned int cmd, void *arg)
+{
+	struct rkisp_isp_params_vdev *params = video_drvdata(file);
+	long ret = 0;
+
+	switch (cmd) {
+	case RKISP_CMD_SET_EXPANDER:
+		ret = rkisp_expander_config(params->dev, arg, true);
+		break;
+	case RKISP_CMD_GET_PARAMS_V33:
+		ret = rkisp_get_params(params, arg);
+		break;
+	default:
+		ret = -EINVAL;
+	}
+
+	return ret;
+}
+
 /* ISP params video device IOCTLs */
 static const struct v4l2_ioctl_ops rkisp_params_ioctl = {
 	.vidioc_reqbufs = vb2_ioctl_reqbufs,
@@ -110,6 +140,7 @@ static const struct v4l2_ioctl_ops rkisp_params_ioctl = {
 	.vidioc_querycap = rkisp_params_querycap,
 	.vidioc_subscribe_event = rkisp_params_subs_evt,
 	.vidioc_unsubscribe_event = rkisp_params_unsubs_evt,
+	.vidioc_default = rkisp_params_ioctl_default,
 };
 
 static int rkisp_params_vb2_queue_setup(struct vb2_queue *vq,
@@ -185,25 +216,46 @@ static void rkisp_params_vb2_buf_queue(struct vb2_buffer *vb)
 	list_add_tail(&params_buf->queue, &params_vdev->params);
 	spin_unlock_irqrestore(&params_vdev->config_lock, flags);
 
-	if (params_vdev->dev->is_first_double) {
+	if (dev->is_wait_aiq) {
+		dev_info(dev->dev, "sync params for rtt\n");
+		dev->is_wait_aiq = false;
+		dev->skip_frame = 0;
+		rkisp_rdbk_trigger_event(dev, T_CMD_END, NULL);
+	}
+	if (dev->is_first_double) {
 		struct isp32_isp_params_cfg *params = params_buf->vaddr[0];
 		struct rkisp_buffer *buf;
 
 		if (!(params->module_cfg_update & ISP32_MODULE_RTT_FST))
 			return;
 		spin_lock_irqsave(&params_vdev->config_lock, flags);
-		while (!list_empty(&params_vdev->params)) {
-			buf = list_first_entry(&params_vdev->params,
-					       struct rkisp_buffer, queue);
-			if (buf == params_buf)
-				break;
+		if (params->module_cfg_update & ~ISP32_MODULE_RTT_FST) {
+			while (!list_empty(&params_vdev->params)) {
+				buf = list_first_entry(&params_vdev->params,
+						       struct rkisp_buffer, queue);
+				if (buf == params_buf)
+					break;
+				list_del(&buf->queue);
+				vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
+			}
+		} else {
+			buf = list_last_entry(&params_vdev->params, struct rkisp_buffer, queue);
 			list_del(&buf->queue);
 			vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
 		}
 		spin_unlock_irqrestore(&params_vdev->config_lock, flags);
-		dev_info(params_vdev->dev->dev,
-			 "first params:%d for rtt resume\n", params->frame_id);
-		params_vdev->dev->is_first_double = false;
+		dev_info(dev->dev, "params seq:%d for rtt\n", params->frame_id);
+		dev->is_first_double = false;
+		if (dev->isp_ver == ISP_V33) {
+			dev->skip_frame = 1;
+			dev->is_wait_aiq = true;
+		}
+		dev->sw_rd_cnt = 0;
+		if (dev->hw_dev->unite == ISP_UNITE_ONE) {
+			dev->unite_index = ISP_UNITE_LEFT;
+			dev->sw_rd_cnt += dev->hw_dev->is_multi_overflow ? 3 : 1;
+		}
+		params_vdev->rdbk_times = dev->sw_rd_cnt + 1;
 		rkisp_trigger_read_back(params_vdev->dev, false, false, false);
 	}
 }
@@ -215,6 +267,8 @@ static void rkisp_params_vb2_stop_streaming(struct vb2_queue *vq)
 	struct rkisp_buffer *buf;
 	unsigned long flags;
 
+	v4l2_dbg(1, rkisp_debug, &dev->v4l2_dev,
+		 "%s state:0x%x\n", __func__, dev->isp_state);
 	/* stop params input firstly */
 	spin_lock_irqsave(&params_vdev->config_lock, flags);
 	params_vdev->streamon = false;
@@ -232,25 +286,47 @@ static void rkisp_params_vb2_stop_streaming(struct vb2_queue *vq)
 	}
 	spin_unlock_irqrestore(&params_vdev->config_lock, flags);
 
-	if (dev->is_pre_on) {
+	if (dev->is_pre_on && (dev->isp_state & ISP_START)) {
 		params_vdev->first_cfg_params = true;
 		return;
 	}
-	rkisp_params_disable_isp(params_vdev);
 	/* clean module params */
 	params_vdev->ops->clear_first_param(params_vdev);
 	params_vdev->rdbk_times = 0;
+	if (dev->isp_ver == ISP_V30) {
+		struct rkisp_isp_params_val_v3x *priv = params_vdev->priv_val;
+
+		tasklet_disable(&priv->lsc_tasklet);
+	}
+	if (params_vdev->is_first_cfg) {
+		rkisp_params_stream_stop(params_vdev);
+		params_vdev->is_first_cfg = false;
+	}
+	dev->fpn_cfg.en = 0;
+	if (dev->fpn_cfg.buf) {
+		vfree(dev->fpn_cfg.buf);
+		dev->fpn_cfg.buf = NULL;
+		dev->fpn_cfg.buf_size = 0;
+	}
 }
 
 static int
 rkisp_params_vb2_start_streaming(struct vb2_queue *queue, unsigned int count)
 {
 	struct rkisp_isp_params_vdev *params_vdev = queue->drv_priv;
+	struct rkisp_device *dev = params_vdev->dev;
 	unsigned long flags;
 
+	v4l2_dbg(1, rkisp_debug, &params_vdev->dev->v4l2_dev,
+		 "%s cnt:%d\n", __func__, count);
 	params_vdev->hdrtmo_en = false;
 	params_vdev->afaemode_en = false;
 	params_vdev->cur_buf = NULL;
+	if (dev->isp_ver == ISP_V30) {
+		struct rkisp_isp_params_val_v3x *priv = params_vdev->priv_val;
+
+		tasklet_enable(&priv->lsc_tasklet);
+	}
 	spin_lock_irqsave(&params_vdev->config_lock, flags);
 	params_vdev->streamon = true;
 	spin_unlock_irqrestore(&params_vdev->config_lock, flags);
@@ -276,7 +352,7 @@ static int rkisp_params_fh_open(struct file *filp)
 	if (!params->dev->is_probe_end)
 		return -EINVAL;
 	ret = rkisp_cond_poll_timeout(!params->dev->is_thunderboot,
-				      2000, 5000 * USEC_PER_MSEC);
+				      5000, 1000 * USEC_PER_MSEC);
 	if (ret)
 		return ret;
 
@@ -286,7 +362,8 @@ static int rkisp_params_fh_open(struct file *filp)
 		if (ret < 0)
 			vb2_fop_release(filp);
 	}
-
+	if (!ret)
+		atomic_inc(&params->open_cnt);
 	return ret;
 }
 
@@ -298,6 +375,10 @@ static int rkisp_params_fop_release(struct file *file)
 	ret = vb2_fop_release(file);
 	if (!ret)
 		v4l2_pipeline_pm_put(&params->vnode.vdev.entity);
+	if (!atomic_dec_return(&params->open_cnt) &&
+	    !(params->dev->isp_state & ISP_START) &&
+	    params->ops->fop_release)
+		params->ops->fop_release(params);
 	return ret;
 }
 
@@ -317,7 +398,10 @@ struct v4l2_file_operations rkisp_params_fops = {
 	.unlocked_ioctl = video_ioctl2,
 	.poll = rkisp_params_fop_poll,
 	.open = rkisp_params_fh_open,
-	.release = rkisp_params_fop_release
+	.release = rkisp_params_fop_release,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl32 = video_ioctl2,
+#endif
 };
 
 static int
@@ -339,18 +423,21 @@ rkisp_params_init_vb2_queue(struct vb2_queue *q,
 
 static int rkisp_init_params_vdev(struct rkisp_isp_params_vdev *params_vdev)
 {
-	int ret;
+	struct rkisp_device *dev = params_vdev->dev;
+	int ret = -EINVAL;
 
-	if (params_vdev->dev->isp_ver <= ISP_V13)
+	if (dev->isp_ver <= ISP_V13)
 		ret = rkisp_init_params_vdev_v1x(params_vdev);
-	else if (params_vdev->dev->isp_ver == ISP_V21)
+	else if (dev->isp_ver == ISP_V21)
 		ret = rkisp_init_params_vdev_v21(params_vdev);
-	else if (params_vdev->dev->isp_ver == ISP_V20)
+	else if (dev->isp_ver == ISP_V20)
 		ret = rkisp_init_params_vdev_v2x(params_vdev);
-	else if (params_vdev->dev->isp_ver == ISP_V30)
+	else if (dev->isp_ver == ISP_V30)
 		ret = rkisp_init_params_vdev_v3x(params_vdev);
-	else
+	else if (dev->isp_ver == ISP_V32 || dev->isp_ver == ISP_V32_L)
 		ret = rkisp_init_params_vdev_v32(params_vdev);
+	else if (dev->isp_ver == ISP_V33)
+		ret = rkisp_init_params_vdev_v33(params_vdev);
 
 	params_vdev->vdev_fmt.fmt.meta.dataformat = V4L2_META_FMT_RK_ISP1_PARAMS;
 	return ret;
@@ -358,16 +445,20 @@ static int rkisp_init_params_vdev(struct rkisp_isp_params_vdev *params_vdev)
 
 static void rkisp_uninit_params_vdev(struct rkisp_isp_params_vdev *params_vdev)
 {
-	if (params_vdev->dev->isp_ver <= ISP_V13)
+	struct rkisp_device *dev = params_vdev->dev;
+
+	if (dev->isp_ver <= ISP_V13)
 		rkisp_uninit_params_vdev_v1x(params_vdev);
-	else if (params_vdev->dev->isp_ver == ISP_V21)
+	else if (dev->isp_ver == ISP_V21)
 		rkisp_uninit_params_vdev_v21(params_vdev);
-	else if (params_vdev->dev->isp_ver == ISP_V20)
+	else if (dev->isp_ver == ISP_V20)
 		rkisp_uninit_params_vdev_v2x(params_vdev);
-	else if (params_vdev->dev->isp_ver == ISP_V30)
+	else if (dev->isp_ver == ISP_V30)
 		rkisp_uninit_params_vdev_v3x(params_vdev);
-	else
+	else if (dev->isp_ver == ISP_V32 || dev->isp_ver == ISP_V32_L)
 		rkisp_uninit_params_vdev_v32(params_vdev);
+	else if (dev->isp_ver == ISP_V33)
+		rkisp_uninit_params_vdev_v33(params_vdev);
 }
 
 void rkisp_params_cfg(struct rkisp_isp_params_vdev *params_vdev, u32 frame_id)
@@ -376,7 +467,8 @@ void rkisp_params_cfg(struct rkisp_isp_params_vdev *params_vdev, u32 frame_id)
 		params_vdev->ops->param_cfg(params_vdev, frame_id, RKISP_PARAMS_IMD);
 }
 
-void rkisp_params_cfgsram(struct rkisp_isp_params_vdev *params_vdev, bool is_check)
+void rkisp_params_cfgsram(struct rkisp_isp_params_vdev *params_vdev,
+			  bool is_check, bool is_reset)
 {
 	if (is_check) {
 		if (params_vdev->dev->procfs.mode & RKISP_PROCFS_FIL_SW)
@@ -387,7 +479,7 @@ void rkisp_params_cfgsram(struct rkisp_isp_params_vdev *params_vdev, bool is_che
 			return;
 	}
 	if (params_vdev->ops->param_cfgsram)
-		params_vdev->ops->param_cfgsram(params_vdev);
+		params_vdev->ops->param_cfgsram(params_vdev, is_reset);
 }
 
 void rkisp_params_isr(struct rkisp_isp_params_vdev *params_vdev,
@@ -402,7 +494,9 @@ void rkisp_params_first_cfg(struct rkisp_isp_params_vdev *params_vdev,
 			    enum v4l2_quantization quantization)
 {
 	struct rkisp_device *dev = params_vdev->dev;
+	u32 val = rkisp_read(dev, ISP_HDRMGE_CTRL, false);
 
+	params_vdev->is_hdr = !!(val & SW_HDRMGE_EN);
 	if (!params_vdev->is_first_cfg)
 		return;
 	params_vdev->is_first_cfg = false;
@@ -459,12 +553,13 @@ void rkisp_params_meshbuf_free(struct rkisp_isp_params_vdev *params_vdev, u64 id
 
 void rkisp_params_stream_stop(struct rkisp_isp_params_vdev *params_vdev)
 {
+	rkisp_params_disable_isp(params_vdev);
 	/* isp stop to free buf */
 	if (params_vdev->ops->stream_stop)
 		params_vdev->ops->stream_stop(params_vdev);
-	if (params_vdev->ops->fop_release)
-		params_vdev->ops->fop_release(params_vdev);
 	params_vdev->first_cfg_params = false;
+	if (!atomic_read(&params_vdev->open_cnt) && params_vdev->ops->fop_release)
+		params_vdev->ops->fop_release(params_vdev);
 }
 
 bool rkisp_params_check_bigmode(struct rkisp_isp_params_vdev *params_vdev)
@@ -544,7 +639,7 @@ int rkisp_register_params_vdev(struct rkisp_isp_params_vdev *params_vdev,
 		RKISP_ISP_PAD_SINK_PARAMS, MEDIA_LNK_FL_ENABLED);
 	if (ret < 0)
 		goto err_unregister_video;
-
+	atomic_set(&params_vdev->open_cnt, 0);
 	return 0;
 
 err_unregister_video:
@@ -567,4 +662,3 @@ void rkisp_unregister_params_vdev(struct rkisp_isp_params_vdev *params_vdev)
 	vb2_queue_release(vdev->queue);
 	rkisp_uninit_params_vdev(params_vdev);
 }
-

@@ -18,6 +18,14 @@ config NO_GKI
 
 	  If unsure, say Y.
 
+config ROCKCHIP_DISABLE_UNUSED
+	tristate "Rockchip Disable Unused"
+	default m if GKI_HACKS_TO_FIX
+	help
+	  Disable unused clk and power down after module init.
+
+	  If unsure, say "N".
+
 #
 # Rockchip Soc drivers
 #
@@ -27,6 +35,18 @@ config ROCKCHIP_AMP
 	help
 	  Say y here to enable Rockchip AMP support.
 	  This option protects resources used by AMP.
+
+config ROCKCHIP_AMP_RPMSG_SHAREDMEM
+	tristate "Rockchip AMP RPMsg Shared Memory"
+	depends on ARCH_ROCKCHIP && RPMSG
+	help
+	  Say y here to enable Rockchip AMP RPMsg Shared Memory.
+
+config ROCKCHIP_AMP_RPMSG_TIMESYNC
+	tristate "Rockchip AMP RPMSG Time Sync"
+	depends on ARCH_ROCKCHIP && RPMSG
+	help
+	  Say y here to enable Rockchip AMP RPMsg Time Sync.
 
 config ROCKCHIP_ARM64_ALIGN_FAULT_FIX
 	bool "Rockchip align fault fix support"
@@ -43,6 +63,12 @@ config ROCKCHIP_CPUINFO
 	  Serial can read from /proc/cpuinfo.
 
 	  If unsure, say N.
+
+config ROCKCHIP_CSU
+	tristate "Rockchip Clock Subunit Driver"
+	depends on ARCH_ROCKCHIP
+	help
+	  This adds the clock subunit driver for Rockchip SoCs.
 
 config ROCKCHIP_GRF
 	tristate "Rockchip General Register Files support"
@@ -156,8 +182,15 @@ config ROCKCHIP_RAMDISK
 	  Saying Y here will allow you to use reserved RAM memory as a block
 	  device.
 
+config ROCKCHIP_LITE_ULTRA_SUSPEND
+	bool "Enable lite/ultra suspend"
+	depends on SUSPEND && NO_GKI
+	help
+	  Add mem_sleep_states options lite/ultra for RK ebook project
+
 config ROCKCHIP_SUSPEND_MODE
 	tristate "Rockchip suspend mode config"
+	depends on SUSPEND
 	help
 	  Say Y here if you want to set the suspend mode to the ATF.
 
@@ -189,6 +222,12 @@ config ROCKCHIP_MTD_VENDOR_STORAGE
 	help
 	  Say y here to enable rockchip mtd vendor storage support.
 
+config ROCKCHIP_RAM_VENDOR_STORAGE
+	tristate "Rockchip ram vendor storage support"
+	depends on ROCKCHIP_VENDOR_STORAGE
+	help
+	  Say y here to enable rockchip ram vendor storage support.
+
 config ROCKCHIP_VENDOR_STORAGE_UPDATE_LOADER
 	bool "Rockchip vendor storage update loader support"
 	default n
@@ -208,10 +247,22 @@ config ROCKCHIP_DEBUG
 config ROCKCHIP_MINI_KERNEL
 	bool "Rockchip Mini Kernel support"
 	select NO_GKI
-	default y if CPU_RV1106 || CPU_RV1126
+	default y if CPU_RV1103B || CPU_RV1106 || CPU_RV1126
 	help
 	  Say y here to enable Rockchip mini kernel support.
 	  This option make the kernel size smaller.
+
+if ROCKCHIP_MINI_KERNEL
+
+config ROCKCHIP_KMALLOC_NO_USE_ARCH_DMA_MINALIGN
+	bool "Rockchip kmalloc no use ARCH_DMA_MINALIGN"
+	help
+	  Say y here to make ARCH_KMALLOC_MINALIGN != ARCH_DMA_MINALIGN
+	  This option can save kmalloc memory but break drivers which
+	  assume kmalloc returned memory is aligned for DMA.
+	  If unsure, say N.
+
+endif
 
 config ROCKCHIP_THUNDER_BOOT
 	bool "Rockchip Thunder Boot support"
@@ -219,6 +270,12 @@ config ROCKCHIP_THUNDER_BOOT
 	help
 	  Say y here to enable Rockchip thunder boot support.
 	  This option make the kernel boot faster.
+
+config ROCKCHIP_THUNDER_BOOT_CRYPTO
+	bool "Rockchip Thunder Boot support hardware crypto"
+	depends on ROCKCHIP_THUNDER_BOOT
+	help
+	  Say y if boot need hardware crypto.
 
 config ROCKCHIP_THUNDER_BOOT_MMC
 	bool "Rockchip Thunder Boot from MMC"
@@ -271,6 +328,8 @@ config RK_MEMBLOCK_PROCFS
 	help
 	  Extend memblock procfs to show size of each memblock, and shows the
 	  result of total size by KiB format.
+
+source "drivers/soc/rockchip/minidump/Kconfig"
 
 endmenu
 

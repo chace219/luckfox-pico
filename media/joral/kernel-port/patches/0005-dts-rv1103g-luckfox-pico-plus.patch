@@ -1,0 +1,71 @@
+diff --git a/sysdrv/source/kernel/arch/arm/boot/dts/rv1103g-luckfox-pico-plus.dts b/sysdrv/source/kernel/arch/arm/boot/dts/rv1103g-luckfox-pico-plus.dts
+index ee163b0a2..0cf960239 100755
+--- a/sysdrv/source/kernel/arch/arm/boot/dts/rv1103g-luckfox-pico-plus.dts
++++ b/sysdrv/source/kernel/arch/arm/boot/dts/rv1103g-luckfox-pico-plus.dts
+@@ -12,6 +12,26 @@
+ / {
+ 	model = "Luckfox Pico Plus";
+ 	compatible = "rockchip,rv1103g-38x38-ipc-v10", "rockchip,rv1103";
++
++	mcp2515_osc: mcp2515-osc {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		clock-frequency = <12000000>;
++	};
++};
++
++&pinctrl {
++	lan8651 {
++		lan8651_int_pin: lan8651-int-pin {
++			rockchip,pins = <1 RK_PC4 RK_FUNC_GPIO &pcfg_pull_up>;
++		};
++	};
++
++	mcp2515 {
++		mcp2515_int_pin: mcp2515-int-pin {
++			rockchip,pins = <1 RK_PC7 RK_FUNC_GPIO &pcfg_pull_up>;
++		};
++	};
+ };
+ 
+ /**********SFC**********/
+@@ -60,12 +80,34 @@ &usbdrd_dwc3 {
+ /**********SPI**********/
+ /* SPI0_M0 */
+ &spi0 {
+-	status = "disabled";
+-	spidev@0 {
+-		spi-max-frequency = <50000000>;
++	status = "okay";
++	num-cs = <2>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&spi0m0_clk &spi0m0_miso &spi0m0_mosi &spi0m0_cs0
++			     &spi0m0_cs1 &lan8651_int_pin &mcp2515_int_pin>;
++	/delete-node/ spidev@0;
++	/delete-node/ fbtft@0;
++
++	mcp2515: can@0 {
++		compatible = "microchip,mcp2515";
++		reg = <0>;
++		spi-max-frequency = <10000000>;
++		clocks = <&mcp2515_osc>;
++		interrupt-parent = <&gpio1>;
++		interrupts = <RK_PC7 IRQ_TYPE_EDGE_FALLING>;
++		status = "okay";
+ 	};
+-	fbtft@0 {
+-		spi-max-frequency = <50000000>;
++
++	lan8651: ethernet@1 {
++		compatible = "microchip,lan8651";
++		reg = <1>;
++		spi-max-frequency = <1000000>;
++		microchip,plca-enable;
++		microchip,plca-node-id = <0>;
++		microchip,plca-node-count = <8>;
++		interrupt-parent = <&gpio1>;
++		interrupts = <RK_PC4 IRQ_TYPE_EDGE_FALLING>;
++		status = "okay";
+ 	};
+ };
+ 

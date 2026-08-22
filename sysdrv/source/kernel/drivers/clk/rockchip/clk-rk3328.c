@@ -203,7 +203,7 @@ PNAME(mux_aclk_peri_pre_p)	= { "cpll_peri",
 				    "gpll_peri",
 				    "hdmiphy_peri" };
 PNAME(mux_ref_usb3otg_src_p)	= { "xin24m",
-				    "clk_usb3otg_ref" };
+				    "clk_ref_usb3otg_src" };
 PNAME(mux_xin24m_32k_p)		= { "xin24m",
 				    "clk_rtc32k" };
 PNAME(mux_mac2io_src_p)		= { "clk_mac2io_src",
@@ -317,14 +317,15 @@ static struct rockchip_clk_branch rk3328_clk_branches[] __initdata = {
 			RK3328_CLKGATE_CON(14), 1, GFLAGS),
 
 	/* PD_DDR */
-	COMPOSITE(0, "clk_ddr", mux_ddrphy_p, CLK_IS_CRITICAL,
-			RK3328_CLKSEL_CON(3), 8, 2, MFLAGS, 0, 3, DFLAGS | CLK_DIVIDER_POWER_OF_TWO,
-			RK3328_CLKGATE_CON(0), 4, GFLAGS),
-	GATE(0, "clk_ddrmsch", "clk_ddr", CLK_IS_CRITICAL,
+	COMPOSITE_DDRCLK(SCLK_DDRCLK, "sclk_ddrc", mux_ddrphy_p, 0,
+			 RK3328_CLKSEL_CON(3), 8, 2, 0, 3,
+			 ROCKCHIP_DDRCLK_SIP_V2),
+
+	GATE(0, "clk_ddrmsch", "sclk_ddrc", CLK_IGNORE_UNUSED,
 			RK3328_CLKGATE_CON(18), 6, GFLAGS),
-	GATE(0, "clk_ddrupctl", "clk_ddr", CLK_IS_CRITICAL,
+	GATE(0, "clk_ddrupctl", "sclk_ddrc", CLK_IGNORE_UNUSED,
 			RK3328_CLKGATE_CON(18), 5, GFLAGS),
-	GATE(0, "aclk_ddrupctl", "clk_ddr", CLK_IGNORE_UNUSED,
+	GATE(0, "aclk_ddrupctl", "sclk_ddrc", CLK_IGNORE_UNUSED,
 			RK3328_CLKGATE_CON(18), 4, GFLAGS),
 	GATE(0, "clk_ddrmon", "xin24m", CLK_IGNORE_UNUSED,
 			RK3328_CLKGATE_CON(0), 6, GFLAGS),

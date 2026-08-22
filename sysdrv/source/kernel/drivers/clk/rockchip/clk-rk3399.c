@@ -651,9 +651,9 @@ static struct rockchip_clk_branch rk3399_clk_branches[] __initdata = {
 	MUX(SCLK_RMII_SRC, "clk_rmii_src", mux_rmii_p, CLK_SET_RATE_PARENT,
 			RK3399_CLKSEL_CON(19), 4, 1, MFLAGS),
 	GATE(SCLK_MACREF_OUT, "clk_mac_refout", "clk_rmii_src", 0,
-			RK3399_CLKGATE_CON(5), 6, GFLAGS),
-	GATE(SCLK_MACREF, "clk_mac_ref", "clk_rmii_src", 0,
 			RK3399_CLKGATE_CON(5), 7, GFLAGS),
+	GATE(SCLK_MACREF, "clk_mac_ref", "clk_rmii_src", 0,
+			RK3399_CLKGATE_CON(5), 6, GFLAGS),
 	GATE(SCLK_MAC_RX, "clk_rmii_rx", "clk_rmii_src", 0,
 			RK3399_CLKGATE_CON(5), 8, GFLAGS),
 	GATE(SCLK_MAC_TX, "clk_rmii_tx", "clk_rmii_src", 0,
@@ -1356,7 +1356,7 @@ static struct rockchip_clk_branch rk3399_clk_branches[] __initdata = {
 			RK3399_CLKSEL_CON(56), 6, 2, MFLAGS,
 			RK3399_CLKGATE_CON(10), 7, GFLAGS),
 
-	COMPOSITE_NOGATE(SCLK_CIF_OUT, "clk_cifout", mux_clk_cif_p, 0,
+	COMPOSITE_NOGATE(SCLK_CIF_OUT, "clk_cifout", mux_clk_cif_p, CLK_SET_RATE_PARENT,
 			 RK3399_CLKSEL_CON(56), 5, 1, MFLAGS, 0, 5, DFLAGS),
 
 	/* gic */

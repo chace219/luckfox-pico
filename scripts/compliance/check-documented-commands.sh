@@ -181,9 +181,37 @@ echo "== The on-device Help and the PDFs are not stale"
 # sources while every unit in the field and every PDF still said it — and
 # nothing in the build noticed.
 #
-# mtime is a weak signal in general and the right one here: both artifacts are
-# committed, so a checkout gives them checkout times, and what this catches is
-# the case that actually happens — someone edits the markdown and stops.
+# mtime alone CANNOT answer this once the files are committed, and trusting it
+# cost a false failure on 2026-08-21: satisense's user-manual.md was reported
+# stale against its PDF with the two 2 ms apart, BOTH unmodified, and generated
+# by the same commit (869622f). Git does not record mtimes, so a fresh clone or
+# a submodule checkout stamps the pair in whatever order it wrote them — this
+# check was a coin flip on any clean checkout, and a gate that fails at random
+# is a gate people learn to ignore.
+#
+# So ask git, which knows: when both files are tracked AND clean, the commit
+# that last touched each is the ground truth for "was the artifact regenerated
+# with its source". Fall back to mtime the moment either side is dirty or
+# untracked — for a file someone is editing right now mtime is exactly the
+# right signal, and that is the case this gate exists to catch: someone edits
+# the markdown and stops.
+function generated_is_stale() {   # $1 = source .md, $2 = generated artifact
+	local src="$1" gen="$2" repo ts_src ts_gen
+	src=$(realpath "$src" 2>/dev/null) || { [ "$1" -nt "$2" ]; return; }
+	gen=$(realpath "$gen" 2>/dev/null) || { [ "$1" -nt "$2" ]; return; }
+	repo=$(git -C "$(dirname "$src")" rev-parse --show-toplevel 2>/dev/null) \
+		|| { [ "$src" -nt "$gen" ]; return; }
+	# Dirty or untracked on either side: mtime is meaningful, use it.
+	if [ -n "$(git -C "$repo" status --porcelain -- "$src" "$gen" 2>/dev/null)" ] \
+	   || ! git -C "$repo" ls-files --error-unmatch -- "$src" >/dev/null 2>&1 \
+	   || ! git -C "$repo" ls-files --error-unmatch -- "$gen" >/dev/null 2>&1; then
+		[ "$src" -nt "$gen" ]; return
+	fi
+	ts_src=$(git -C "$repo" log -1 --format=%ct -- "$src" 2>/dev/null)
+	ts_gen=$(git -C "$repo" log -1 --format=%ct -- "$gen" 2>/dev/null)
+	[ -n "$ts_src" ] && [ -n "$ts_gen" ] || { [ "$src" -nt "$gen" ]; return; }
+	[ "$ts_src" -gt "$ts_gen" ]
+}
 GENERATED=(
 	"media/joral/satisense-edge/docs/manual:media/joral/satisense-edge/web/public/docs"
 	"media/joral/media-gateway/docs/manual:media/joral/media-gateway/src/web/www/docs"
@@ -197,18 +225,18 @@ for pair in "${GENERATED[@]}"; do
 		base=$(basename "$md" .md)
 		html="$out/$base.html"
 		[ -f "$html" ] || continue
-		if [ "$md" -nt "$html" ]; then
+		if generated_is_stale "$md" "$html"; then
 			bad "$base.md is newer than the Help HTML — re-run scripts/render-manual.mjs --pdf"
 			stale=1
 		fi
 		pdf="$src/pdf/$base.pdf"
-		if [ -f "$pdf" ] && [ "$md" -nt "$pdf" ]; then
+		if [ -f "$pdf" ] && generated_is_stale "$md" "$pdf"; then
 			bad "$base.md is newer than $base.pdf — the customer PDF is stale"
 			stale=1
 		fi
 	done
 done
-[ $stale -eq 0 ] && ok "every generated Help page and PDF is at least as new as its source"
+[ $stale -eq 0 ] && ok "every generated Help page and PDF was regenerated with its source"
 
 echo
 echo "-- $pass passed, $fail failed"

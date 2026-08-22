@@ -477,7 +477,7 @@
 };
 
 &saradc {
- 	status = "okay";
+	status = "okay";
 	vref-supply = <&vcc_1v8>;
 };
 

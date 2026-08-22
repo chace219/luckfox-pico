@@ -191,7 +191,7 @@ int vehicle_generic_sensor_read(struct vehicle_ad_dev *ad, char reg)
 //	msgs[1].scl_rate = ad->i2c_rate;
 
 	ret = i2c_transfer(ad->adapter, msgs, 2);
-	if (ret)
+	if (ret < 0)
 		return ret;
 
 	return pval;
@@ -284,6 +284,12 @@ int vehicle_parse_sensor(struct vehicle_ad_dev *ad)
 		}
 		if (of_property_read_u32(cp, "mclk_rate", &ad->mclk_rate))
 			VEHICLE_DGERR("Get %s mclk_rate failed!\n", cp->name);
+
+		if (of_property_read_u32(cp, "drop_frames",
+					 &ad->drop_frames)) {
+			VEHICLE_DGERR("%s:Get sensor, drop-frames failed!\n", __func__);
+			ad->drop_frames = 0; //default drop frames;
+		}
 
 		if (of_property_read_u32(cp, "rst_active", &ad->rst_active))
 			VEHICLE_DGERR("Get %s rst_active failed!", cp->name);

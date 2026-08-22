@@ -1076,10 +1076,12 @@ int mmc_select_bus_width(struct mmc_card *card)
 	static unsigned ext_csd_bits[] = {
 		EXT_CSD_BUS_WIDTH_8,
 		EXT_CSD_BUS_WIDTH_4,
+		EXT_CSD_BUS_WIDTH_1,
 	};
 	static unsigned bus_widths[] = {
 		MMC_BUS_WIDTH_8,
 		MMC_BUS_WIDTH_4,
+		MMC_BUS_WIDTH_1,
 	};
 	struct mmc_host *host = card->host;
 	unsigned idx, bus_width = 0;
@@ -2023,6 +2025,8 @@ static int mmc_sleep(struct mmc_host *host)
 	struct mmc_command cmd = {};
 	struct mmc_card *card = host->card;
 	unsigned int timeout_ms = DIV_ROUND_UP(card->ext_csd.sa_timeout, 10000);
+	unsigned long timeout;
+	u32 status;
 	int err;
 
 	/* Re-tuning can't be done once the card is deselected */
@@ -2062,8 +2066,28 @@ static int mmc_sleep(struct mmc_host *host)
 	 * SEND_STATUS command to poll the status because that command (and most
 	 * others) is invalid while the card sleeps.
 	 */
-	if (!cmd.busy_timeout || !(host->caps & MMC_CAP_WAIT_WHILE_BUSY))
-		mmc_delay(timeout_ms);
+	if (host->ops->card_busy) {
+		timeout = jiffies + msecs_to_jiffies(timeout_ms);
+
+		do {
+			bool done = time_after(jiffies, timeout);
+
+			status = host->ops->card_busy(card->host) ?
+				 0 : R1_READY_FOR_DATA | R1_STATE_TRAN << 9;
+
+			if (!status)
+				mmc_delay(1);
+
+			if (done) {
+				err = -ETIMEDOUT;
+				break;
+			}
+		} while (!mmc_ready_for_data(status));
+
+	} else {
+		if (!cmd.busy_timeout || !(host->caps & MMC_CAP_WAIT_WHILE_BUSY))
+			mmc_delay(timeout_ms);
+	}
 
 out_release:
 	mmc_retune_release(host);

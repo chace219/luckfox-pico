@@ -80,10 +80,11 @@ struct ipv6_devconf {
 
 	struct ctl_table_header *sysctl_header;
 
-	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_USE(1, struct { __s32 accept_ra_min_lft; u32 padding; });
+
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
-	ANDROID_KABI_RESERVE(4);
+	ANDROID_KABI_BACKPORT_USE(4, struct { __u8 ra_honor_pio_pflag; __u8 padding4[7]; });
 };
 
 struct ipv6_params {

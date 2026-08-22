@@ -239,10 +239,25 @@ fail:
 
 static int jpgdec_soft_reset(struct mpp_dev *mpp)
 {
-	mpp_write(mpp, JPGDEC_REG_SYS_BASE, JPGDEC_FORCE_SOFTRESET_VALID);
-	mpp_write(mpp, JPGDEC_REG_INT_EN_BASE, JPGDEC_SOFT_REST_EN);
+	int ret;
+	u32 int_status = mpp_read(mpp, JPGDEC_REG_INT_EN_BASE);
+	u32 dec_en = int_status & JPGDEC_START_EN;
 
-	return 0;
+	/* if hw is idle, need to set force_softreset_valid bit to reset */
+	if (!dec_en)
+		mpp_write(mpp, JPGDEC_REG_SYS_BASE, JPGDEC_FORCE_SOFTRESET_VALID);
+
+	mpp_debug(DEBUG_RESET, "soft reset");
+
+	mpp_write(mpp, JPGDEC_REG_INT_EN_BASE, int_status | JPGDEC_SOFT_REST_EN);
+	ret = readl_relaxed_poll_timeout(mpp->reg_base + JPGDEC_REG_INT_EN_BASE,
+					int_status, int_status & JPGDEC_SOFT_RSET_READY,
+					0, 10);
+
+	if (ret)
+		mpp_err("soft reset failed.");
+
+	return ret;
 }
 
 static int jpgdec_run(struct mpp_dev *mpp,
@@ -284,6 +299,8 @@ static int jpgdec_run(struct mpp_dev *mpp,
 	return 0;
 }
 
+static int jpgdec_reset(struct mpp_dev *mpp);
+
 static int jpgdec_finish(struct mpp_dev *mpp,
 			 struct mpp_task *mpp_task)
 {
@@ -316,7 +333,7 @@ static int jpgdec_finish(struct mpp_dev *mpp,
 	 */
 	if (!(task->irq_status & JPGDEC_SOFT_RSET_READY) &&
 	    !atomic_read(&mpp->reset_request))
-		jpgdec_soft_reset(mpp);
+		jpgdec_reset(mpp);
 
 	mpp_debug(DEBUG_REGISTER,
 		  "dec_get %08x dec_length %d\n", dec_get, dec_length);
@@ -518,8 +535,11 @@ static int jpgdec_isr(struct mpp_dev *mpp)
 static int jpgdec_reset(struct mpp_dev *mpp)
 {
 	struct jpgdec_dev *dec = to_jpgdec_dev(mpp);
+	int ret = 0;
 
-	if (dec->rst_a && dec->rst_h) {
+	ret = jpgdec_soft_reset(mpp);
+
+	if (ret && dec->rst_a && dec->rst_h) {
 		mpp_debug(DEBUG_RESET, "reset in\n");
 
 		/* Don't skip this or iommu won't work after reset */
@@ -558,7 +578,7 @@ static struct mpp_dev_ops jpgdec_v1_dev_ops = {
 };
 
 static const struct mpp_dev_var jpgdec_v1_data = {
-	.device_type = MPP_DEVICE_JPGDEC,
+	.device_type = MPP_DEVICE_RKJPEGD,
 	.hw_info = &jpgdec_v1_hw_info,
 	.trans_info = jpgdec_v1_trans,
 	.hw_ops = &jpgdec_v1_hw_ops,
@@ -602,7 +622,7 @@ static int jpgdec_probe(struct platform_device *pdev)
 
 	ret = devm_request_threaded_irq(dev, mpp->irq,
 					mpp_dev_irq,
-					mpp_dev_isr_sched,
+					NULL,
 					IRQF_SHARED,
 					dev_name(dev), mpp);
 	if (ret) {
@@ -638,6 +658,7 @@ struct platform_driver rockchip_jpgdec_driver = {
 	.driver = {
 		.name = JPGDEC_DRIVER_NAME,
 		.of_match_table = of_match_ptr(mpp_jpgdec_dt_match),
+		.pm = &mpp_common_pm_ops,
 	},
 };
 EXPORT_SYMBOL(rockchip_jpgdec_driver);

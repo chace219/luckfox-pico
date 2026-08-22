@@ -14,7 +14,7 @@
 	model = "Rockchip RK3566 EVB1 DDR4 V10 Board";
 	compatible = "rockchip,rk3566-evb1-ddr4-v10", "rockchip,rk3566";
 
-	vcc3v3_pcie: gpio-regulator {
+	vcc3v3_pcie: vcc3v3-pcie {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc3v3_pcie";
 		regulator-min-microvolt = <3300000>;
@@ -44,6 +44,13 @@
 		enable-active-high;
 		regulator-always-on;
 		regulator-boot-on;
+	};
+};
+
+&bt_sound {
+	status = "disabled";
+	simple-audio-card,cpu {
+		sound-dai = <&i2s2_2ch>;
 	};
 };
 
@@ -219,6 +226,10 @@
 	power-supply = <&vcc3v3_lcd0_n>;
 };
 
+&hynitron {
+	power-supply = <&vcc3v3_lcd0_n>;
+};
+
 &i2c2 {
 	status = "okay";
 	pinctrl-names = "default";
@@ -271,6 +282,12 @@
 			};
 		};
 	};
+};
+
+&i2s2_2ch {
+	pinctrl-0 = <&i2s2m1_sclktx &i2s2m1_lrcktx &i2s2m1_sdi &i2s2m1_sdo>;
+	rockchip,bclk-fs = <32>;
+	status = "disabled";
 };
 
 &i2s3_2ch {

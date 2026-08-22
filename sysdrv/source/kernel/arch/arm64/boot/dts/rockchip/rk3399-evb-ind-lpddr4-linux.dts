@@ -46,6 +46,8 @@
 		reset-gpios = <&gpio1 23 GPIO_ACTIVE_LOW>;
 		prepare-delay-ms = <20>;
 		enable-delay-ms = <20>;
+		width-mm = <120>;
+		height-mm = <160>;
 
 		display-timings {
 			native-mode = <&timing0>;
@@ -90,6 +92,14 @@
 &dmac_bus {
 	iram = <&iram>;
 	rockchip,force-iram;
+};
+
+&dp_in_vopb {
+	status = "okay";
+};
+
+&dp_in_vopl {
+	status = "disabled";
 };
 
 &dp_sound {
@@ -333,6 +343,9 @@
 
 &vopb {
 	status = "okay";
+	assigned-clocks = <&cru DCLK_VOP0_DIV>;
+	/* The dclk parent for VOP->HDMI must from VPLL */
+	assigned-clock-parents = <&cru PLL_VPLL>;
 };
 
 &vopb_mmu {
@@ -341,6 +354,8 @@
 
 &vopl {
 	status = "okay";
+	assigned-clocks = <&cru DCLK_VOP1_DIV>;
+	assigned-clock-parents = <&cru PLL_CPLL>;
 };
 
 &vopl_mmu {

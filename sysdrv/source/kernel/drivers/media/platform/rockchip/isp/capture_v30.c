@@ -922,6 +922,11 @@ static int mi_frame_start(struct rkisp_stream *stream, u32 mis)
 
 	/* readback start to update stream buf if null */
 	spin_lock_irqsave(&stream->vbq_lock, lock_flags);
+	if (stream->streaming && !mis && stream->is_crop_upd) {
+		rkisp_stream_config_dcrop(stream, false);
+		rkisp_stream_config_rsz(stream, false);
+		stream->is_crop_upd = false;
+	}
 	if (stream->streaming && !mis && !stream->curr_buf) {
 		if (!stream->next_buf && !list_empty(&stream->buf_queue)) {
 			stream->next_buf = list_first_entry(&stream->buf_queue,
@@ -951,7 +956,7 @@ static int mi_frame_end(struct rkisp_stream *stream, u32 state)
 	struct capture_fmt *isp_fmt = &stream->out_isp_fmt;
 	struct rkisp_buffer *buf = NULL;
 	unsigned long lock_flags = 0;
-	int i = 0;
+	int i = 0, seq;
 
 	if (stream->id == RKISP_STREAM_VIR)
 		return 0;
@@ -970,7 +975,10 @@ static int mi_frame_end(struct rkisp_stream *stream, u32 state)
 		    (stream->frame_early && state == FRAME_IRQ))
 			goto end;
 	} else {
+		spin_lock_irqsave(&stream->vbq_lock, lock_flags);
 		buf = stream->curr_buf;
+		stream->curr_buf = NULL;
+		spin_unlock_irqrestore(&stream->vbq_lock, lock_flags);
 	}
 
 	if (buf) {
@@ -987,19 +995,48 @@ static int mi_frame_end(struct rkisp_stream *stream, u32 state)
 			goto end;
 		}
 
+		rkisp_dmarx_get_frame(dev, &seq, NULL, &ns, true);
+		if (!ns)
+			ns = ktime_get_ns();
+
 		/* Dequeue a filled buffer */
 		for (i = 0; i < isp_fmt->mplanes; i++) {
 			u32 payload_size = stream->out_fmt.plane_fmt[i].sizeimage;
 
 			vb2_set_plane_payload(vb2_buf, i, payload_size);
+			if (stream->is_attach_info && i == isp_fmt->mplanes - 1) {
+				struct rkisp_frame_info *info = buf->vaddr[i] + payload_size;
+				struct sensor_exposure_cfg *exp = &dev->params_vdev.exposure;
+
+				info->seq = seq;
+				info->hdr = 0;
+				info->timestamp = IS_HDR_RDBK(dev->rd_mode) ? ns : dev->vicap_sof.timestamp;
+				info->rolling_shutter_skew = exp->linear_exp.rolling_shutter_skew;
+				info->sensor_exposure_time = exp->linear_exp.coarse_integration_time;
+				info->sensor_analog_gain = exp->linear_exp.analog_gain_code_global;
+				info->sensor_digital_gain = exp->linear_exp.digital_gain_global;
+				info->isp_digital_gain = exp->linear_exp.isp_digital_gain;
+				if (dev->rd_mode == HDR_RDBK_FRAME2 ||
+				    dev->rd_mode == HDR_FRAMEX2_DDR ||
+				    dev->rd_mode == HDR_LINEX2_DDR) {
+					info->hdr = 1;
+					info->rolling_shutter_skew = exp->hdr_exp[0].rolling_shutter_skew;
+
+					info->sensor_exposure_time = exp->hdr_exp[0].coarse_integration_time;
+					info->sensor_analog_gain = exp->hdr_exp[0].analog_gain_code_global;
+					info->sensor_digital_gain = exp->hdr_exp[0].digital_gain_global;
+					info->isp_digital_gain = exp->hdr_exp[0].isp_digital_gain;
+
+					info->sensor_exposure_time_l = exp->hdr_exp[1].coarse_integration_time;
+					info->sensor_analog_gain_l = exp->hdr_exp[1].analog_gain_code_global;
+					info->sensor_digital_gain_l = exp->hdr_exp[1].digital_gain_global;
+					info->isp_digital_gain_l = exp->hdr_exp[1].isp_digital_gain;
+				}
+			}
 		}
 
-		rkisp_dmarx_get_frame(dev, &i, NULL, &ns, true);
-		buf->vb.sequence = i;
-		if (!ns)
-			ns = rkisp_time_get_ns(dev);
+		buf->vb.sequence = seq;
 		vb2_buf->timestamp = ns;
-
 		ns = rkisp_time_get_ns(dev);
 		stream->dbg.interval = ns - stream->dbg.timestamp;
 		stream->dbg.timestamp = ns;
@@ -1138,6 +1175,9 @@ static int rkisp_queue_setup(struct vb2_queue *queue,
 			plane_fmt->sizeimage / pixm->height *
 			ALIGN(pixm->height, 16) :
 			plane_fmt->sizeimage;
+		/* attach information size */
+		if (stream->is_attach_info && i == isp_fmt->mplanes - 1)
+			sizes[i] += sizeof(struct rkisp_frame_info);
 	}
 
 	rkisp_chk_tb_over(dev);
@@ -1302,97 +1342,6 @@ end:
 	mutex_unlock(&dev->hw_dev->dev_lock);
 }
 
-static void vir_cpy_image(struct work_struct *work)
-{
-	struct rkisp_vir_cpy *cpy =
-	container_of(work, struct rkisp_vir_cpy, work);
-	struct rkisp_stream *vir = cpy->stream;
-	struct rkisp_buffer *src_buf = NULL;
-	unsigned long lock_flags = 0;
-	u32 i;
-
-	v4l2_dbg(1, rkisp_debug, &vir->ispdev->v4l2_dev,
-		 "%s enter\n", __func__);
-
-	vir->streaming = true;
-	spin_lock_irqsave(&vir->vbq_lock, lock_flags);
-	if (!list_empty(&cpy->queue)) {
-		src_buf = list_first_entry(&cpy->queue,
-				struct rkisp_buffer, queue);
-		list_del(&src_buf->queue);
-	}
-	spin_unlock_irqrestore(&vir->vbq_lock, lock_flags);
-
-	while (src_buf || vir->streaming) {
-		if (vir->stopping || !vir->streaming)
-			goto end;
-
-		if (!src_buf)
-			wait_for_completion(&cpy->cmpl);
-
-		vir->frame_end = false;
-		spin_lock_irqsave(&vir->vbq_lock, lock_flags);
-
-		if (!src_buf && !list_empty(&cpy->queue)) {
-			src_buf = list_first_entry(&cpy->queue,
-					struct rkisp_buffer, queue);
-			list_del(&src_buf->queue);
-		}
-
-		if (src_buf && !vir->curr_buf && !list_empty(&vir->buf_queue)) {
-			vir->curr_buf = list_first_entry(&vir->buf_queue,
-					struct rkisp_buffer, queue);
-			list_del(&vir->curr_buf->queue);
-		}
-		spin_unlock_irqrestore(&vir->vbq_lock, lock_flags);
-
-		if (!vir->curr_buf || !src_buf)
-			goto end;
-
-		for (i = 0; i < vir->out_isp_fmt.mplanes; i++) {
-			u32 payload_size = vir->out_fmt.plane_fmt[i].sizeimage;
-			void *src = vb2_plane_vaddr(&src_buf->vb.vb2_buf, i);
-			void *dst = vb2_plane_vaddr(&vir->curr_buf->vb.vb2_buf, i);
-
-			if (!src || !dst)
-				break;
-			vb2_set_plane_payload(&vir->curr_buf->vb.vb2_buf, i, payload_size);
-			memcpy(dst, src, payload_size);
-		}
-
-		vir->curr_buf->vb.sequence = src_buf->vb.sequence;
-		vir->curr_buf->vb.vb2_buf.timestamp = src_buf->vb.vb2_buf.timestamp;
-		vb2_buffer_done(&vir->curr_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
-		vir->curr_buf = NULL;
-end:
-		if (src_buf)
-			vb2_buffer_done(&src_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
-		src_buf = NULL;
-		spin_lock_irqsave(&vir->vbq_lock, lock_flags);
-
-		if (!list_empty(&cpy->queue)) {
-			src_buf = list_first_entry(&cpy->queue,
-					struct rkisp_buffer, queue);
-			list_del(&src_buf->queue);
-		} else if (vir->stopping) {
-			vir->streaming = false;
-		}
-
-		spin_unlock_irqrestore(&vir->vbq_lock, lock_flags);
-	}
-
-	vir->frame_end = true;
-
-	if (vir->stopping) {
-		vir->stopping = false;
-		vir->streaming = false;
-		wake_up(&vir->done);
-	}
-
-	v4l2_dbg(1, rkisp_debug, &vir->ispdev->v4l2_dev,
-		 "%s exit\n", __func__);
-}
-
 static int rkisp_stream_start(struct rkisp_stream *stream)
 {
 	struct v4l2_device *v4l2_dev = &stream->ispdev->v4l2_dev;
@@ -1449,7 +1398,7 @@ rkisp_start_streaming(struct vb2_queue *queue, unsigned int count)
 		struct rkisp_stream *t = &dev->cap_dev.stream[stream->conn_id];
 
 		if (t->streaming) {
-			INIT_WORK(&dev->cap_dev.vir_cpy.work, vir_cpy_image);
+			INIT_WORK(&dev->cap_dev.vir_cpy.work, rkisp_stream_vir_cpy_image);
 			init_completion(&dev->cap_dev.vir_cpy.cmpl);
 			INIT_LIST_HEAD(&dev->cap_dev.vir_cpy.queue);
 			dev->cap_dev.vir_cpy.stream = stream;
@@ -1765,14 +1714,4 @@ void rkisp_mi_v30_isr(u32 mis_val, struct rkisp_device *dev)
 			dev->irq_ends_mask &= ~ISP_FRAME_BP;
 		rkisp_check_idle(dev, ISP_FRAME_BP);
 	}
-}
-
-void rkisp_mipi_v30_isr(unsigned int phy, unsigned int packet,
-			unsigned int overflow, unsigned int state,
-			struct rkisp_device *dev)
-{
-	if (state & GENMASK(19, 17))
-		v4l2_warn(&dev->v4l2_dev, "RD_SIZE_ERR:0x%08x\n", state);
-	if (state & ISP21_MIPI_DROP_FRM)
-		v4l2_warn(&dev->v4l2_dev, "MIPI drop frame\n");
 }

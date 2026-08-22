@@ -52,9 +52,12 @@ static int rockchip_gem_iommu_map(struct rockchip_gem_object *rk_obj)
 
 	rk_obj->dma_addr = rk_obj->mm.start;
 
+	rockchip_drm_dbg(drm->dev, VOP_DEBUG_IOMMU_MAP, "iommu map: iova: %pad size: 0x%zx",
+			 &rk_obj->dma_addr, rk_obj->base.size);
+
 	ret = iommu_map_sgtable(private->domain, rk_obj->dma_addr, rk_obj->sgt,
 				prot);
-	if (ret < rk_obj->base.size) {
+	if (ret < (ssize_t)rk_obj->base.size) {
 		DRM_ERROR("failed to map buffer: size=%zd request_size=%zd\n",
 			  ret, rk_obj->base.size);
 		ret = -ENOMEM;
@@ -79,6 +82,9 @@ static int rockchip_gem_iommu_unmap(struct rockchip_gem_object *rk_obj)
 {
 	struct drm_device *drm = rk_obj->base.dev;
 	struct rockchip_drm_private *private = drm->dev_private;
+
+	rockchip_drm_dbg(drm->dev, VOP_DEBUG_IOMMU_MAP, "iommu unmap: iova: %pad size: %zx",
+			 &rk_obj->dma_addr, rk_obj->size);
 
 	iommu_unmap(private->domain, rk_obj->dma_addr, rk_obj->size);
 
@@ -565,9 +571,6 @@ static int rockchip_drm_gem_object_mmap(struct drm_gem_object *obj,
 		ret = rockchip_drm_gem_object_mmap_dma(obj, vma);
 	}
 
-	if (ret)
-		drm_gem_vm_close(vma);
-
 	return ret;
 }
 
@@ -617,6 +620,7 @@ rockchip_gem_alloc_object(struct drm_device *drm, unsigned int size,
 	struct address_space *mapping;
 	struct rockchip_gem_object *rk_obj;
 	struct drm_gem_object *obj;
+	int ret;
 
 #ifdef CONFIG_ARM_LPAE
 	gfp_t gfp_mask = GFP_HIGHUSER | __GFP_RECLAIMABLE | __GFP_DMA32;
@@ -635,7 +639,12 @@ rockchip_gem_alloc_object(struct drm_device *drm, unsigned int size,
 
 	obj = &rk_obj->base;
 
-	drm_gem_object_init(drm, obj, size);
+	ret = drm_gem_object_init(drm, obj, size);
+	if (ret < 0) {
+		DRM_DEV_ERROR(drm->dev, "failed to initialize gem object, ret:%d\n", ret);
+		kfree(rk_obj);
+		return ERR_PTR(ret);
+	}
 
 	mapping = file_inode(obj->filp)->i_mapping;
 	mapping_set_gfp_mask(mapping, gfp_mask);
@@ -873,18 +882,23 @@ rockchip_gem_prime_import_sg_table(struct drm_device *drm,
 	if (!rk_obj->pages) {
 		DRM_ERROR("failed to allocate pages.\n");
 		ret = -ENOMEM;
-		goto err_free_rk_obj;
+		goto err_unmap;
 	}
 
 	ret = drm_prime_sg_to_page_addr_arrays(sg, rk_obj->pages, NULL, rk_obj->num_pages);
 	if (ret < 0) {
 		DRM_ERROR("invalid sgtable.\n");
 		drm_free_large(rk_obj->pages);
-		goto err_free_rk_obj;
+		goto err_unmap;
 	}
 
 	return &rk_obj->base;
 
+err_unmap:
+	if (private->domain)
+		rockchip_gem_iommu_unmap(rk_obj);
+	else
+		dma_unmap_sgtable(drm->dev, rk_obj->sgt, DMA_BIDIRECTIONAL, 0);
 err_free_rk_obj:
 	rockchip_gem_release_object(rk_obj);
 	return ERR_PTR(ret);
