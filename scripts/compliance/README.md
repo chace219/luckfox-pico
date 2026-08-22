@@ -1,10 +1,19 @@
 # Compliance tooling
 
 Two generators and a gate, one release procedure. The generators describe **the
-image this tree builds** and derive their component list from the same Buildroot
-`.config`, so they cannot describe different images. The gate asks the question
-neither of them can: whether the documents an assessor reads are talking about
-that image at all.
+image this tree builds**: both read the Buildroot package list for the same
+`.config`, and both add what Buildroot cannot see — the kernel, U-Boot, the
+bootloader blobs, the vendor SDK, the rootfs skeleton and the C library — from a
+declaration file each. The gate asks the question neither of them can: whether
+the documents an assessor reads are talking about that image at all.
+
+*That paragraph used to say the two "derive their component list from the same
+Buildroot `.config`, so they cannot describe different images". It was wrong for
+sixteen days, and in the expensive direction: only `cve-check.py` read the
+added-component declarations, so the kernel and U-Boot were CVE-checked while
+the SBOM listed neither. `gen-sbom.sh` now fails unless the two declaration
+files agree name for name and version for version, which is what makes the
+sentence true rather than merely intended.*
 
 | | What it answers | Command |
 |---|---|---|
@@ -12,6 +21,7 @@ that image at all.
 | [`cve-check.py`](cve-check.py) | What is *known to be wrong* with what is in it? | `./build.sh cve` |
 | [`check-cited-commits.sh`](check-cited-commits.sh) | Does the paperwork describe what actually ships? | `./build.sh cited` |
 | [`check-partition-layout.sh`](check-partition-layout.sh) | Does every consumer of the **frozen** flash layout still agree? | `./build.sh partitions` |
+| [`archive-release.sh`](archive-release.sh) | Where is the evidence for the release we shipped? | `scripts/compliance/archive-release.sh` |
 
 Regulation (EU) 2024/2847 (Cyber Resilience Act): Annex I Part II §1 (SBOM),
 Annex I Part I §2 ("without known exploitable vulnerabilities"), Annex I Part II
@@ -35,6 +45,14 @@ is checking cannot fail.
 Outputs land in `output/compliance/`, stamped with the SDK build ID
 (`git describe`) so a report can be matched to a deployed unit — the same
 identifier the daemons report via `--version` and the consoles show.
+
+`output/` is **gitignored**, so that directory is a workspace, not a record.
+`archive-release.sh` copies each release's SBOM, CVE report and a generated
+`provenance.md` — release identity, build ID, commit, submodule pins — into the
+tracked `media/joral/releases/<version>/`, which is where a technical file
+should point. Until 2026-08-22 no release was tagged and nothing was archived:
+the fact that `2026.08.17` was built from `5a6f91d6a` lived in a filename in an
+ignored directory on one workstation.
 
 ## Release procedure
 
@@ -108,9 +126,17 @@ scripts/compliance/test-ssh-host-persistence.sh output/out/rootfs_uclibc_rv1106
 Then, **after** the image is built and **before** it is shipped or tagged:
 
 ```sh
-./build.sh sbom --reuse      # --reuse skips legal-info's slow source re-verify
 ./build.sh cve               # exit status is the gate
+./build.sh sbom --reuse      # --reuse skips legal-info's slow source re-verify
+scripts/compliance/archive-release.sh   # then commit and tag — runbook step 6
 ```
+
+Run **both** generators, every release. `sbom` was absent from the release gate
+line until 2026-08-22, which is why the tree once held a CVE report two releases
+and a kernel migration newer than its SBOM while Annex I Part II §1 asks for one
+per release. `sbom` also fails outright now if
+[`platform-extra.csv`](platform-extra.csv) and [`cpe-extra.csv`](cpe-extra.csv)
+disagree about what is in the image.
 
 `./build.sh cve` exits:
 
@@ -133,7 +159,7 @@ and fail loudly rather than silently skip anything.
 ## Tests
 
 ```sh
-scripts/compliance/test-cve-check.py     # 39 checks, no network
+scripts/compliance/test-cve-check.py     # 64 checks, no network
 ```
 
 The gate's value is failing when it should and only when it should, so the tests
@@ -141,7 +167,9 @@ drive the real script over fixture advisory data (`--offline` reads only the
 cache, which makes the cache the test seam) and cover the ways a checker can
 lie: a missing CPE reading as clean, an expired decision still suppressing, a
 malformed triage row being ignored rather than rejected, absent advisory data
-degrading into a pass, report-only findings leaking into the gate. Each of those
+degrading into a pass, report-only findings leaking into the gate, and an
+accepted risk on an unqueryable component outliving its review date or losing
+its owner. Each of those
 was confirmed to fail against a checker mutated back to the wrong behaviour, so
 they guard the contract rather than merely passing.
 
@@ -186,7 +214,10 @@ table: Buildroot already has one (`<PKG>_CPE_ID_VENDOR/PRODUCT`), and
 `make show-info` resolves it against the version actually built. 73 of this
 image's 130 target packages carry one.
 
-[`cpe-extra.csv`](cpe-extra.csv) covers the rest, and does three jobs:
+[`cpe-extra.csv`](cpe-extra.csv) covers the rest, and does three jobs — and its
+third is paired with [`platform-extra.csv`](platform-extra.csv), which puts the
+same components in the SBOM. Add a component to one and `gen-sbom.sh` fails
+until it is in the other:
 
 1. **Declares a CPE** Buildroot lacks (verify it first — a *wrong* CPE reports a
    component as clean, which is worse than the gap it closes; `cve-check.py
@@ -200,6 +231,35 @@ image's 130 target packages carry one.
 
 Components with no CPE from either source are reported as **NOT CHECKED**, by
 name, in the report's Coverage section. They are never counted as clean.
+
+### A `CPE=NONE` that is a decision, not a fact
+
+Job 2 above covers two different things that used to be written identically.
+For our own code, "nothing to query" is true by definition. For a closed-source
+third-party binary it is a **risk we are accepting**: Rockchip's bootloader
+blobs and media SDK run on every unit, we cannot read them, cannot query them,
+and hear about their defects only if Rockchip says so. Written as a bare `NONE`
+and a sentence, the second silently inherited the first's permanence — and this
+file's own claim of a "quarterly review" was enforced by nothing.
+
+`DECISION` separates them, on `CPE=NONE` rows only:
+
+| `DECISION` | Means | Needs |
+|---|---|---|
+| `no-nvd-presence` (default, may be blank) | there is nothing to query | nothing |
+| `accepted-risk` | there is something we cannot query and we ship it anyway | `REVIEWED_BY` + an ISO `REVIEW_BY` |
+
+Past `REVIEW_BY` **the gate fails** — the same contract `cve-triage.csv` has.
+Nothing about the component changes on that date; what expires is the licence to
+stop looking, so the review is re-reading the vendor's release notes rather than
+re-querying NVD, which will never have anything. A malformed row (unknown
+decision, missing owner, unparseable date, or a decision on a row that declares
+a CPE) exits **2**, not 1: a suppression that fails to parse is a suppression
+nobody notices is gone.
+
+Currently on accepted risk: `rockchip-rkbin` and `rockchip-media-sdk`, both due
+`2026-11-09` — deliberately the same day as the first `cve-triage.csv` expiries,
+so the reviews are one session rather than three.
 
 ### Report-only components
 

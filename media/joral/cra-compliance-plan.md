@@ -34,7 +34,7 @@ httpd + CGIs run as root (accepted in `project-context.md:78`). No firewall rule
 No LICENSE file in media-gateway. SatiSense config import has no schema validation
 (`web/cgi/api-config.sh:15-19`).
 
-## Status at a glance (2026-08-21)
+## Status at a glance (2026-08-22)
 
 *The table above is the 2026-07-26 audit and stays frozen. This one is the
 current position, and it is what to read first. "met" means a path in the tree
@@ -45,18 +45,18 @@ was found by executing, not by reading. Per-product detail lives in each tree's
 
 | Annex I | Media Gateway | SatiSense Edge | Bench | Residual |
 |---|---|---|---|---|
-| 1 Secure by default | **met** — HTTPS on 443 by default, per-unit cert, factory credential buys only a password change | **met** — `signencrypt` + `web.tls` by default, same credential gate | ✅ 08-09/08-12 | first-use trust is a self-signed fingerprint; **anonymous OPC UA closed 2026-08-19** — factory `allow_anonymous: false`, no shipped OPC UA credential, not yet on a unit |
-| 2 No known CVEs at shipment | **met at the gate** — `./build.sh cve` **0 blocking**, OpenSSL 3.5.7 LTS | same (shared rootfs) | ✅ 08-12 | kernel (5155) + U-Boot (41) are report-only. the GNU wget accepted-risk was **resolved 08-16 by dropping the package**, leaving **python3 ×5** as the only accepted-risk. **dhcpcd was reclassified `not-affected` 2026-08-19** — it had been mis-filed `fixed-pending-release` for a mitigation that was ours and had already shipped, so it would have expired 2026-11-12 into a blocking finding for an unreachable code path; the config it rests on is now guarded by a test. **python3 removal was staged the same day and then reversed** — the interpreter is **kept** and the fix is a version bump, 3.11.6 → **3.11.16** (12 Aug 2026), carried as a tracked package replacement. **CVE-2020-29396 was reclassified `not-affected` 2026-08-19** — it is an Odoo sandbox escape with python listed only as the running-with platform, so it was never a CPython defect and no bump could ever have retired it. **BUILT AND GATED 2026-08-19**: the image carries 3.11.16 (read out of `rootfs.img`), `./build.sh cve` **0 blocking**. The bump retired **two** of the four — CVE-2024-6232 and CVE-2024-7592 now match nothing and their triage rows were deleted — and did **not** retire **CVE-2026-15308 and CVE-2026-4519**, which still match 3.11.16 and remain accepted-risk on the unchanged reachability argument. So: python3 ×2, not ×0 |
+| 1 Secure by default | **met** — HTTPS on 443 by default, per-unit cert, factory credential buys only a password change | **met** — `signencrypt` + `web.tls` by default, same credential gate | ✅ 08-09/08-12 | first-use trust is a self-signed fingerprint; **anonymous OPC UA closed 2026-08-19 and confirmed on a board the same day** — factory `allow_anonymous: false`, no shipped OPC UA credential, UaExpert refused in both directions (item 8 leg f). *(This cell read "not yet on a unit" until 2026-08-22, contradicting leg f four screens below it.)* |
+| 2 No known CVEs at shipment | **met at the gate** — `./build.sh cve` **0 blocking**, OpenSSL 3.5.7 LTS | same (shared rootfs) | ✅ 08-12 | kernel (5155) + U-Boot (41) are report-only. the GNU wget accepted-risk was **resolved 08-16 by dropping the package**, leaving **python3 ×5** as the only accepted-risk. **dhcpcd was reclassified `not-affected` 2026-08-19** — it had been mis-filed `fixed-pending-release` for a mitigation that was ours and had already shipped, so it would have expired 2026-11-12 into a blocking finding for an unreachable code path; the config it rests on is now guarded by a test. **python3 removal was staged the same day and then reversed** — the interpreter is **kept** and the fix is a version bump, 3.11.6 → **3.11.16** (12 Aug 2026), carried as a tracked package replacement. **CVE-2020-29396 was reclassified `not-affected` 2026-08-19** — it is an Odoo sandbox escape with python listed only as the running-with platform, so it was never a CPython defect and no bump could ever have retired it. **BUILT AND GATED 2026-08-19**: the image carries 3.11.16 (read out of `rootfs.img`), `./build.sh cve` **0 blocking**. The bump retired **two** of the four — CVE-2024-6232 and CVE-2024-7592 now match nothing and their triage rows were deleted — and did **not** retire **CVE-2026-15308 and CVE-2026-4519**, which still match 3.11.16 and remain accepted-risk on the unchanged reachability argument. So: python3 ×2, not ×0. **Two accepted risks of a different kind were recorded 2026-08-23** — `rockchip-rkbin` and `rockchip-media-sdk`, closed-source blobs that cannot be queried at all; they were silent `CPE=NONE` rows until then and now carry an owner and a `REVIEW_BY` the gate enforces (see the dated entry) |
 | 3 Confidentiality / integrity | **met** for the console path | **met** — secrets in a 0600 sidecar, **encrypted at rest and bound to the board since 08-16**, never served to the browser; MQTT TLS verification proven enforced | ✅ 08-12/13, **sealing confirmed on a unit 2026-08-22** (`mode=encrypted`, `binding=soc-otp+emmc-cid`) | the sealing protects the stored file, **not** a running unit against root (no secure element); MQTT mutual TLS unexercised; **`/oem` still carries build-user ownership on every fielded unit and no update can fix it — only a reflash** (item 14). Nothing loads from it any more: the daemon since 2026.08.5 (`ldd`-confirmed on a unit), interactive root shells since 2026.08.6 (`RkEnv.sh` removed) |
 | 4 Minimise attack surface | **met** — BSP daemons and 118 packages gone, default-deny IPv4+IPv6 firewall, **`wifi_app` userspace dropped 2026-08-22 (claimed 08-12, never true until now — see the correction below)**, image inodes root-owned, and since **2026-08-21** the `oem` partition ships **empty** (198 files / 21 MB of Rockchip demo suite, a Wi-Fi driver for a removed radio, and a divergent copy of the console — none of it in the SBOM or the CVE gate, both of which read the rootfs) | same (shared rootfs) | ✅ 08-12/08-16, **oem strip and board hardening confirmed on a unit 08-21** | ~~httpd + CGIs run as root~~ — **console confirmed running as `www-data` on a unit 2026-08-22** (setuid `privop` dispatcher for the few root verbs). The same check found **stunnel still root** because its `setuid` was emitted inside `[web]` where `drop_privileges()` never reads it — **fixed and confirmed on a unit 2026-08-22**, both terminators now `www-data`; root password is off the **published** vendor default since 08-16 (`$6$`, undocumented to customers) but is still one short shared value — unreachable over the network, serial-console login withdrawn with the getty. **All 16 board profiles are hardened since 08-21** (14 were not; two served an unauthenticated root shell) — but 15 of them have never been booted here |
-| 5 Access control | **met** for the console | **met** for the console and, since 2026-08-19, the OPC UA endpoint | ✅ 08-09, OPC UA identity ⚠️ not on a unit | CAN :8001 unauthenticated by protocol design |
+| 5 Access control | **met** for the console | **met** for the console and, since 2026-08-19, the OPC UA endpoint | ✅ 08-09; **OPC UA identity ✅ 08-19** — UaExpert against a board, refusals and admission with the channel and identity layers separated | CAN :8001 unauthenticated by protocol design |
 | 6 Security-event logging | **met** — console trail complete, and CAN peer identity is recorded on **both** transports since the 08-18 recovery (`50ec9b9`) | **met** | ✅ 08-12 (IE) | the UDP peer record has not been exercised on a unit (`grep can_udp_peer_seen /var/log/messages` after sending from two hosts); no off-device forwarding on either |
 | 7 Update mechanism | **met** — signed A/B SWUpdate, ordered releases, downgrade gate | same | ✅ **08-22 — full cycle and the downgrade refusal, on a unit** | DEV signing key only (the remaining gap, and the shipping blocker). Partition layout **frozen 2026-08-19** (gated by `./build.sh partitions`) |
 | 8 Factory reset | **met** | **met** | ✅ 08-12 | — |
 
 | Annex I Part II | Status |
 |---|---|
-| §1 SBOM per release | **met** — `./build.sh sbom`, Buildroot legal-info + hand-declared app layer |
+| §1 SBOM per release | **met 2026-08-22, and it was not before.** `./build.sh sbom` is Buildroot legal-info + a hand-declared app layer + `platform-extra.csv`. That third source is new: until 08-22 the SBOM listed **neither the kernel, U-Boot, the bootloader blobs, the Rockchip media SDK nor the C library**, while the CVE report checked them all from its own `cpe-extra.csv`. The two are now cross-checked and disagreeing fails the build. `sbom` also joined the release gate line, which is why the tree held a CVE report two releases newer than its SBOM |
 | §2 Address vulnerabilities without delay | **met at the gate** — triage rows carry an owner and a `REVIEW_BY` date; first expiries 2026-11 |
 | §3 Periodic security testing | **partial** — **CI and parser fuzzing landed 2026-08-23** (`make test` on every push in both repos; a deterministic fuzz replay inside `make test`, coverage-guided libFuzzer nightly; one defect found and fixed — see the dated entry). Owed on that half: the coverage-guided run has never executed, only ~24M/~32M random rounds. The hardware bench is the loop that finds the real defects; **two** legs outstanding (item 8 b, which needs a broker whose authentication we control, and g, which gates nothing). a, c–f closed 08-19/20; h–k opened and closed 2026-08-21, and that session found three defects no reading of the tree could have shown: a renamed init script shipping twice, a purge whose silence was unreadable, and a command both customer manuals told operators to run that this image has never had |
 | §4–6 Coordinated disclosure | **partial — the only deadline-bound row, and nothing on it is engineering's.** Policy, address and the publishable `security.txt` + policy page are all done (08-09, 08-18, `disclosure/`); the **mailbox does not exist yet**, and until mail is received the row is not met |
@@ -166,6 +166,128 @@ what remains is a Workspace group and a web upload, in that order.
   than a settled contract of the decode core. Recorded here and in
   `satisense-edge/tests/fuzz/README.md` so it is a known property rather than a
   discovery during an audit.
+
+- **2026-08-23 — Annex I Part II §2: the two Rockchip blobs move from a silent
+  `CPE=NONE` to an accepted risk with an owner and an expiry.** A follow-on from
+  the SBOM reconciliation, and the more interesting half of it.
+
+  `cpe-extra.csv` used `CPE=NONE` for two different things written identically —
+  a bare `NONE` and a sentence. For our own daemons and consoles it states a
+  **fact**: first-party code has no NVD presence by definition, and its defects
+  reach us through testing and `security@joralllc.com`. For `rockchip-rkbin` and
+  `rockchip-media-sdk` it stated a **decision**: closed-source binaries that run
+  on every unit, which we cannot read, cannot query, and hear about only if
+  Rockchip says so. Written the same way, the decision inherited the fact's
+  permanence — and the file's own claim of a "quarterly review" was enforced by
+  nothing at all.
+
+  `DECISION` now separates them, on `CPE=NONE` rows only. `no-nvd-presence` is
+  the fact and needs nothing. `accepted-risk` needs `REVIEWED_BY` and an ISO
+  `REVIEW_BY`, and **the gate fails once that date passes** — the same contract
+  `cve-triage.csv` has carried since 2026-08-09. The framing that matters is
+  that nothing about the blob changes on the review date; what expires is our
+  licence to stop looking, so the review is re-reading Rockchip's release notes,
+  not re-querying NVD, which will never have anything to say.
+
+  Both rows are dated **2026-11-09**, deliberately the same day as the first
+  `cve-triage.csv` expiries, so the reviews are one session rather than three.
+  Their justifications carry the reachability argument that makes the risk
+  acceptable rather than merely unavoidable: `librknnmrt` processes model
+  tensors and not network input, and the rkbin blobs execute only between reset
+  and U-Boot, with the flash-time `usbplug` blob requiring physical MaskROM
+  access. The rkbin entry also records what the fix would cost — a new Rockchip
+  drop changes the bootloader, which the A/B updater cannot deliver, so it is a
+  reflash.
+
+  **Verified by injecting drift, five ways**, each confirmed to fail: a lapsed
+  review date (gate fails, exit 1, the component named); an accepted risk with
+  no owner; one with an unparseable date; an unknown `DECISION` value, which
+  must not silently default to `no-nvd-presence`; and a `DECISION` on a row that
+  declares a CPE, which would have created a second, coarser suppression path
+  that no `cve-triage.csv` row would ever mention. The last four exit **2**, not
+  1 — a suppression that fails to parse is a suppression nobody notices is gone.
+  Nine checks added to `test-cve-check.py`, now 64.
+
+  **One thing the work exposed that was not the point of it.** Both declaration
+  files number their error messages *after* the comment lines are stripped, and
+  both files are more comment than data — so `cpe-extra.csv:22` had always
+  pointed at a comment rather than at the offending row. Fixed for
+  `cve-triage.csv` at the same time, and guarded by a test whose fixture puts
+  the bad row on a known file line.
+
+- **2026-08-22 — Annex I Part II §1: the SBOM did not list the kernel, and
+  nothing noticed for sixteen days.** Found by re-reading the two compliance
+  generators against each other rather than by any gate.
+
+  `gen-sbom.sh` built the platform layer from Buildroot's `legal-info`
+  manifest alone. `cve-check.py` built its inventory from the same manifest
+  **plus** the "component added" rows of `cpe-extra.csv` — which is how
+  `linux-kernel`, `u-boot` and `rockchip-media-sdk` were ever checked at all.
+  So the CVE report carried 2908 findings across two components that appeared
+  nowhere in the bill of materials, while its own header claimed the two
+  documents "derive the component list from the same Buildroot `.config`, so
+  they describe the same image by construction". That sentence was false from
+  the day it was written.
+
+  **Nine components were missing, not three.** Beyond the kernel, U-Boot and the
+  vendor SDK, `legal-info` omits every Buildroot-internal package that carries
+  no source archive — the rootfs skeleton, `initscripts`, `ifupdown-scripts`,
+  `urandom-scripts` and `toolchain-external-custom`. That last one is the
+  external-toolchain wrapper, which is what ships **uClibc-ng 1.0.31, libgcc_s,
+  libstdc++ and libatomic**: the product's C library was not in its own SBOM.
+  Reviewing the boot chain while fixing it turned up a tenth component that was
+  in **neither** document — **`rockchip-rkbin`**, the closed-source DDR-init
+  and SPL blobs that run *before* U-Boot and are packed into `idblock.img`.
+  Nine were checked-but-unlisted; that one was simply invisible.
+
+  The fix is `scripts/compliance/platform-extra.csv`, the same six columns as a
+  product's `app-manifest.csv`, emitted into the SBOM verbatim — and a
+  **bidirectional check in `gen-sbom.sh` that fails the build** unless the added
+  components in it and in `cpe-extra.csv` match name for name and version for
+  version. Verified by injecting drift rather than by passing: a kernel version
+  that disagrees between the files, a component checked but not listed, and a
+  component listed but not checked each fail it; the control passes. Platform
+  layer 52 → 62 components; CVE gate re-run at **0 blocking**, inventory 69 →
+  70. The CVE report's false paragraph is corrected in place and says what it
+  used to say.
+
+  **The version bump that would have exposed this did the opposite.** The kernel
+  went 5.10.160 → 5.10.252 on 08-21 and `cpe-extra.csv` was updated, so the CVE
+  report tracked the new kernel correctly — and the SBOM, listing no kernel at
+  all, could not go stale in any visible way. A component absent from a document
+  never contradicts it.
+
+- **2026-08-22 — Annex II / Part II §2: `sbom` was not on the release gate line,
+  and release evidence was archived nowhere.** Two findings with one root.
+
+  `media/joral/release-build-runbook.md` ran six gates — `oem`, `partitions`,
+  `hardening`, `doccmds`, `cited`, `cve` — and not `sbom`. The others fail a
+  build; the SBOM only *produces* a document, so its absence cost nothing at
+  build time. Result: a CVE report for build `177-g5a6f91d6a` sitting beside an
+  SBOM for build `155-g98cd1a5ff`, two releases and a kernel migration apart,
+  against an obligation that reads "per release". `sbom` is now the seventh gate.
+
+  And `output/compliance/` is **gitignored**, with no release ever tagged — only
+  `v1.0.0` exists. The mapping from release `2026.08.17` to commit `5a6f91d6a`
+  existed in a filename in an ignored directory on one workstation and nowhere
+  else. That mapping is what Part II §2 needs to answer *which builds does this
+  advisory affect*, from a version an operator reads off a console.
+
+  `scripts/compliance/archive-release.sh` copies the SBOM, the CVE report and a
+  generated `provenance.md` — release, build ID, commit, subject, date, CVE
+  verdict, submodule pins — into the tracked `media/joral/releases/<version>/`.
+  It **refuses** artifacts whose build IDs disagree with each other, a `-dirty`
+  build ID, a commit that is not an ancestor of `HEAD`, and overwriting an
+  existing archive. Runbook step 6 is the commit and the `release/<version>`
+  tag, in that order.
+
+  `2026.08.17` cannot be archived as an as-built record: it has a CVE report at
+  its build ID and no SBOM at all, because `sbom` was not on the gate line when
+  it was cut. `gen-sbom.sh --image-id` reconstructs one from the unchanged
+  Buildroot output, and both the SBOM header and `provenance.md` then say the ID
+  was **declared** rather than derived — a reconstruction presented as an
+  as-built record is the failure the whole step exists to prevent. The archive
+  otherwise starts at the next cut.
 
 - **2026-08-22 — both products, Annex I #7: the A/B update path and the
   downgrade refusal are demonstrated on hardware.** The row had been
@@ -3222,7 +3344,11 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
 ## Remaining work (refreshed 2026-08-21 against both trees and `main` on each)
 
 The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) and
-gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
+gap items 4c/4d/4e are closed above. *(That sentence was carrying more weight than
+it had earned: the SBOM was 'closed' on 2026-08-06 and did not list the kernel,
+U-Boot or the C library until 2026-08-22, and was not regenerated per release
+until the same day — see the two dated entries. 'Closed' now means a gate fails
+when it stops being true.)* What is actually left, deadline item first:
 
 1. **Disclosure channel** — *deadline-bound: reporting obligations start 11 Sep 2026,
    **~3.5 weeks out**, and apply to already-shipped units.* **Engineering half done
