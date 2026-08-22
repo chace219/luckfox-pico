@@ -137,6 +137,18 @@ what remains is a Workspace group and a web upload, in that order.
   a crash and having no artifact for it would have been the whole exercise
   wasted.
 
+  **CI earned its keep on the first run.** satisense's workflow failed
+  immediately, and on something no amount of local testing would have shown:
+  the product Makefile did an unconditional `include ../../Makefile.param`,
+  a file that lives in this superproject and is not part of that repository.
+  In a standalone checkout make could not parse the Makefile at all, so *no*
+  target ran — `make test` included. The suites had only ever been invoked
+  from inside a full SDK tree, by hand, so the first thing a fresh checkout
+  did was fall over. The include is now conditional and the cross-build goals
+  assert it themselves with a message naming what to do instead; verified in
+  both directions, standalone and in-SDK. It is a small defect and a large
+  point: this is precisely the class a habit cannot catch.
+
   **What this row still owes, stated rather than rounded up.** The
   coverage-guided half has not run anywhere: there is no clang on the build
   workstation, so what has executed is ~24M (media-gateway) and ~32M
