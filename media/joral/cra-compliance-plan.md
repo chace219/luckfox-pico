@@ -4,6 +4,10 @@
 reference for Regulation (EU) 2024/2847, Annex I & II) plus a code-level audit of both
 product trees. Status column reflects the codebase as of commit `8cff5d0e9`.*
 
+*Not an engineer? [`cra-remaining-work.md`](cra-remaining-work.md) is this
+document's open items in plain language, with owners and dates — written for
+product management and legal. Everything below assumes the codebase.*
+
 ## Key dates
 
 - **11 September 2026** — vulnerability/incident reporting obligations begin (applies to already-shipped units).
@@ -47,7 +51,7 @@ was found by executing, not by reading. Per-product detail lives in each tree's
 |---|---|---|---|---|
 | 1 Secure by default | **met** — HTTPS on 443 by default, per-unit cert, factory credential buys only a password change | **met** — `signencrypt` + `web.tls` by default, same credential gate | ✅ 08-09/08-12 | first-use trust is a self-signed fingerprint; **anonymous OPC UA closed 2026-08-19 and confirmed on a board the same day** — factory `allow_anonymous: false`, no shipped OPC UA credential, UaExpert refused in both directions (item 8 leg f). *(This cell read "not yet on a unit" until 2026-08-22, contradicting leg f four screens below it.)* |
 | 2 No known CVEs at shipment | **met at the gate** — `./build.sh cve` **0 blocking**, OpenSSL 3.5.7 LTS | same (shared rootfs) | ✅ 08-12 | kernel (5155) + U-Boot (41) are report-only. the GNU wget accepted-risk was **resolved 08-16 by dropping the package**, leaving **python3 ×5** as the only accepted-risk. **dhcpcd was reclassified `not-affected` 2026-08-19** — it had been mis-filed `fixed-pending-release` for a mitigation that was ours and had already shipped, so it would have expired 2026-11-12 into a blocking finding for an unreachable code path; the config it rests on is now guarded by a test. **python3 removal was staged the same day and then reversed** — the interpreter is **kept** and the fix is a version bump, 3.11.6 → **3.11.16** (12 Aug 2026), carried as a tracked package replacement. **CVE-2020-29396 was reclassified `not-affected` 2026-08-19** — it is an Odoo sandbox escape with python listed only as the running-with platform, so it was never a CPython defect and no bump could ever have retired it. **BUILT AND GATED 2026-08-19**: the image carries 3.11.16 (read out of `rootfs.img`), `./build.sh cve` **0 blocking**. The bump retired **two** of the four — CVE-2024-6232 and CVE-2024-7592 now match nothing and their triage rows were deleted — and did **not** retire **CVE-2026-15308 and CVE-2026-4519**, which still match 3.11.16 and remain accepted-risk on the unchanged reachability argument. So: python3 ×2, not ×0. **Two accepted risks of a different kind were recorded 2026-08-23** — `rockchip-rkbin` and `rockchip-media-sdk`, closed-source blobs that cannot be queried at all; they were silent `CPE=NONE` rows until then and now carry an owner and a `REVIEW_BY` the gate enforces (see the dated entry) |
-| 3 Confidentiality / integrity | **met** for the console path | **met** — secrets in a 0600 sidecar, **encrypted at rest and bound to the board since 08-16**, never served to the browser; MQTT TLS verification proven enforced | ✅ 08-12/13, **sealing confirmed on a unit 2026-08-22** (`mode=encrypted`, `binding=soc-otp+emmc-cid`) | the sealing protects the stored file, **not** a running unit against root (no secure element); MQTT mutual TLS unexercised; **`/oem` still carries build-user ownership on every fielded unit and no update can fix it — only a reflash** (item 14). Nothing loads from it any more: the daemon since 2026.08.5 (`ldd`-confirmed on a unit), interactive root shells since 2026.08.6 (`RkEnv.sh` removed) |
+| 3 Confidentiality / integrity | **met** for the console path | **met** — secrets in a 0600 sidecar, **encrypted at rest and bound to the board since 08-16**, never served to the browser; MQTT TLS verification proven enforced | ✅ 08-12/13, **sealing confirmed on a unit 2026-08-22** (`mode=encrypted`, `binding=soc-otp+emmc-cid`) | the sealing protects the stored file, **not** a running unit against root (no secure element); MQTT mutual TLS unexercised. ~~`/oem` carries build-user ownership on every fielded unit and no update can fix it — only a reflash~~ — **retired 2026-08-21 by bench leg h**: `S22oemclean` empties `/oem` and re-owns the mountpoint `1000:1000` → `0:0` on the first boot after an update, observed on a unit reconstructed into the fielded-unit condition. So the next update fixes it, not only a reflash. *(This cell asserted the reflash-only claim until 2026-08-23, two days after the same document recorded leg h retiring it, and after both Annex II fact sheets had been corrected — see the reconciliation entry.)* Nothing loads from `/oem` any more either: the daemon since 2026.08.5 (`ldd`-confirmed on a unit), interactive root shells since 2026.08.6 (`RkEnv.sh` removed) |
 | 4 Minimise attack surface | **met** — BSP daemons and 118 packages gone, default-deny IPv4+IPv6 firewall, **`wifi_app` userspace dropped 2026-08-22 (claimed 08-12, never true until now — see the correction below)**, image inodes root-owned, and since **2026-08-21** the `oem` partition ships **empty** (198 files / 21 MB of Rockchip demo suite, a Wi-Fi driver for a removed radio, and a divergent copy of the console — none of it in the SBOM or the CVE gate, both of which read the rootfs) | same (shared rootfs) | ✅ 08-12/08-16, **oem strip and board hardening confirmed on a unit 08-21** | ~~httpd + CGIs run as root~~ — **console confirmed running as `www-data` on a unit 2026-08-22** (setuid `privop` dispatcher for the few root verbs). The same check found **stunnel still root** because its `setuid` was emitted inside `[web]` where `drop_privileges()` never reads it — **fixed and confirmed on a unit 2026-08-22**, both terminators now `www-data`; root password is off the **published** vendor default since 08-16 (`$6$`, undocumented to customers) but is still one short shared value — unreachable over the network, serial-console login withdrawn with the getty. **All 16 board profiles are hardened since 08-21** (14 were not; two served an unauthenticated root shell) — but 15 of them have never been booted here |
 | 5 Access control | **met** for the console | **met** for the console and, since 2026-08-19, the OPC UA endpoint | ✅ 08-09; **OPC UA identity ✅ 08-19** — UaExpert against a board, refusals and admission with the channel and identity layers separated | CAN :8001 unauthenticated by protocol design |
 | 6 Security-event logging | **met** — console trail complete, and CAN peer identity is recorded on **both** transports since the 08-18 recovery (`50ec9b9`) | **met** | ✅ 08-12 (IE) | the UDP peer record has not been exercised on a unit (`grep can_udp_peer_seen /var/log/messages` after sending from two hosts); no off-device forwarding on either |
@@ -69,6 +73,48 @@ what remains is a Workspace group and a web upload, in that order.
 ## Closed since the audit
 
 *Appended as items land. The table above stays a snapshot of the 2026-07-26 audit.*
+
+- **2026-08-23 — reconciliation: two places where this document disagreed with
+  itself.** Both were *undercounts* — work recorded as owed that the same
+  document records as done, several screens apart. Neither changes what the
+  products do. They are written up because the 2026-08-19 entry argued that an
+  undercount has to be treated as seriously as an overclaim, and an argument
+  made once and then not applied is the failure mode this programme keeps
+  paying for.
+
+  **The `/oem` residual on Annex I row 3.** The status table still said `/oem`
+  "carries build-user ownership on every fielded unit and no update can fix it
+  — only a reflash". Bench leg h retired exactly that on **2026-08-21**:
+  `S22oemclean` empties `/oem` and re-owns the mountpoint `1000:1000` → `0:0`
+  on the first boot after an update, observed on a unit reconstructed into the
+  fielded-unit condition — the removal and the boot being the same event, so an
+  observation rather than two runs joined by an argument. Both Annex II fact
+  sheets were corrected at the time. This cell was not, and carried the
+  reflash-only claim for two more days.
+
+  It is the more consequential of the two, because "only a reflash" and "the
+  next update fixes it" are different answers to a question a customer asks:
+  whether fielded units need to come back. Getting that wrong in the pessimistic
+  direction costs a recall nobody needed.
+
+  **Item 11's third bullet.** It asked for "the negative/fault legs in item 8d"
+  as an outstanding bench session. Item 8d was struck through on **2026-08-19**
+  on discovering that all six — tampered payload, tampered signature, wrong key,
+  power cut mid-write, deliberately broken slot, factory reset — had passed on
+  hardware on 2026-08-14 and were recorded in `swupdate-implementation-plan.md`'s
+  own bench-results table. The pointer in item 11 was never updated, so the
+  remaining-work list kept asking for a session that had already happened. That
+  is the same cost the original 8d error carried: it nearly bought a bench
+  session re-running six passing tests.
+
+  **What both have in common, and it is worth a gate rather than a habit.** In
+  each case a *dated entry* was written correctly and the *roll-up that points
+  at it* was not, so the document's summary and its evidence drifted apart while
+  every individual statement stayed true where it was written. That is not
+  something review catches — both readings are locally consistent. `./build.sh
+  cited` already asserts that a cited commit ships; nothing yet asserts that a
+  row claiming work is outstanding has no dated entry closing it. Recorded here
+  as the shape of the next gate worth building.
 
 - **2026-08-23 — both products, Annex I Part II §3: the suites became a
   control, and the first parser fuzzing exists.** This row had two named gaps
@@ -3826,7 +3872,7 @@ when it stops being true.)* What is actually left, deadline item first:
       one-way door #2 and it is now the only pre-ship engineering blocker in
       this item. Carl's hour; procedure and compromise runbook are drafted and
       ready to sign in `firmware-signing-and-support-policy.md`.
-    - **Run the negative/fault legs in item 8d.** A bench session.
+    - ~~**Run the negative/fault legs in item 8d.**~~ — **nothing owed: they passed on hardware 2026-08-14.** This bullet outlived the correction that retired it. Item 8d was struck through on 2026-08-19 on discovering all six negative and fault paths — tampered payload, tampered signature, wrong key, power cut mid-write, deliberately broken slot, factory reset — had passed on a unit five days before the row was last refreshed, and are recorded in `swupdate-implementation-plan.md`'s bench-results table. The pointer here was never updated, so item 11 kept asking for a bench session that had already happened. **What was genuinely outstanding on this row — an ordinary operator update and the downgrade refusal firing — closed on hardware 2026-08-22.** The key ceremony above is the whole of what item 11 still owes.
 12. ~~**Diagnosability defects filed but not fixed**~~ — **both fixed
     2026-08-16** (see the dated entry above): the SatiSense daemon now writes
     `/var/log/intelligence-edge.log` itself (`core/logfile.c`, 1 MB cap + one
