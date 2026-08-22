@@ -70,6 +70,8 @@ struct rockchip_dp_chip_data {
 	bool	ssc;
 	bool	audio;
 	bool	split_mode;
+	bool	format_yuv;
+	u8	max_bpc;
 };
 
 struct rockchip_dp_device {
@@ -89,9 +91,6 @@ struct rockchip_dp_device {
 	struct analogix_dp_device *adp;
 	struct analogix_dp_plat_data plat_data;
 	struct rockchip_drm_sub_dev sub_dev;
-
-	unsigned int min_refresh_rate;
-	unsigned int max_refresh_rate;
 };
 
 static int rockchip_grf_write(struct regmap *grf, unsigned int reg,
@@ -218,15 +217,16 @@ static int rockchip_dp_powerdown(struct analogix_dp_plat_data *plat_data)
 static int rockchip_dp_get_modes(struct analogix_dp_plat_data *plat_data,
 				 struct drm_connector *connector)
 {
+	struct rockchip_dp_device *dp = to_dp(plat_data);
 	struct drm_display_info *di = &connector->display_info;
-	/* VOP couldn't output YUV video format for eDP rightly */
 	u32 mask = DRM_COLOR_FORMAT_YCRCB444 | DRM_COLOR_FORMAT_YCRCB422;
 
-	if ((di->color_formats & mask)) {
-		DRM_DEBUG_KMS("Swapping display color format from YUV to RGB\n");
-		di->color_formats &= ~mask;
-		di->color_formats |= DRM_COLOR_FORMAT_RGB444;
-		di->bpc = 8;
+	if (!dp->data->format_yuv) {
+		if ((di->color_formats & mask)) {
+			DRM_DEBUG_KMS("Swapping display color format from YUV to RGB\n");
+			di->color_formats &= ~mask;
+			di->color_formats |= DRM_COLOR_FORMAT_RGB444;
+		}
 	}
 
 	return 0;
@@ -314,6 +314,23 @@ static void rockchip_dp_bridge_detach(struct analogix_dp_plat_data *plat_data,
 		rockchip_drm_unregister_sub_dev(sdev);
 }
 
+static enum drm_mode_status
+rockchip_dp_drm_encoder_mode_valid(struct drm_encoder *encoder,
+				   const struct drm_display_mode *mode)
+{
+	struct rockchip_dp_device *dp = to_dp(encoder);
+	struct videomode vm;
+
+	drm_display_mode_to_videomode(mode, &vm);
+
+	if (!vm.hfront_porch || !vm.hback_porch || !vm.vfront_porch || !vm.vback_porch) {
+		DRM_DEV_ERROR(dp->dev, "front porch or back porch can not be 0\n");
+		return MODE_BAD;
+	}
+
+	return MODE_OK;
+}
+
 static bool
 rockchip_dp_drm_encoder_mode_fixup(struct drm_encoder *encoder,
 				   const struct drm_display_mode *mode,
@@ -330,24 +347,6 @@ static void rockchip_dp_drm_encoder_mode_set(struct drm_encoder *encoder,
 	/* do nothing */
 }
 
-static
-struct drm_crtc *rockchip_dp_drm_get_new_crtc(struct drm_encoder *encoder,
-					      struct drm_atomic_state *state)
-{
-	struct drm_connector *connector;
-	struct drm_connector_state *conn_state;
-
-	connector = drm_atomic_get_new_connector_for_encoder(state, encoder);
-	if (!connector)
-		return NULL;
-
-	conn_state = drm_atomic_get_new_connector_state(state, connector);
-	if (!conn_state)
-		return NULL;
-
-	return conn_state->crtc;
-}
-
 static void rockchip_dp_drm_encoder_enable(struct drm_encoder *encoder,
 					   struct drm_atomic_state *state)
 {
@@ -356,7 +355,7 @@ static void rockchip_dp_drm_encoder_enable(struct drm_encoder *encoder,
 	struct drm_crtc_state *old_crtc_state;
 	int ret;
 
-	crtc = rockchip_dp_drm_get_new_crtc(encoder, state);
+	crtc = rockchip_drm_encoder_get_new_crtc(encoder, state);
 	if (!crtc)
 		return;
 
@@ -380,21 +379,33 @@ static void rockchip_dp_drm_encoder_disable(struct drm_encoder *encoder,
 					    struct drm_atomic_state *state)
 {
 	struct rockchip_dp_device *dp = to_dp(encoder);
-	struct drm_crtc *crtc;
+	struct drm_crtc *old_crtc, *new_crtc;
 	struct drm_crtc_state *new_crtc_state = NULL;
+	struct rockchip_crtc_state *s;
 	int ret;
 
-	crtc = rockchip_dp_drm_get_new_crtc(encoder, state);
+	old_crtc = rockchip_drm_encoder_get_old_crtc(encoder, state);
+	new_crtc = rockchip_drm_encoder_get_new_crtc(encoder, state);
+
+	if (old_crtc && old_crtc != new_crtc) {
+		s = to_rockchip_crtc_state(old_crtc->state);
+
+		if (dp->plat_data.split_mode)
+			s->output_if &= ~(VOP_OUTPUT_IF_eDP1 | VOP_OUTPUT_IF_eDP0);
+		else
+			s->output_if &= ~(dp->id ? VOP_OUTPUT_IF_eDP1 : VOP_OUTPUT_IF_eDP0);
+	}
+
 	/* No crtc means we're doing a full shutdown */
-	if (!crtc)
+	if (!new_crtc)
 		return;
 
-	new_crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+	new_crtc_state = drm_atomic_get_new_crtc_state(state, new_crtc);
 	/* If we're not entering self-refresh, no need to wait for vact */
 	if (!new_crtc_state || !new_crtc_state->self_refresh_active)
 		return;
 
-	ret = rockchip_drm_wait_vact_end(crtc, PSR_WAIT_LINE_FLAG_TIMEOUT_MS);
+	ret = rockchip_drm_wait_vact_end(new_crtc, PSR_WAIT_LINE_FLAG_TIMEOUT_MS);
 	if (ret)
 		DRM_DEV_ERROR(dp->dev, "line flag irq timed out\n");
 }
@@ -407,12 +418,19 @@ rockchip_dp_drm_encoder_atomic_check(struct drm_encoder *encoder,
 	struct rockchip_dp_device *dp = to_dp(encoder);
 	struct rockchip_crtc_state *s = to_rockchip_crtc_state(crtc_state);
 	struct drm_display_info *di = &conn_state->connector->display_info;
+	struct drm_bridge_state *new_bridge_state;
+	struct drm_bridge *bridge;
+	const struct analogix_dp_output_format *output_fmt;
 	int refresh_rate;
 
-	if (di->num_bus_formats)
-		s->bus_format = di->bus_formats[0];
-	else
-		s->bus_format = MEDIA_BUS_FMT_RGB888_1X24;
+	bridge = drm_bridge_chain_get_first_bridge(encoder);
+	new_bridge_state = drm_atomic_get_new_bridge_state(conn_state->state, bridge);
+	if (!new_bridge_state)
+		return 0;
+
+	dev_dbg(dp->dev, "input format 0x%04x, output format 0x%04x\n",
+		new_bridge_state->input_bus_cfg.format,
+		new_bridge_state->output_bus_cfg.format);
 
 	/*
 	 * The hardware IC designed that VOP must output the RGB10 video
@@ -421,8 +439,17 @@ rockchip_dp_drm_encoder_atomic_check(struct drm_encoder *encoder,
 	 * controller, that's why we need to hardcode the VOP output mode
 	 * to RGA10 here.
 	 */
-
-	s->output_mode = ROCKCHIP_OUT_MODE_AAAA;
+	output_fmt = analogix_dp_get_output_format(new_bridge_state->output_bus_cfg.format);
+	switch (output_fmt->color_format) {
+	case DRM_COLOR_FORMAT_YCRCB422:
+		s->output_mode = ROCKCHIP_OUT_MODE_YUV422;
+		break;
+	case DRM_COLOR_FORMAT_RGB444:
+	case DRM_COLOR_FORMAT_YCRCB444:
+	default:
+		s->output_mode = ROCKCHIP_OUT_MODE_AAAA;
+		break;
+	}
 	s->output_type = DRM_MODE_CONNECTOR_eDP;
 	if (dp->plat_data.split_mode) {
 		s->output_flags |= ROCKCHIP_OUTPUT_DUAL_CHANNEL_LEFT_RIGHT_MODE;
@@ -431,7 +458,18 @@ rockchip_dp_drm_encoder_atomic_check(struct drm_encoder *encoder,
 	} else {
 		s->output_if |= dp->id ? VOP_OUTPUT_IF_eDP1 : VOP_OUTPUT_IF_eDP0;
 	}
-	s->output_bpc = di->bpc;
+
+	if (dp->plat_data.dual_connector_split) {
+		s->output_flags |= ROCKCHIP_OUTPUT_DUAL_CONNECTOR_SPLIT_MODE;
+
+		if (dp->plat_data.left_display)
+			s->output_if_left_panel |= dp->id ?
+						VOP_OUTPUT_IF_eDP1 :
+						VOP_OUTPUT_IF_eDP0;
+	}
+
+	s->bus_format = output_fmt->bus_format;
+	s->output_bpc = output_fmt->bpc;
 	s->bus_flags = di->bus_flags;
 	s->tv_state = &conn_state->tv;
 	s->eotf = HDMI_EOTF_TRADITIONAL_GAMMA_SDR;
@@ -439,9 +477,9 @@ rockchip_dp_drm_encoder_atomic_check(struct drm_encoder *encoder,
 	/**
 	 * It's priority to user rate range define in dtsi.
 	 */
-	if (dp->max_refresh_rate && dp->min_refresh_rate) {
-		s->max_refresh_rate = dp->max_refresh_rate;
-		s->min_refresh_rate = dp->min_refresh_rate;
+	if (dp->plat_data.max_refresh_rate && dp->plat_data.min_refresh_rate) {
+		s->max_refresh_rate = dp->plat_data.max_refresh_rate;
+		s->min_refresh_rate = dp->plat_data.min_refresh_rate;
 	} else {
 		s->max_refresh_rate = di->monitor_range.max_vfreq;
 		s->min_refresh_rate = di->monitor_range.min_vfreq;
@@ -468,6 +506,7 @@ rockchip_dp_drm_encoder_atomic_check(struct drm_encoder *encoder,
 }
 
 static struct drm_encoder_helper_funcs rockchip_dp_encoder_helper_funcs = {
+	.mode_valid = rockchip_dp_drm_encoder_mode_valid,
 	.mode_fixup = rockchip_dp_drm_encoder_mode_fixup,
 	.mode_set = rockchip_dp_drm_encoder_mode_set,
 	.atomic_enable = rockchip_dp_drm_encoder_enable,
@@ -550,7 +589,7 @@ static int rockchip_dp_bind(struct device *dev, struct device *master,
 			.ops = &rockchip_dp_audio_codec_ops,
 			.spdif = 1,
 			.i2s = 1,
-			.max_i2s_channels = 2,
+			.max_i2s_channels = 8,
 		};
 
 		dp->audio_pdev =
@@ -633,6 +672,7 @@ static int rockchip_dp_probe(struct platform_device *pdev)
 	dp->adp = ERR_PTR(-ENODEV);
 	dp->data = &dp_data[id];
 	dp->plat_data.ssc = dp->data->ssc;
+	dp->plat_data.max_bpc = dp->data->max_bpc ? dp->data->max_bpc : 8;
 	dp->plat_data.panel = panel;
 	dp->plat_data.dev_type = dp->data->chip_type;
 	dp->plat_data.power_on_start = rockchip_dp_poweron_start;
@@ -644,6 +684,7 @@ static int rockchip_dp_probe(struct platform_device *pdev)
 	dp->plat_data.convert_to_origin_mode = drm_mode_convert_to_origin_mode;
 	dp->plat_data.skip_connector = rockchip_dp_skip_connector(bridge);
 	dp->plat_data.bridge = bridge;
+	dp->plat_data.disable_psr = device_property_read_bool(dp->dev, "rockchip,disable-psr");
 
 	ret = rockchip_dp_of_probe(dp);
 	if (ret < 0)
@@ -655,7 +696,9 @@ static int rockchip_dp_probe(struct platform_device *pdev)
 	if (IS_ERR(dp->adp))
 		return PTR_ERR(dp->adp);
 
-	if (dp->data->split_mode && device_property_read_bool(dev, "split-mode")) {
+	if (dp->data->split_mode &&
+	    (device_property_read_bool(dev, "split-mode") ||
+	     device_property_read_bool(dev, "dual-channel"))) {
 		struct rockchip_dp_device *secondary =
 				rockchip_dp_find_by_id(dev->driver, !dp->id);
 		if (!secondary) {
@@ -665,12 +708,20 @@ static int rockchip_dp_probe(struct platform_device *pdev)
 
 		dp->plat_data.right = secondary->adp;
 		dp->plat_data.split_mode = true;
+		dp->plat_data.dual_channel_mode = device_property_read_bool(dev, "dual-channel");
+		secondary->plat_data.panel = dp->plat_data.panel;
 		secondary->plat_data.left = dp->adp;
 		secondary->plat_data.split_mode = true;
 	}
 
-	device_property_read_u32(dev, "min-refresh-rate", &dp->min_refresh_rate);
-	device_property_read_u32(dev, "max-refresh-rate", &dp->max_refresh_rate);
+	device_property_read_u32(dev, "min-refresh-rate", &dp->plat_data.min_refresh_rate);
+	device_property_read_u32(dev, "max-refresh-rate", &dp->plat_data.max_refresh_rate);
+
+	if (dp->data->split_mode && device_property_read_bool(dev, "dual-connector-split")) {
+		dp->plat_data.dual_connector_split = true;
+		if (device_property_read_bool(dev, "left-display"))
+			dp->plat_data.left_display = true;
+	}
 
 	ret = component_add(dev, &rockchip_dp_component_ops);
 	if (ret)
@@ -775,6 +826,8 @@ static const struct rockchip_dp_chip_data rk3588_edp[] = {
 		.ssc = true,
 		.audio = true,
 		.split_mode = true,
+		.format_yuv = true,
+		.max_bpc = 10,
 	},
 	{
 		.chip_type = RK3588_EDP,
@@ -784,6 +837,8 @@ static const struct rockchip_dp_chip_data rk3588_edp[] = {
 		.ssc = true,
 		.audio = true,
 		.split_mode = true,
+		.format_yuv = true,
+		.max_bpc = 10,
 	},
 	{ /* sentinel */ }
 };

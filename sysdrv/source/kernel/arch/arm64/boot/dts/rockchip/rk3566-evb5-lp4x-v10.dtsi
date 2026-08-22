@@ -14,7 +14,7 @@
 	model = "Rockchip RK3566 EVB5 LP4X V10 Board";
 	compatible = "rockchip,rk3566-evb5-lp4x-v10", "rockchip,rk3566";
 
-	vcc3v3_pcie: gpio-regulator {
+	vcc3v3_pcie: vcc3v3-pcie {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc3v3_pcie";
 		regulator-min-microvolt = <3300000>;
@@ -45,6 +45,13 @@
 
 &audiopwmout_diff {
 	status = "disabled";
+};
+
+&bt_sound {
+	status = "disabled";
+	simple-audio-card,cpu {
+		sound-dai = <&i2s2_2ch>;
+	};
 };
 
 &combphy1_usq {
@@ -165,7 +172,17 @@
 	power-supply = <&vcc3v3_lcd0_n>;
 };
 
+&hynitron {
+	power-supply = <&vcc3v3_lcd0_n>;
+};
+
 &i2c5 {
+	status = "disabled";
+};
+
+&i2s2_2ch {
+	pinctrl-0 = <&i2s2m0_sclktx &i2s2m0_lrcktx &i2s2m0_sdi &i2s2m0_sdo>;
+	rockchip,bclk-fs = <32>;
 	status = "disabled";
 };
 

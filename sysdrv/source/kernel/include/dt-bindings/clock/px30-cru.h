@@ -89,6 +89,14 @@
 #define SCLK_SDMMC_DIV50	87
 #define SCLK_I2S0_TX_MUX	88
 #define SCLK_I2S0_RX_MUX	89
+#define SCLK_I2S0_RX_SRC	90
+#define SCLK_I2S0_TX_SRC	91
+#define SCLK_I2S1_SRC		92
+#define SCLK_I2S2_SRC		93
+#define SCLK_UART3_SRC		94
+#define SCLK_UART4_SRC		95
+#define SCLK_UART5_SRC		96
+#define SCLK_PDM_SRC		97
 
 /* dclk gates */
 #define DCLK_VOPB		150
@@ -183,6 +191,7 @@
 
 #define PLL_GPLL		1
 
+#define SCLK_UART0_PMU_SRC	3
 #define SCLK_RTC32K_PMU		4
 #define SCLK_WIFI_PMU		5
 #define SCLK_UART0_PMU		6

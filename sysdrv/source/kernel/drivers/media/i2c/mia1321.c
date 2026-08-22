@@ -2,10 +2,12 @@
 /*
  * mia1321 driver
  *
- * Copyright (C) 2023 Rockchip Electronics Co., Ltd.
+ * Copyright (C) 2025 Rockchip Electronics Co., Ltd.
  *
  * V0.0X01.0X01 first version
  */
+
+// #define DEBUG
 
 #include <linux/clk.h>
 #include <linux/device.h>
@@ -31,11 +33,11 @@
 
 #define MIA1321_LANES			2
 #define MIA1321_BITS_PER_SAMPLE		12
-#define MIA1321_LINK_FREQ_37125		576000000  //37.125mbp
+#define MIA1321_LINK_FREQ_37125		576000000  //37.125mbps
 
 #define PIXEL_RATE_WITH_315M_10BIT	(MIA1321_LINK_FREQ_37125 / MIA1321_BITS_PER_SAMPLE * 2 * \
 					MIA1321_LANES)
-#define MIA1321_XVCLK_FREQ		26000000
+#define MIA1321_XVCLK_FREQ		24000000
 
 #define CHIP_ID				0x0400
 #define MIA1321_REG_CHIP_ID		0x0011
@@ -64,7 +66,7 @@
 #define MIA1321_REG_ANA_GAIN_M		0x0019
 #define MIA1321_REG_ANA_GAIN_L		0x0018
 
-#define MIA1321_ONCE_GAIN_STEP		0x5dc
+#define MIA1321_ONCE_GAIN_STEP		0x320
 #define MIA1321_GAIN_MIN		MIA1321_ONCE_GAIN_STEP
 #define MIA1321_AGAIN_MAX		(MIA1321_ONCE_GAIN_STEP * 32) /* just again */
 #define MIA1321_GAIN_MAX		(MIA1321_AGAIN_MAX * 1)
@@ -158,8 +160,6 @@ struct mia1321 {
 	u32			cur_vts;
 	bool			is_thunderboot;
 	bool			is_first_streamoff;
-	bool			is_mirror;
-	bool			is_flip;
 };
 
 #define to_mia1321(sd) container_of(sd, struct mia1321, subdev)
@@ -171,203 +171,6 @@ static const struct regval mia1321_global_regs[] = {
 	{REG_NULL, 0x00},
 };
 
-static const struct regval mia1321_linear_60_1280x1080_regs[] = {
-	//input:26M
-	//size:1280*1080
-	//fps:60
-	//mipi 2lane
-	
-	{0x011d, 0x00}, //10BIT
-
-	{0x011f, 0x00},
-
-	{0x012e, 0x02},
-	{0x012b, 0x01},
-	
-	{0x00bd, 0x00},
-	{0x00bc, 0x01},
-	
-	{0x00bf, 0x00},
-	{0x00c0, 0x00},
-
-	{0x00cd, 0x01},
-	{0x00ce, 0x01},
-	{0x00cf, 0x00},
-	{0x00e1, 0x00},
-	{0x011c, 0x00},
-	{0x0120, 0x00},
-	{0x0125, 0x00},
-	{0x003c, 0x01},
-	{0x003d, 0x03},
-	{0x1201, 0xf0},
-	{0x1051, 0x1e},
-	{0x1202, 0x70},
-	{0x1203, 0x10},
-	{0x1070, 0x02},
-	{0x1205, 0x00},
-	{0x1208, 0x01},
-	{0x1000, 0x16},
-	{0x1024, 0x00},
-	{0x1025, 0x05},
-	{0x1026, 0x38},
-	{0x1027, 0x04},
-	{0x1020, 0x2a},
-	{0x1042, 0x03},
-	{0x0010, 0x05},
-	{0x0012, 0x01},
-	{0x0043, 0x03},
-	{0x003f, 0x3f},
-	{0x0041, 0xff},	//0x3f default: mipi single strength adjust
-
-	{0x009a, 0x01}, //MIRROR
-	{0x0099, 0x01},	//FLIP
-
-	{0x00ca, 0x01},
-	{0x00e1, 0x00},
-	{0x00e2, 0x00},
-	{0x0030, 0xc0},
-	{0x012c, 0x01},
-	
-	//60fps
-	{0x004a, 0x01}, //PLL_OUTDIV 
-	{0x004b, 0x90}, //PLL_FBDIV
-	{0x004c, 0x03}, //PLL_DIV_ADC 
-	{0x004e, 0x01}, //PLL_DIV_BITCLK
-	{0x0051, 0x03}, //PLL_DIV_PCLK 
-	{0x0053, 0x03}, //PLL_DIV_CPCLK
-
-	{0x00d0, 0x9a},	//fot_num 666
-	{0x00d1, 0x02},	//fot_num 666
-	{0x00df, 0x42},	//fot_line
-	{0x01c9, 0x9a},	//col_n 666(HS)
-	{0x01ca, 0x02},	//col_n 666(HS)
-	{0x0043, 0x01},
-	{0x02fd, 0x58},
-	{0x02fe, 0x42},
-	{0x031f, 0xb0},
-	{0x0320, 0x04},
-	{0x0305, 0x08},
-	{0x0306, 0x87},
-	{0x0307, 0xfc},
-	{0x0308, 0x08},
-	{0x0317, 0x80},
-	{0x0318, 0x0c},
-	{0x030f, 0xfa},
-	{0x0310, 0x0f},
-	{0x02ff, 0xfa},
-	{0x0300, 0x8f},
-	{0x0309, 0xfa},
-	{0x030a, 0x8f},
-	{0x00ce, 0x03},
-	{0x1000, 0x06},
-	{0x1018, 0x01},
-	{0x1018, 0x00},
-	{0x012a, 0x01},
-	{0x012a, 0x00},
-	{0x00ce, 0x00},
-	{0x00cd, 0x01},
-
-	{0x012a, 0x01},
-	{0x012a, 0x00},
-	{REG_NULL, 0x00},
-};
-static const struct regval mia1321_linear_120_1280x1080_regs[] = {
-	//input:26M
-	//size:1280*1080
-	//fps:117
-	//mipi 2lane
-	
-	{0x011d, 0x00}, //10BIT
-
-	{0x011f, 0x00},
-
-	{0x012e, 0x02},
-	{0x012b, 0x01},
-	
-	{0x00bd, 0x00},
-	{0x00bc, 0x01},
-	
-	{0x00bf, 0x00},
-	{0x00c0, 0x00},
-
-	{0x00cd, 0x01},
-	{0x00ce, 0x01},
-	{0x00cf, 0x00},
-	{0x00e1, 0x00},
-	{0x011c, 0x00},
-	{0x0120, 0x00},
-	{0x0125, 0x00},
-	{0x003c, 0x01},
-	{0x003d, 0x03},
-	{0x1201, 0xf0},
-	{0x1051, 0x1e},
-	{0x1202, 0x70},
-	{0x1203, 0x10},
-	{0x1070, 0x02},
-	{0x1205, 0x00},
-	{0x1208, 0x01},
-	{0x1000, 0x16},
-	{0x1024, 0x00},
-	{0x1025, 0x05},
-	{0x1026, 0x38},
-	{0x1027, 0x04},
-	{0x1020, 0x2a},
-	{0x1042, 0x03},
-	{0x0010, 0x05},
-	{0x0012, 0x01},
-	{0x0043, 0x03},
-	{0x003f, 0x3f},
-	{0x0041, 0xff},	//0x3f default: mipi single strength adjust
-	{0x00ca, 0x01},
-	{0x00e1, 0x00},
-	{0x00e2, 0x00},
-	{0x0030, 0xc0},
-	{0x012c, 0x01},
-	
-	//117fps	
-	{0x004a, 0x01},//PLL_OUTDIV 
-	{0x004b, 0xd8},//PLL_FBDIV 117fps
-	//{0x004b, 0xC0},//PLL_FBDIV 100fps
-	{0x004c, 0x02},//PLL_DIV_ADC 
-	{0x004e, 0x01},//PLL_DIV_BITCLK
-	{0x0051, 0x02},//PLL_DIV_PCLK 
-	{0x0053, 0x02},//PLL_DIV_CPCLK
-		
-	{0x00d0, 0x9a},	//fot_num 666
-	{0x00d1, 0x02},	//fot_num 666
-	{0x00df, 0x42},	//fot_line
-	{0x01c9, 0x9a},	//col_n 666(HS)
-	{0x01ca, 0x02},	//col_n 666(HS)
-	{0x0043, 0x01},
-	{0x02fd, 0x58},
-	{0x02fe, 0x42},
-	{0x031f, 0xb0},
-	{0x0320, 0x04},
-	{0x0305, 0x08},
-	{0x0306, 0x87},
-	{0x0307, 0xfc},
-	{0x0308, 0x08},
-	{0x0317, 0x80},
-	{0x0318, 0x0c},
-	{0x030f, 0xfa},
-	{0x0310, 0x0f},
-	{0x02ff, 0xfa},
-	{0x0300, 0x8f},
-	{0x0309, 0xfa},
-	{0x030a, 0x8f},
-	{0x00ce, 0x03},
-	{0x1000, 0x06},
-	{0x1018, 0x01},
-	{0x1018, 0x00},
-	{0x012a, 0x01},
-	{0x012a, 0x00},
-	{0x00ce, 0x00},
-	{0x00cd, 0x01},
-
-	{0x012a, 0x01},
-	{0x012a, 0x00},
-	{REG_NULL, 0x00},
-};
 static const struct regval mia1321_linear_10_1280x720_regs[] = {
 	//input:24M
 	//size:1280*1080
@@ -456,38 +259,7 @@ static const struct regval mia1321_linear_10_1280x720_regs[] = {
 	{REG_NULL, 0x00},
 };
 
-
 static const struct mia1321_mode supported_modes[] = {
-	{
-		.width = 1280,
-		.height = 1080,
-		.max_fps = {
-			.numerator = 10000,
-			.denominator = 600000,
-		},
-		.exp_def = 0x01f4,
-		.hts_def = 0x0a68,
-		.vts_def = 0x04b0,
-		.bus_fmt = MEDIA_BUS_FMT_SGRBG10_1X10,
-		.reg_list = mia1321_linear_60_1280x1080_regs,
-		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
-	},
-	{
-		.width = 1280,
-		.height = 1080,
-		.max_fps = {
-			.numerator = 10000,
-			.denominator = 1170000,
-		},
-		.exp_def = 0x01f4,
-		.hts_def = 0x0a68,
-		.vts_def = 0x04b0,
-		.bus_fmt = MEDIA_BUS_FMT_SGRBG10_1X10,
-		.reg_list = mia1321_linear_120_1280x1080_regs,
-		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
-	},
 	{
 		.width = 1280,
 		.height = 1080,
@@ -542,7 +314,6 @@ static int mia1321_write_reg(struct i2c_client *client, u16 reg,
 
 	if (i2c_master_send(client, buf, len + 2) != len + 2)
 		return -EIO;
-
 	return 0;
 }
 
@@ -602,40 +373,30 @@ static void mia1321_set_orientation_reg(struct mia1321 *mia1321, u32 en_flip_mir
 {
 	switch (en_flip_mir) {
 	case  0:
-		mia1321->is_flip = false;
-		mia1321->is_mirror = false;
 		mia1321_write_reg(mia1321->client, MIA1321_FLIP_REG,
 				  MIA1321_REG_VALUE_08BIT, 0x00);
 		mia1321_write_reg(mia1321->client, MIA1321_MIRROR_REG,
 				  MIA1321_REG_VALUE_08BIT, 0x00);
 		break;
 	case  1:
-		mia1321->is_flip = false;
-		mia1321->is_mirror = true;
 		mia1321_write_reg(mia1321->client, MIA1321_FLIP_REG,
 				  MIA1321_REG_VALUE_08BIT, 0x00);
 		mia1321_write_reg(mia1321->client, MIA1321_MIRROR_REG,
 				  MIA1321_REG_VALUE_08BIT, 0x01);
 		break;
 	case  2:
-		mia1321->is_flip = true;
-		mia1321->is_mirror = false;
 		mia1321_write_reg(mia1321->client, MIA1321_FLIP_REG,
 				  MIA1321_REG_VALUE_08BIT, 0x01);
 		mia1321_write_reg(mia1321->client, MIA1321_MIRROR_REG,
 				  MIA1321_REG_VALUE_08BIT, 0x00);
 		break;
 	case  3:
-		mia1321->is_flip = true;
-		mia1321->is_mirror = true;
 		mia1321_write_reg(mia1321->client, MIA1321_FLIP_REG,
 				  MIA1321_REG_VALUE_08BIT, 0x01);
 		mia1321_write_reg(mia1321->client, MIA1321_MIRROR_REG,
 				  MIA1321_REG_VALUE_08BIT, 0x01);
 		break;
 	default:
-		mia1321->is_flip = false;
-		mia1321->is_mirror = false;
 		mia1321_write_reg(mia1321->client, MIA1321_FLIP_REG,
 				  MIA1321_REG_VALUE_08BIT, 0x00);
 		mia1321_write_reg(mia1321->client, MIA1321_MIRROR_REG,
@@ -698,13 +459,11 @@ static const struct s_again mia1321_again[] = {
 static int mia1321_set_gain_reg(struct mia1321 *mia1321, u32 gain)
 {
 
-	int ret = 0, i = 0;//, dgain;
+	int ret = 0, i = 0;
 	u8 gain_0x0018 = 0x00;
 	u8 gain_0x0019 = 0x00;
 	u8 gain_0x001b = 0x1f;
 
-	//struct device *dev = &mia1321->client->dev;
-	dev_info(&(mia1321->client->dev), "-----gain ------------ %d\n", gain);
 	if (gain <= MIA1321_GAIN_MIN)
 		gain = MIA1321_GAIN_MIN;
 
@@ -1107,22 +866,16 @@ static int __mia1321_start_stream(struct mia1321 *mia1321)
 
 	if (!mia1321->is_thunderboot) {
 		ret = mia1321_write_array(mia1321->client, mia1321->cur_mode->reg_list);
-		if (ret) 
+		if (ret)
 			return ret;
-
 		/* In case these controls are set before streaming */
 		ret = __v4l2_ctrl_handler_setup(&mia1321->ctrl_handler);
-
 		if (ret)
 			return ret;
 	}
 
 	ret = mia1321_write_reg(mia1321->client, MIA1321_REG_CTRL_MODE,
 				MIA1321_REG_VALUE_08BIT, MIA1321_MODE_STREAMING);
-
-	mia1321_write_reg(mia1321->client, MIA1321_FLIP_REG, MIA1321_REG_VALUE_08BIT, 0x01);
-	mia1321_write_reg(mia1321->client, MIA1321_MIRROR_REG, MIA1321_REG_VALUE_08BIT, 0x01);
-
 	return ret;
 }
 
@@ -1406,16 +1159,6 @@ static const struct v4l2_subdev_ops mia1321_subdev_ops = {
 	.pad = &mia1321_pad_ops,
 };
 
-/*
-static void mia1321_modify_fps_info(struct mia1321 *mia1321)
-{
-	const struct mia1321_mode *mode = mia1321->cur_mode;
-
-	mia1321->cur_fps.denominator = mode->max_fps.denominator * mode->vts_def /
-						mia1321->cur_vts;
-}
-*/
-
 static int mia1321_set_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct mia1321 *mia1321 = container_of(ctrl->handler,
@@ -1424,8 +1167,7 @@ static int mia1321_set_ctrl(struct v4l2_ctrl *ctrl)
 	s64 max;
 	int ret = 0;
 	u32 val = 0;
-	//dev_info(&client->dev, "---22--gain ------------ %d--- %d--- %d\n",
-	//	  mia1321->cur_vts, mia1321->cur_mode->vts_def, mia1321->cur_mode->height);
+
 	/* Propagate change of current control to all related controls */
 	switch (ctrl->id) {
 	case V4L2_CID_VBLANK:
@@ -1448,14 +1190,14 @@ static int mia1321_set_ctrl(struct v4l2_ctrl *ctrl)
 		if (mia1321->cur_mode->hdr_mode == NO_HDR) {
 			val = ctrl->val;
 
-			ret = mia1321_write_reg(mia1321->client,
-						MIA1321_REG_EXPOSURE_H,
-						MIA1321_REG_VALUE_08BIT,
-						MIA1321_FETCH_EXP_H(val));
-			ret = mia1321_write_reg(mia1321->client,
-						MIA1321_REG_EXPOSURE_M,
-						MIA1321_REG_VALUE_08BIT,
-						MIA1321_FETCH_EXP_M(val));
+			ret |= mia1321_write_reg(mia1321->client,
+						 MIA1321_REG_EXPOSURE_H,
+						 MIA1321_REG_VALUE_08BIT,
+						 MIA1321_FETCH_EXP_H(val));
+			ret |= mia1321_write_reg(mia1321->client,
+						 MIA1321_REG_EXPOSURE_M,
+						 MIA1321_REG_VALUE_08BIT,
+						 MIA1321_FETCH_EXP_M(val));
 			ret |= mia1321_write_reg(mia1321->client,
 						 MIA1321_REG_EXPOSURE_L,
 						 MIA1321_REG_VALUE_08BIT,
@@ -1470,21 +1212,6 @@ static int mia1321_set_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_VBLANK:
 		/*TODO stable vts*/
 		dev_info(&(mia1321->client->dev), "set vblank 0x%x\n", ctrl->val);
-		/*
-		ret = mia1321_write_reg(mia1321->client,
-					MIA1321_REG_VTS_H,
-					MIA1321_REG_VALUE_08BIT,
-					(ctrl->val + mia1321->cur_mode->height)
-					>> 8);
-		ret |= mia1321_write_reg(mia1321->client,
-					 MIA1321_REG_VTS_L,
-					 MIA1321_REG_VALUE_08BIT,
-					 (ctrl->val + mia1321->cur_mode->height)
-					 & 0xff);
-		mia1321->cur_vts = ctrl->val + mia1321->cur_mode->height;
-		if (mia1321->cur_vts != mia1321->cur_mode->vts_def)
-			mia1321_modify_fps_info(mia1321);
-		*/
 		mia1321->cur_vts = mia1321->cur_mode->vts_def;
 		break;
 	case V4L2_CID_TEST_PATTERN:
@@ -1575,7 +1302,7 @@ static int mia1321_initialize_controls(struct mia1321 *mia1321)
 	v4l2_ctrl_new_std(handler, &mia1321_ctrl_ops,
 			  V4L2_CID_HFLIP, 0, 1, 1, 0);
 	v4l2_ctrl_new_std(handler, &mia1321_ctrl_ops,
-			  V4L2_CID_VFLIP, 0, 1, 1, 0);	
+			  V4L2_CID_VFLIP, 0, 1, 1, 0);
 	if (handler->error) {
 		ret = handler->error;
 		dev_err(&mia1321->client->dev,
@@ -1761,7 +1488,7 @@ static int mia1321_probe(struct i2c_client *client,
 		pm_runtime_get_sync(dev);
 	else
 		pm_runtime_idle(dev);
-	
+
 	return 0;
 
 err_clean_entity:

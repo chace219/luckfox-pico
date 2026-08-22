@@ -11,8 +11,8 @@
 #include <linux/regulator/consumer.h>
 
 enum monitor_dev_type {
-	MONITOR_TPYE_CPU = 0,	/* CPU */
-	MONITOR_TPYE_DEV,	/* GPU, NPU, DMC, and so on */
+	MONITOR_TYPE_CPU = 0,	/* CPU */
+	MONITOR_TYPE_DEV,	/* GPU, NPU, DMC, and so on */
 };
 
 enum system_monitor_event_type {
@@ -160,6 +160,8 @@ int rockchip_monitor_dev_low_temp_adjust(struct monitor_dev_info *info,
 int rockchip_monitor_dev_high_temp_adjust(struct monitor_dev_info *info,
 					  bool is_high);
 int rockchip_monitor_suspend_low_temp_adjust(int cpu);
+void rockchip_monitor_remove_cpu_limit(int cpu);
+void rockchip_monitor_restore_cpu_limit(int cpu);
 int rockchip_system_monitor_register_notifier(struct notifier_block *nb);
 void rockchip_system_monitor_unregister_notifier(struct notifier_block *nb);
 #else
@@ -220,6 +222,14 @@ rockchip_monitor_dev_high_temp_adjust(struct monitor_dev_info *info,
 static inline int rockchip_monitor_suspend_low_temp_adjust(int cpu)
 {
 	return 0;
+};
+
+static inline void rockchip_monitor_remove_cpu_limit(int cpu)
+{
+};
+
+static inline void rockchip_monitor_restore_cpu_limit(int cpu)
+{
 };
 
 static inline int

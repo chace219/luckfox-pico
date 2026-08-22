@@ -199,7 +199,7 @@ static __maybe_unused const struct regval sc831ai_2lane_linear10bit_3840x2160_re
 	{0x320d, 0x68},
 	{0x320e, 0x08},
 	{0x320f, 0xca},
-	{0x3301, 0x28},
+	{0x3301, 0x0a},
 	{0x3302, 0x10},
 	{0x3303, 0x10},
 	{0x3304, 0x68},
@@ -212,7 +212,7 @@ static __maybe_unused const struct regval sc831ai_2lane_linear10bit_3840x2160_re
 	{0x330b, 0xf8},
 	{0x330c, 0x10},
 	{0x330d, 0x08},
-	{0x330e, 0x36},
+	{0x330e, 0x3c},
 	{0x331e, 0x41},
 	{0x331f, 0x71},
 	{0x3333, 0x10},
@@ -220,7 +220,9 @@ static __maybe_unused const struct regval sc831ai_2lane_linear10bit_3840x2160_re
 	{0x334c, 0x10},
 	{0x335d, 0x60},
 	{0x3364, 0x5e},
+	{0x3366, 0x01},
 	{0x3367, 0x04},
+	{0x338f, 0x80},
 	{0x3390, 0x01},
 	{0x3391, 0x03},
 	{0x3392, 0x07},
@@ -230,19 +232,19 @@ static __maybe_unused const struct regval sc831ai_2lane_linear10bit_3840x2160_re
 	{0x3396, 0x01},
 	{0x3397, 0x03},
 	{0x3398, 0x07},
-	{0x3399, 0x28},
-	{0x339a, 0x4c},
+	{0x3399, 0x0e},
+	{0x339a, 0x12},
 	{0x339b, 0x4c},
 	{0x339c, 0x4c},
 	{0x33ad, 0x24},
-	{0x33ae, 0x4e},
-	{0x33af, 0x80},
+	{0x33ae, 0x58},
+	{0x33af, 0x88},
 	{0x33b2, 0x50},
 	{0x33b3, 0x20},
 	{0x33f8, 0x00},
 	{0x33f9, 0x88},
 	{0x33fa, 0x00},
-	{0x33fb, 0x98},
+	{0x33fb, 0xa0},
 	{0x33fc, 0x43},
 	{0x33fd, 0x47},
 	{0x349f, 0x03},
@@ -253,30 +255,30 @@ static __maybe_unused const struct regval sc831ai_2lane_linear10bit_3840x2160_re
 	{0x34aa, 0x01},
 	{0x34ab, 0x10},
 	{0x34ac, 0x01},
-	{0x34ad, 0x20},
+	{0x34ad, 0x28},
 	{0x34f8, 0x43},
 	{0x34f9, 0x08},
 	{0x3632, 0x64},
-	{0x363b, 0x18},
+	{0x363b, 0x16},
 	{0x363c, 0x0e},
 	{0x363d, 0x8e},
 	{0x363e, 0x6c},
 	{0x3654, 0x00},
-	{0x3674, 0xb2},
-	{0x3675, 0xa4},
-	{0x3676, 0x88},
+	{0x3674, 0x94},
+	{0x3675, 0x84},
+	{0x3676, 0x68},
 	{0x367c, 0x41},
 	{0x367d, 0x43},
 	{0x3690, 0x35},
-	{0x3691, 0x36},
-	{0x3692, 0x66},
+	{0x3691, 0x35},
+	{0x3692, 0x45},
 	{0x3693, 0x40},
 	{0x3694, 0x41},
-	{0x3696, 0x85},
-	{0x3697, 0x85},
-	{0x3698, 0x83},
-	{0x3699, 0x92},
-	{0x369a, 0x99},
+	{0x3696, 0x81},
+	{0x3697, 0x80},
+	{0x3698, 0x80},
+	{0x3699, 0x83},
+	{0x369a, 0x81},
 	{0x369b, 0xff},
 	{0x369c, 0xff},
 	{0x369d, 0xff},
@@ -293,40 +295,60 @@ static __maybe_unused const struct regval sc831ai_2lane_linear10bit_3840x2160_re
 	{0x36ec, 0x43},
 	{0x36ed, 0x3a},
 	{0x370f, 0x01},
+	{0x3721, 0x6c},
+	{0x3724, 0xe5},
+	{0x3725, 0xa8},
 	{0x3727, 0x14},
-	{0x37b0, 0x03},
-	{0x37b1, 0x8b},
-	{0x37b2, 0x8b},
+	{0x37b0, 0x17},
+	{0x37b1, 0x9b},
+	{0x37b2, 0xfb},
 	{0x37b3, 0x41},
 	{0x37b4, 0x43},
 	{0x37fa, 0xc7},
 	{0x37fb, 0x31},
-	{0x37fc, 0x10},
+	{0x37fc, 0x00},
 	{0x37fd, 0x36},
-	{0x3905, 0xad},
+	{0x3905, 0x0f},
 	{0x391f, 0x41},
+	{0x3933, 0x80},
+	{0x3934, 0xd3},
+	{0x3937, 0x70},
+	{0x3939, 0x0f},
+	{0x393a, 0xf8},
 	{0x3e00, 0x01},
 	{0x3e01, 0x17},
 	{0x3e02, 0x00},
+	{0x3e16, 0x00},
+	{0x3e17, 0xbc},
+	{0x3e18, 0x00},
+	{0x3e19, 0xbc},
+	{0x4424, 0x02},
 	{0x4509, 0x1a},
-	{0x450d, 0x0a},
-	{0x5780, 0x66},
-	{0x5784, 0x08},
-	{0x5785, 0x04},
+	{0x450d, 0x0b},
+	{0x4800, 0x24},
+	{0x5000, 0x0e},
+	{0x550e, 0x02},
+	{0x550f, 0x1c},
+	{0x5510, 0x28},
+	{0x575c, 0x10},
+	{0x575d, 0x08},
+	{0x5780, 0x76},
+	{0x5784, 0x10},
+	{0x5785, 0x08},
 	{0x5787, 0x0a},
 	{0x5788, 0x0a},
 	{0x5789, 0x08},
 	{0x578a, 0x0a},
 	{0x578b, 0x0a},
 	{0x578c, 0x08},
-	{0x578d, 0x40},
+	{0x578d, 0x41},
 	{0x5790, 0x08},
 	{0x5791, 0x04},
 	{0x5792, 0x04},
 	{0x5793, 0x08},
 	{0x5794, 0x04},
 	{0x5795, 0x04},
-	{0x57a8, 0xd0},
+	{0x57a8, 0xd2},
 	{0x57aa, 0x2a},
 	{0x57ab, 0x7f},
 	{0x57ac, 0x00},
@@ -367,6 +389,10 @@ static const struct sc831ai_mode supported_modes[] = {
 		.bpp = 10,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
 	},
+};
+
+static const u32 bus_code[] = {
+	MEDIA_BUS_FMT_SBGGR10_1X10,
 };
 
 static const char *const sc831ai_test_pattern_menu[] = {
@@ -476,10 +502,13 @@ sc831ai_find_best_fit(struct sc831ai *sc831ai, struct v4l2_subdev_format *fmt)
 
 	for (i = 0; i < ARRAY_SIZE(supported_modes); i++) {
 		dist = sc831ai_get_reso_dist(&supported_modes[i], framefmt);
-		if ((cur_best_fit_dist == -1 || dist < cur_best_fit_dist) &&
-		    supported_modes[i].bus_fmt == framefmt->code) {
+		if (cur_best_fit_dist == -1 || dist < cur_best_fit_dist) {
 			cur_best_fit_dist = dist;
 			cur_best_fit = i;
+		} else if (dist == cur_best_fit_dist &&
+			   framefmt->code == supported_modes[i].bus_fmt) {
+			cur_best_fit = i;
+			break;
 		}
 	}
 	dev_info(&sc831ai->client->dev, "%s: cur_best_fit(%d)", __func__,
@@ -576,11 +605,9 @@ static int sc831ai_enum_mbus_code(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_pad_config *cfg,
 				  struct v4l2_subdev_mbus_code_enum *code)
 {
-	struct sc831ai *sc831ai = to_sc831ai(sd);
-
-	if (code->index != 0)
+	if (code->index >= ARRAY_SIZE(bus_code))
 		return -EINVAL;
-	code->code = sc831ai->cur_mode->bus_fmt;
+	code->code = bus_code[code->index];
 
 	return 0;
 }
@@ -631,6 +658,74 @@ static int sc831ai_g_frame_interval(struct v4l2_subdev *sd,
 		fi->interval = sc831ai->cur_fps;
 	else
 		fi->interval = mode->max_fps;
+
+	return 0;
+}
+
+static const struct sc831ai_mode *sc831ai_find_mode(struct sc831ai *sc831ai, int fps)
+{
+	const struct sc831ai_mode *mode = NULL;
+	const struct sc831ai_mode *match = NULL;
+	int cur_fps = 0;
+	int i = 0;
+
+	for (i = 0; i < ARRAY_SIZE(supported_modes); i++) {
+		mode = &supported_modes[i];
+		if (mode->width == sc831ai->cur_mode->width &&
+		    mode->height == sc831ai->cur_mode->height &&
+		    mode->bus_fmt == sc831ai->cur_mode->bus_fmt) {
+			cur_fps = DIV_ROUND_CLOSEST(mode->max_fps.denominator, mode->max_fps.numerator);
+			if (cur_fps == fps) {
+				match = mode;
+				break;
+			}
+		}
+	}
+	return match;
+}
+
+static int sc831ai_s_frame_interval(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_frame_interval *fi)
+{
+	struct sc831ai *sc831ai = to_sc831ai(sd);
+	const struct sc831ai_mode *mode = NULL;
+	struct v4l2_fract *fract = &fi->interval;
+	s64 h_blank, vblank_def;
+	u64 pixel_rate = 0;
+	int fps;
+
+	if (sc831ai->streaming)
+		return -EBUSY;
+
+	if (fi->pad != 0)
+		return -EINVAL;
+
+	if (fract->numerator == 0) {
+		v4l2_err(sd, "error param, check interval param\n");
+		return -EINVAL;
+	}
+	fps = DIV_ROUND_CLOSEST(fract->denominator, fract->numerator);
+	mode = sc831ai_find_mode(sc831ai, fps);
+	if (mode == NULL) {
+		v4l2_err(sd, "couldn't match fi\n");
+		return -EINVAL;
+	}
+
+	sc831ai->cur_mode = mode;
+
+	h_blank = mode->hts_def - mode->width;
+	__v4l2_ctrl_modify_range(sc831ai->hblank, h_blank,
+				 h_blank, 1, h_blank);
+	vblank_def = mode->vts_def - mode->height;
+	__v4l2_ctrl_modify_range(sc831ai->vblank, vblank_def,
+				 SC831AI_VTS_MAX - mode->height,
+				 1, vblank_def);
+	__v4l2_ctrl_s_ctrl(sc831ai->link_freq, mode->mipi_freq_idx);
+	pixel_rate = (u32)link_freq_items[mode->mipi_freq_idx] /
+		     mode->bpp * 2 * SC831AI_2LANES;
+	__v4l2_ctrl_s_ctrl_int64(sc831ai->pixel_rate, pixel_rate);
+	sc831ai->cur_fps = mode->max_fps;
+	sc831ai->cur_vts = mode->vts_def;
 
 	return 0;
 }
@@ -757,6 +852,9 @@ static long sc831ai_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	long ret = 0;
 	u64 pixel_rate = 0;
 	u32 i, h, w, stream;
+	int cur_best_fit = -1;
+	int cur_best_fit_dist = -1;
+	int cur_dist, cur_fps, dst_fps;
 
 	switch (cmd) {
 	case PREISP_CMD_SET_HDRAE_EXP:
@@ -767,6 +865,8 @@ static long sc831ai_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 
 	case RKMODULE_SET_HDR_CFG:
 		hdr_cfg = (struct rkmodule_hdr_cfg *)arg;
+		if (hdr_cfg->hdr_mode == sc831ai->cur_mode->hdr_mode)
+			return 0;
 		if (sc831ai->streaming) {
 			ret = sc831ai_write_array(sc831ai->client,
 						  sc831ai->cur_mode->reg_list);
@@ -775,21 +875,32 @@ static long sc831ai_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		}
 		w = sc831ai->cur_mode->width;
 		h = sc831ai->cur_mode->height;
+		dst_fps = DIV_ROUND_CLOSEST(sc831ai->cur_mode->max_fps.denominator,
+			sc831ai->cur_mode->max_fps.numerator);
 		for (i = 0; i < sc831ai->cfg_num; i++) {
 			if (w == supported_modes[i].width &&
 			    h == supported_modes[i].height &&
-			    supported_modes[i].hdr_mode == hdr_cfg->hdr_mode) {
-				sc831ai_change_mode(sc831ai,
-						    &supported_modes[i]);
-				break;
+			    supported_modes[i].hdr_mode == hdr_cfg->hdr_mode &&
+			    supported_modes[i].bus_fmt == sc831ai->cur_mode->bus_fmt) {
+				cur_fps = DIV_ROUND_CLOSEST(supported_modes[i].max_fps.denominator,
+					supported_modes[i].max_fps.numerator);
+				cur_dist = abs(cur_fps - dst_fps);
+				if (cur_best_fit_dist == -1 || cur_dist < cur_best_fit_dist) {
+					cur_best_fit_dist = cur_dist;
+					cur_best_fit = i;
+				} else if (cur_dist == cur_best_fit_dist) {
+					cur_best_fit = i;
+					break;
+				}
 			}
 		}
-		if (i == sc831ai->cfg_num) {
+		if (cur_best_fit == -1) {
 			dev_err(&sc831ai->client->dev,
 				"not find hdr mode:%d %dx%d config\n",
 				hdr_cfg->hdr_mode, w, h);
 			ret = -EINVAL;
 		} else {
+			sc831ai_change_mode(sc831ai, &supported_modes[cur_best_fit]);
 			mode = sc831ai->cur_mode;
 			w = mode->hts_def - mode->width;
 			h = mode->vts_def - mode->height;
@@ -1380,6 +1491,7 @@ static const struct v4l2_subdev_core_ops sc831ai_core_ops = {
 static const struct v4l2_subdev_video_ops sc831ai_video_ops = {
 	.s_stream = sc831ai_s_stream,
 	.g_frame_interval = sc831ai_g_frame_interval,
+	.s_frame_interval = sc831ai_s_frame_interval,
 };
 
 static const struct v4l2_subdev_pad_ops sc831ai_pad_ops = {
@@ -1856,7 +1968,11 @@ static void __exit sensor_mod_exit(void)
 	i2c_del_driver(&sc831ai_i2c_driver);
 }
 
+#if defined(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP) && !defined(CONFIG_INITCALL_ASYNC)
+subsys_initcall(sensor_mod_init);
+#else
 device_initcall_sync(sensor_mod_init);
+#endif
 module_exit(sensor_mod_exit);
 
 MODULE_DESCRIPTION("smartsens,sc831ai sensor driver");

@@ -140,35 +140,16 @@ struct rkvdec_link_dev {
 	u32 decoded;
 	u32 total;
 	u32 error;
-	u32 stuff_err;
-	u32 stuff_total;
-	u32 stuff_on_error;
+	u32 hack_task_running;
 
 	struct rkvdec_link_info *info;
 	struct mpp_dma_buffer *table;
 	u32 link_node_size;
 	u32 link_reg_count;
 
-	struct mpp_task **tasks_hw;
-	u32 task_capacity;
-	s32 task_total;
-	s32 task_decoded;
-	s32 task_size;
-	s32 task_count;
-	s32 task_write;
-	s32 task_read;
-	s32 task_send;
-	s32 task_recv;
-
 	/* taskqueue variables */
 	u32 task_running;
-	u32 task_prepared;
-	s32 task_to_run;
-	u32 task_on_timeout;
-
-	/* taskqueue trigger variables */
-	u32 task_irq;
-	u32 task_irq_prev;
+	atomic_t task_pending;
 	/* timeout can be trigger in different thread so atomic is needed */
 	atomic_t task_timeout;
 	u32 task_timeout_prev;
@@ -183,6 +164,12 @@ struct rkvdec_link_dev {
 	u32 task_cnt;
 	u64 stuff_cycle_sum;
 	u32 stuff_cnt;
+
+	/* link info */
+	u32 task_capacity;
+	struct mpp_dma_buffer *table_array;
+	struct list_head unused_list;
+	struct list_head used_list;
 };
 
 enum RKVDEC2_CCU_MODE {
@@ -234,9 +221,9 @@ void rkvdec2_link_session_deinit(struct mpp_session *session);
 int rkvdec2_attach_ccu(struct device *dev, struct rkvdec2_dev *dec);
 int rkvdec2_ccu_link_init(struct platform_device *pdev, struct rkvdec2_dev *dec);
 void *rkvdec2_ccu_alloc_task(struct mpp_session *session, struct mpp_task_msgs *msgs);
-int rkvdec2_ccu_iommu_fault_handle(struct iommu_domain *iommu,
-				   struct device *iommu_dev,
-				   unsigned long iova, int status, void *arg);
+int rkvdec2_soft_ccu_iommu_fault_handle(struct iommu_domain *iommu,
+					struct device *iommu_dev,
+					unsigned long iova, int status, void *arg);
 irqreturn_t rkvdec2_soft_ccu_irq(int irq, void *param);
 void rkvdec2_soft_ccu_worker(struct kthread_work *work_s);
 
@@ -244,5 +231,8 @@ int rkvdec2_ccu_alloc_table(struct rkvdec2_dev *dec,
 			    struct rkvdec_link_dev *link_dec);
 irqreturn_t rkvdec2_hard_ccu_irq(int irq, void *param);
 void rkvdec2_hard_ccu_worker(struct kthread_work *work_s);
+int rkvdec2_hard_ccu_iommu_fault_handle(struct iommu_domain *iommu,
+					struct device *iommu_dev,
+					unsigned long iova, int status, void *arg);
 
 #endif

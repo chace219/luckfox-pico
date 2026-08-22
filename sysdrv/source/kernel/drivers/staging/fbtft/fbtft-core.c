@@ -292,9 +292,9 @@ static void fbtft_update_display(struct fbtft_par *par, unsigned int start_line,
 		throughput = throughput ? (len * 1000) / throughput : 0;
 		throughput = throughput * 1000 / 1024;
 
-		// dev_info(par->info->device,
-		// 	 "Display update: %ld kB/s, fps=%ld\n",
-		// 	 throughput, fps);
+		dev_info(par->info->device,
+			 "Display update: %ld kB/s, fps=%ld\n",
+			 throughput, fps);
 		par->first_update_done = true;
 	}
 }
@@ -745,6 +745,7 @@ struct fb_info *fbtft_framebuffer_alloc(struct fbtft_display *display,
 	return info;
 
 release_framebuf:
+	fb_deferred_io_cleanup(info);
 	framebuffer_release(info);
 
 alloc_fail:
@@ -1228,8 +1229,8 @@ int fbtft_probe_common(struct fbtft_display *display,
 	par->pdev = pdev;
 
 	if (display->buswidth == 0) {
-		dev_err(dev, "buswidth is not set\n");
-		return -EINVAL;
+		ret = dev_err_probe(dev, -EINVAL, "buswidth is not set\n");
+		goto out_release;
 	}
 
 	/* write register functions */

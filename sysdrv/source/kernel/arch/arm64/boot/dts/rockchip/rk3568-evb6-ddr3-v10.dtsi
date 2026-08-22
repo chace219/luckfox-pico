@@ -20,7 +20,7 @@
 		pinctrl-0 = <&hp_det>;
 	};
 
-	vcc3v3_pcie: gpio-regulator {
+	vcc3v3_pcie: vcc3v3-pcie {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc3v3_pcie";
 		regulator-min-microvolt = <3300000>;
@@ -40,6 +40,13 @@
 		enable-active-high;
 		regulator-always-on;
 		regulator-boot-on;
+	};
+};
+
+&bt_sound {
+	status = "disabled";
+	simple-audio-card,cpu {
+		sound-dai = <&i2s2_2ch>;
 	};
 };
 
@@ -101,6 +108,10 @@
  * when mipi panel is connected to dsi1.
  */
 &gt1x {
+	power-supply = <&vcc3v3_lcd0_n>;
+};
+
+&hynitron {
 	power-supply = <&vcc3v3_lcd0_n>;
 };
 
@@ -199,6 +210,12 @@
 	status = "disabled";
 
 	/delete-node/ mxc6655xa@15;
+};
+
+&i2s2_2ch {
+	pinctrl-0 = <&i2s2m0_sclktx &i2s2m0_lrcktx &i2s2m0_sdi &i2s2m0_sdo>;
+	rockchip,bclk-fs = <32>;
+	status = "disabled";
 };
 
 &csi2_dphy_hw {

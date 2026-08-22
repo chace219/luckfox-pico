@@ -295,6 +295,9 @@ int __init cma_declare_contiguous_nid(phys_addr_t base,
 			&base, &alignment);
 		goto err;
 	}
+#else
+	if (alignment == 0x0)
+		alignment = PAGE_SIZE;
 #endif
 	base = ALIGN(base, alignment);
 	size = ALIGN(size, alignment);
@@ -586,7 +589,7 @@ struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align,
 	 */
 	if (page) {
 		for (i = 0; i < count; i++)
-			page_kasan_tag_reset(page + i);
+			page_kasan_tag_reset(nth_page(page, i));
 	}
 
 	if (ret && !(gfp_mask & __GFP_NOWARN)) {

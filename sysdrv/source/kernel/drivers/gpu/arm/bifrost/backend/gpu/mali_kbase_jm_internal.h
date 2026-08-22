@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  *
- * (C) COPYRIGHT 2011-2016, 2018-2022 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2011-2016, 2018-2023 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -41,22 +41,14 @@
  * @job_tail:		Job tail address reported by GPU
  * @end_timestamp:	Timestamp of job completion
  */
-void kbase_job_done_slot(struct kbase_device *kbdev, int s, u32 completion_code,
-					u64 job_tail, ktime_t *end_timestamp);
+void kbase_job_done_slot(struct kbase_device *kbdev, int s, u32 completion_code, u64 job_tail,
+			 ktime_t *end_timestamp);
 
 #if IS_ENABLED(CONFIG_GPU_TRACEPOINTS)
 static inline char *kbasep_make_job_slot_string(unsigned int js, char *js_string, size_t js_size)
 {
-	snprintf(js_string, js_size, "job_slot_%u", js);
+	(void)scnprintf(js_string, js_size, "job_slot_%u", js);
 	return js_string;
-}
-#endif
-
-#if !MALI_USE_CSF
-static inline int kbasep_jm_is_js_free(struct kbase_device *kbdev, unsigned int js,
-				       struct kbase_context *kctx)
-{
-	return !kbase_reg_read(kbdev, JOB_SLOT_REG(js, JS_COMMAND_NEXT));
 }
 #endif
 
@@ -82,8 +74,8 @@ int kbase_job_hw_submit(struct kbase_device *kbdev, struct kbase_jd_atom *katom,
  *						   on the specified atom
  * @kbdev:		Device pointer
  * @js:			Job slot to stop on
- * @action:		The action to perform, either JSn_COMMAND_HARD_STOP or
- *			JSn_COMMAND_SOFT_STOP
+ * @action:		The action to perform, either JS_COMMAND_HARD_STOP or
+ *			JS_COMMAND_SOFT_STOP
  * @core_reqs:		Core requirements of atom to stop
  * @target_katom:	Atom to stop
  *
@@ -102,8 +94,8 @@ void kbasep_job_slot_soft_or_hard_stop_do_action(struct kbase_device *kbdev, uns
  * @kctx:	Context pointer. May be NULL
  * @katom:	Specific atom to stop. May be NULL
  * @js:		Job slot to hard stop
- * @action:	The action to perform, either JSn_COMMAND_HARD_STOP or
- *		JSn_COMMAND_SOFT_STOP
+ * @action:	The action to perform, either JS_COMMAND_HARD_STOP or
+ *		JS_COMMAND_SOFT_STOP
  *
  * If no context is provided then all jobs on the slot will be soft or hard
  * stopped.

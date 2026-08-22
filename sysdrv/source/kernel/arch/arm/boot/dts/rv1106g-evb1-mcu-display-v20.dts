@@ -1,8 +1,8 @@
-
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
  * Copyright (c) 2023 Rockchip Electronics Co., Ltd.
  */
+
 /dts-v1/;
 
 #include "rv1106g-evb1-v11.dts"

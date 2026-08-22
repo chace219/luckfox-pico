@@ -3092,6 +3092,53 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       position is a documented re-base plan plus demonstrated ability to run
       one — Annex I Part II §2 asks for a process, not a version — and the
       5.10.252 refresh is the first exercise of it.
+
+      **Executed the same evening, and it builds.** The merged tree
+      (Rockchip `develop-5.10` + the 17-file Luckfox carry set + the six
+      patches) compiles clean at **5.10.252**, and a full image was packed
+      from it: `./build.sh kernel && rootfs && firmware` all exit 0, gates
+      `oem` 18/18, `partitions` 16/16, `hardening` 23/23. **Not one driver
+      source needed editing** — the stable-series API guarantee held, which
+      is the evidence behind choosing 5.10 over 6.1.
+
+      **CVE effect, measured before and after on the same image and NVD
+      cache:** kernel matches **5155 → 2867**, 2288 records retired (44%).
+      Gate passes both ways at 0 blocking; nothing else moved. `cpe-extra.csv`
+      is bumped to 5.10.252 accordingly.
+
+      Two findings worth carrying forward. **The OTP node came out right** —
+      the built dtb names four clocks, matching Rockchip's driver; the six
+      `reset-names` are not a mismatch because that lookup is unnamed. And
+      **the image pipeline hardcodes two kernel paths**, so an out-of-tree
+      build produces a correct kernel inside an image that still contains the
+      old one, exiting 0 at every stage — this happened, was caught by
+      checking the image rather than the log, and is written up with the
+      one-line fix in [`kernel-port/README.md`](kernel-port/README.md).
+
+      **Confirmed on hardware, then migrated in-tree.** A unit was flashed
+      with the 5.10.252 image and **T1S, the OPC UA server and the CAN
+      gateway were confirmed working** (2026-08-21) — the row is no longer
+      resting on a host build. On **2026-08-22** 5.10.252 became the default
+      kernel: `sysdrv/source/kernel` is the merged tree, `Makefile.param` is
+      unmodified vendor code, and a plain `./build.sh` produces a 5.10.252
+      image with no environment setup. Rebuilt and re-verified from the
+      migrated tree with all six gates green. The build and release procedure,
+      including the `.swu`, is
+      [`release-build-runbook.md`](release-build-runbook.md).
+
+      **One assertion still outstanding:** `secrets_at_rest.mode = encrypted`
+      read off a 5.10.252 unit. The hardware pass covered the networking and
+      protocol stacks but not that field, and it is the one the OTP clock-list
+      finding makes load-bearing — the host suite fakes the binding sources,
+      so only the device can answer it.
+
+      **Delivery constraint, unchanged:** the kernel travels in the
+      single-copy `boot` FIT, so 5.10.252 reaches a unit only by reflash. A
+      `.swu` built on it carries `/lib/modules/5.10.252/` to a unit that may
+      still be running 5.10.160, where `S52npu` logs
+      `no rknpu.ko for kernel 5.10.160` and continues — NPU acceleration and
+      the backlight silently absent. No units are fielded yet, so this costs a
+      rebuild today and a recall after first shipment.
 6. **Audit-log off-device forwarding** — the one item left on Annex I #6; designed
    in `audit-log-forwarding-plan.md`, deferred pending a product decision (action
    plan item 5).

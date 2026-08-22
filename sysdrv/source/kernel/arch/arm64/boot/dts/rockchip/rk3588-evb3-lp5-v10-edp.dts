@@ -18,8 +18,8 @@
 		enable-delay-ms = <120>;
 		unprepare-delay-ms = <120>;
 		disable-delay-ms = <120>;
-		width-mm = <129>;
-		height-mm = <171>;
+		width-mm = <120>;
+		height-mm = <160>;
 
 		panel-timing {
 			clock-frequency = <200000000>;
@@ -85,6 +85,10 @@
 &hdptxphy0 {
 	lane-polarity-invert = <0 1 0 0>;
 	status = "okay";
+};
+
+&hynitron {
+	status = "disabled";
 };
 
 &i2c5 {

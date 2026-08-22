@@ -147,7 +147,7 @@ struct vfsmount *nfs_d_automount(struct path *path)
 	struct nfs_fs_context *ctx;
 	struct fs_context *fc;
 	struct vfsmount *mnt = ERR_PTR(-ENOMEM);
-	struct nfs_server *server = NFS_SERVER(d_inode(path->dentry));
+	struct nfs_server *server = NFS_SB(path->dentry->d_sb);
 	struct nfs_client *client = server->nfs_client;
 	int timeout = READ_ONCE(nfs_mountpoint_expiry_timeout);
 	int ret;
@@ -168,6 +168,11 @@ struct vfsmount *nfs_d_automount(struct path *path)
 	ctx->clone_data.fattr	= nfs_alloc_fattr();
 	if (!ctx->clone_data.fattr)
 		goto out_fc;
+
+	if (fc->cred != server->cred) {
+		put_cred(fc->cred);
+		fc->cred = get_cred(server->cred);
+	}
 
 	if (fc->net_ns != client->cl_net) {
 		put_net(fc->net_ns);

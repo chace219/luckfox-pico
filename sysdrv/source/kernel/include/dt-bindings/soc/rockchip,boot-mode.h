@@ -22,7 +22,7 @@
 #define BOOT_UMS		(REBOOT_FLAG + 12)
 /* reboot system quiescent */
 #define BOOT_QUIESCENT		(REBOOT_FLAG + 14)
-
-#define BOOT_TO_UBOOT (REBOOT_FLAG + 16)
+/* reboot by panic and capture ramdump in uboot through usb */
+#define BOOT_WINUSB		(REBOOT_FLAG + 15)
 
 #endif

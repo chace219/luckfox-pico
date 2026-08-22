@@ -4,7 +4,9 @@
  * Copyright (C) 2014 ROCKCHIP, Inc.
  */
 
+#include <linux/bitfield.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/platform_device.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -51,6 +53,8 @@
 #define SARADC2_START			BIT(4)
 #define SARADC2_SINGLE_MODE		BIT(5)
 
+#define SARADC2_CONV_CHANNELS GENMASK(3, 0)
+
 struct rockchip_saradc;
 
 struct rockchip_saradc_data {
@@ -68,6 +72,8 @@ struct rockchip_saradc {
 	struct clk		*clk;
 	struct completion	completion;
 	struct regulator	*vref;
+	/* lock to protect against multiple access to the device */
+	struct mutex		lock;
 	int			uv_vref;
 	struct reset_control	*reset;
 	const struct rockchip_saradc_data *data;
@@ -109,10 +115,14 @@ static void rockchip_saradc_start_v2(struct rockchip_saradc *info,
 
 	writel_relaxed(0xc, info->regs + SARADC_T_DAS_SOC);
 	writel_relaxed(0x20, info->regs + SARADC_T_PD_SOC);
-	val = SARADC2_EN_END_INT << 16 | SARADC2_EN_END_INT;
+	val = FIELD_PREP(SARADC2_EN_END_INT, 1);
+	val |= SARADC2_EN_END_INT << 16;
 	writel_relaxed(val, info->regs + SARADC2_END_INT_EN);
-	val = SARADC2_START | SARADC2_SINGLE_MODE | chn;
-	writel(val << 16 | val, info->regs + SARADC2_CONV_CON);
+	val = FIELD_PREP(SARADC2_START, 1) |
+	      FIELD_PREP(SARADC2_SINGLE_MODE, 1) |
+	      FIELD_PREP(SARADC2_CONV_CHANNELS, chn);
+	val |= (SARADC2_START | SARADC2_SINGLE_MODE | SARADC2_CONV_CHANNELS) << 16;
+	writel(val, info->regs + SARADC2_CONV_CON);
 }
 
 static void rockchip_saradc_start(struct rockchip_saradc *info,
@@ -189,22 +199,22 @@ static int rockchip_saradc_read_raw(struct iio_dev *indio_dev,
 #endif
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
-		mutex_lock(&indio_dev->mlock);
+		mutex_lock(&info->lock);
 
 		if (info->suspended) {
-			mutex_unlock(&indio_dev->mlock);
+			mutex_unlock(&info->lock);
 			return -EBUSY;
 		}
 
 		ret = rockchip_saradc_conversion(info, chan);
 		if (ret) {
 			rockchip_saradc_power_down(info);
-			mutex_unlock(&indio_dev->mlock);
+			mutex_unlock(&info->lock);
 			return ret;
 		}
 
 		*val = info->last_val;
-		mutex_unlock(&indio_dev->mlock);
+		mutex_unlock(&info->lock);
 		return IIO_VAL_INT;
 	case IIO_CHAN_INFO_SCALE:
 		/* It is a dummy regulator */
@@ -386,6 +396,18 @@ static const struct rockchip_saradc_data rk3588_saradc_data = {
 	.read = rockchip_saradc_read_v2,
 };
 
+static const struct iio_chan_spec rockchip_rv1103b_saradc_iio_channels[] = {
+	SARADC_CHANNEL(0, "adc0", 10),
+};
+
+static const struct rockchip_saradc_data rv1103b_saradc_data = {
+	.channels = rockchip_rv1103b_saradc_iio_channels,
+	.num_channels = ARRAY_SIZE(rockchip_rv1103b_saradc_iio_channels),
+	.clk_rate = 1000000,
+	.start = rockchip_saradc_start_v2,
+	.read = rockchip_saradc_read_v2,
+};
+
 static const struct iio_chan_spec rockchip_rv1106_saradc_iio_channels[] = {
 	SARADC_CHANNEL(0, "adc0", 10),
 	SARADC_CHANNEL(1, "adc1", 10),
@@ -421,6 +443,9 @@ static const struct of_device_id rockchip_saradc_match[] = {
 	}, {
 		.compatible = "rockchip,rk3588-saradc",
 		.data = &rk3588_saradc_data,
+	}, {
+		.compatible = "rockchip,rv1103b-saradc",
+		.data = &rv1103b_saradc_data,
 	}, {
 		.compatible = "rockchip,rv1106-saradc",
 		.data = &rv1106_saradc_data,
@@ -476,7 +501,9 @@ static irqreturn_t rockchip_saradc_trigger_handler(int irq, void *p)
 	int ret;
 	int i, j = 0;
 
-	mutex_lock(&i_dev->mlock);
+	memset(&data, 0, sizeof(data));
+
+	mutex_lock(&info->lock);
 
 	for_each_set_bit(i, i_dev->active_scan_mask, i_dev->masklength) {
 		const struct iio_chan_spec *chan = &i_dev->channels[i];
@@ -493,7 +520,7 @@ static irqreturn_t rockchip_saradc_trigger_handler(int irq, void *p)
 
 	iio_push_to_buffers_with_timestamp(i_dev, &data, iio_get_time_ns(i_dev));
 out:
-	mutex_unlock(&i_dev->mlock);
+	mutex_unlock(&info->lock);
 
 	iio_trigger_notify_done(i_dev->trig);
 
@@ -544,7 +571,7 @@ static ssize_t saradc_test_chn_store(struct device *dev,
 		return size;
 	}
 
-	if (!info->test && val < SARADC_CTRL_CHN_MASK) {
+	if (!info->test && val <= SARADC_CTRL_CHN_MASK) {
 		info->test = true;
 		info->chn = val;
 		mod_delayed_work(info->wq, &info->work, msecs_to_jiffies(100));
@@ -784,6 +811,8 @@ static int rockchip_saradc_probe(struct platform_device *pdev)
 		return ret;
 	}
 #endif
+	mutex_init(&info->lock);
+
 	return devm_iio_device_register(&pdev->dev, indio_dev);
 }
 
@@ -794,14 +823,14 @@ static int rockchip_saradc_suspend(struct device *dev)
 	struct rockchip_saradc *info = iio_priv(indio_dev);
 
 	/* Avoid reading saradc when suspending */
-	mutex_lock(&indio_dev->mlock);
+	mutex_lock(&info->lock);
 
 	clk_disable_unprepare(info->clk);
 	clk_disable_unprepare(info->pclk);
 	regulator_disable(info->vref);
 
 	info->suspended = true;
-	mutex_unlock(&indio_dev->mlock);
+	mutex_unlock(&info->lock);
 
 	return 0;
 }

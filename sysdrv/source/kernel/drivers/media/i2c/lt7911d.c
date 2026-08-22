@@ -22,6 +22,7 @@
 #include <linux/module.h>
 #include <linux/of_graph.h>
 #include <linux/rk-camera-module.h>
+#include <linux/rk_hdmirx_config.h>
 #include <linux/slab.h>
 #include <linux/timer.h>
 #include <linux/v4l2-dv-timings.h>
@@ -654,12 +655,6 @@ static int lt7911d_s_dv_timings(struct v4l2_subdev *sd,
 		return 0;
 	}
 
-	if (!v4l2_valid_dv_timings(timings,
-				&lt7911d_timings_cap, NULL, NULL)) {
-		v4l2_dbg(1, debug, sd, "%s: timings out of range\n", __func__);
-		return -ERANGE;
-	}
-
 	lt7911d->timings = *timings;
 
 	enable_stream(sd, false);
@@ -925,6 +920,9 @@ static long lt7911d_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	case RKMODULE_GET_HDMI_MODE:
 		*(int *)arg = RKMODULE_HDMIIN_MODE;
 		break;
+	case RK_HDMIRX_CMD_GET_SIGNAL_STABLE_STATUS:
+		*(int *)arg = !lt7911d->nosignal;
+		break;
 	default:
 		ret = -ENOIOCTLCMD;
 		break;
@@ -965,6 +963,20 @@ static long lt7911d_compat_ioctl32(struct v4l2_subdev *sd,
 			return ret;
 		}
 
+		ret = lt7911d_ioctl(sd, cmd, seq);
+		if (!ret) {
+			ret = copy_to_user(up, seq, sizeof(*seq));
+			if (ret)
+				ret = -EFAULT;
+		}
+		kfree(seq);
+		break;
+	case RK_HDMIRX_CMD_GET_SIGNAL_STABLE_STATUS:
+		seq = kzalloc(sizeof(*seq), GFP_KERNEL);
+		if (!seq) {
+			ret = -ENOMEM;
+			return ret;
+		}
 		ret = lt7911d_ioctl(sd, cmd, seq);
 		if (!ret) {
 			ret = copy_to_user(up, seq, sizeof(*seq));

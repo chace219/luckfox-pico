@@ -11,8 +11,10 @@
  * V0.0X01.0X05 support enum sensor fmt
  * V0.0X01.0X06 support mirror and flip
  * V0.0X01.0X07 add quick stream on/off
+ * V0.0X01.0X08 add support thunder boot
  */
 
+//#define DEBUG
 #include <linux/clk.h>
 #include <linux/device.h>
 #include <linux/delay.h>
@@ -31,8 +33,10 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-subdev.h>
 #include <linux/pinctrl/consumer.h>
+#include "../platform/rockchip/isp/rkisp_tb_helper.h"
+#include "cam-tb-setup.h"
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x07)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x08)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
@@ -143,6 +147,7 @@ struct gc4653 {
 	struct v4l2_ctrl	*v_flip;
 	struct v4l2_ctrl	*test_pattern;
 	struct mutex		mutex;
+	struct v4l2_fract	cur_fps;
 	bool			streaming;
 	bool			power_on;
 	const struct gc4653_mode *cur_mode;
@@ -156,6 +161,9 @@ struct gc4653 {
 	const char		*module_name;
 	const char		*len_name;
 	bool			has_init_exp;
+	bool			is_thunderboot;
+	bool			is_first_streamoff;
+	bool			is_standby;
 };
 
 #define to_gc4653(sd) container_of(sd, struct gc4653, subdev)
@@ -387,6 +395,10 @@ static const struct gc4653_mode supported_modes[] = {
 	},
 };
 
+static const u32 bus_code[] = {
+	MEDIA_BUS_FMT_SGRBG10_1X10,
+};
+
 static const s64 link_freq_menu_items[] = {
 	GC4653_LINK_FREQ_LINEAR,
 };
@@ -497,6 +509,10 @@ gc4653_find_best_fit(struct gc4653 *gc4653, struct v4l2_subdev_format *fmt)
 		if (cur_best_fit_dist == -1 || dist < cur_best_fit_dist) {
 			cur_best_fit_dist = dist;
 			cur_best_fit = i;
+		} else if (dist == cur_best_fit_dist &&
+			   framefmt->code == supported_modes[i].bus_fmt) {
+			cur_best_fit = i;
+			break;
 		}
 	}
 
@@ -543,6 +559,7 @@ static int gc4653_set_fmt(struct v4l2_subdev *sd,
 		__v4l2_ctrl_s_ctrl(gc4653->link_freq,
 				   gc4653->cur_link_freq);
 		gc4653->cur_vts = mode->vts_def;
+		gc4653->cur_fps = mode->max_fps;
 	}
 	mutex_unlock(&gc4653->mutex);
 
@@ -579,11 +596,9 @@ static int gc4653_enum_mbus_code(struct v4l2_subdev *sd,
 				 struct v4l2_subdev_pad_config *cfg,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
-	struct gc4653 *gc4653 = to_gc4653(sd);
-
-	if (code->index != 0)
+	if (code->index >= ARRAY_SIZE(bus_code))
 		return -EINVAL;
-	code->code = gc4653->cur_mode->bus_fmt;
+	code->code = bus_code[code->index];
 
 	return 0;
 }
@@ -668,7 +683,73 @@ static int gc4653_g_frame_interval(struct v4l2_subdev *sd,
 	struct gc4653 *gc4653 = to_gc4653(sd);
 	const struct gc4653_mode *mode = gc4653->cur_mode;
 
-	fi->interval = mode->max_fps;
+	if (gc4653->streaming)
+		fi->interval = gc4653->cur_fps;
+	else
+		fi->interval = mode->max_fps;
+
+	return 0;
+}
+
+static const struct gc4653_mode *gc4653_find_mode(struct gc4653 *gc4653, int fps)
+{
+	const struct gc4653_mode *mode = NULL;
+	const struct gc4653_mode *match = NULL;
+	int cur_fps = 0;
+	int i = 0;
+
+	for (i = 0; i < gc4653->cfg_num; i++) {
+		mode = &supported_modes[i];
+		if (mode->width == gc4653->cur_mode->width &&
+		    mode->height == gc4653->cur_mode->height &&
+		    mode->hdr_mode == gc4653->cur_mode->hdr_mode &&
+		    mode->bus_fmt == gc4653->cur_mode->bus_fmt) {
+			cur_fps = DIV_ROUND_CLOSEST(mode->max_fps.denominator, mode->max_fps.numerator);
+			if (cur_fps == fps) {
+				match = mode;
+				break;
+			}
+		}
+	}
+	return match;
+}
+
+static int gc4653_s_frame_interval(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_frame_interval *fi)
+{
+	struct gc4653 *gc4653 = to_gc4653(sd);
+	const struct gc4653_mode *mode = NULL;
+	struct v4l2_fract *fract = &fi->interval;
+	s64 h_blank, vblank_def;
+	int fps;
+
+	if (gc4653->streaming)
+		return -EBUSY;
+
+	if (fi->pad != 0)
+		return -EINVAL;
+
+	if (fract->numerator == 0) {
+		v4l2_err(sd, "error param, check interval param\n");
+		return -EINVAL;
+	}
+	fps = DIV_ROUND_CLOSEST(fract->denominator, fract->numerator);
+	mode = gc4653_find_mode(gc4653, fps);
+	if (mode == NULL) {
+		v4l2_err(sd, "couldn't match fi\n");
+		return -EINVAL;
+	}
+
+	gc4653->cur_mode = mode;
+
+	h_blank = mode->hts_def - mode->width;
+	__v4l2_ctrl_modify_range(gc4653->hblank, h_blank,
+				 h_blank, 1, h_blank);
+	vblank_def = mode->vts_def - mode->height;
+	__v4l2_ctrl_modify_range(gc4653->vblank, vblank_def,
+				 GC4653_VTS_MAX - mode->height,
+				 1, vblank_def);
+	gc4653->cur_fps = mode->max_fps;
 
 	return 0;
 }
@@ -720,6 +801,9 @@ static long gc4653_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	long ret = 0;
 	u32 stream = 0;
 	struct rkmodule_channel_info *ch_info;
+	int cur_best_fit = -1;
+	int cur_best_fit_dist = -1;
+	int cur_dist, cur_fps, dst_fps;
 
 	switch (cmd) {
 	case RKMODULE_GET_MODULE_INFO:
@@ -732,22 +816,36 @@ static long gc4653_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		break;
 	case RKMODULE_SET_HDR_CFG:
 		hdr = (struct rkmodule_hdr_cfg *)arg;
+		if (hdr->hdr_mode == gc4653->cur_mode->hdr_mode)
+			return 0;
 		w = gc4653->cur_mode->width;
 		h = gc4653->cur_mode->height;
+		dst_fps = DIV_ROUND_CLOSEST(gc4653->cur_mode->max_fps.denominator,
+			gc4653->cur_mode->max_fps.numerator);
 		for (i = 0; i < gc4653->cfg_num; i++) {
 			if (w == supported_modes[i].width &&
 			    h == supported_modes[i].height &&
-			    supported_modes[i].hdr_mode == hdr->hdr_mode) {
-				gc4653->cur_mode = &supported_modes[i];
-				break;
+			    supported_modes[i].hdr_mode == hdr->hdr_mode &&
+			    supported_modes[i].bus_fmt == gc4653->cur_mode->bus_fmt) {
+				cur_fps = DIV_ROUND_CLOSEST(supported_modes[i].max_fps.denominator,
+					supported_modes[i].max_fps.numerator);
+				cur_dist = abs(cur_fps - dst_fps);
+				if (cur_best_fit_dist == -1 || cur_dist < cur_best_fit_dist) {
+					cur_best_fit_dist = cur_dist;
+					cur_best_fit = i;
+				} else if (cur_dist == cur_best_fit_dist) {
+					cur_best_fit = i;
+					break;
+				}
 			}
 		}
-		if (i == gc4653->cfg_num) {
+		if (cur_best_fit == -1) {
 			dev_err(&gc4653->client->dev,
 				"not find hdr mode:%d %dx%d config\n",
 				hdr->hdr_mode, w, h);
 			ret = -EINVAL;
 		} else {
+			gc4653->cur_mode = &supported_modes[cur_best_fit];
 			w = gc4653->cur_mode->hts_def -
 			    gc4653->cur_mode->width;
 			h = gc4653->cur_mode->vts_def -
@@ -909,26 +1007,36 @@ static long gc4653_compat_ioctl32(struct v4l2_subdev *sd,
 
 static int __gc4653_start_stream(struct gc4653 *gc4653)
 {
-	int ret;
+	int ret = 0;
 
-	ret = gc4653_write_array(gc4653->client, gc4653->cur_mode->reg_list);
-	if (ret)
-		return ret;
-
-	/* In case these controls are set before streaming */
-	ret = __v4l2_ctrl_handler_setup(&gc4653->ctrl_handler);
-	if (gc4653->has_init_exp && gc4653->cur_mode->hdr_mode != NO_HDR) {
-		ret = gc4653_ioctl(&gc4653->subdev, PREISP_CMD_SET_HDRAE_EXP,
-			&gc4653->init_hdrae_exp);
-		if (ret) {
-			dev_err(&gc4653->client->dev,
-				"init exp fail in hdr mode\n");
+	dev_info(&gc4653->client->dev,
+		 "%dx%d@%d, mode %d, vts 0x%x\n",
+		 gc4653->cur_mode->width,
+		 gc4653->cur_mode->height,
+		 gc4653->cur_fps.denominator / gc4653->cur_fps.numerator,
+		 gc4653->cur_mode->hdr_mode,
+		 gc4653->cur_vts);
+	if (!gc4653->is_thunderboot) {
+		ret = gc4653_write_array(gc4653->client, gc4653->cur_mode->reg_list);
+		if (ret)
 			return ret;
+
+		/* In case these controls are set before streaming */
+		ret = __v4l2_ctrl_handler_setup(&gc4653->ctrl_handler);
+		if (ret)
+			return ret;
+		if (gc4653->has_init_exp && gc4653->cur_mode->hdr_mode != NO_HDR) {
+			ret = gc4653_ioctl(&gc4653->subdev, PREISP_CMD_SET_HDRAE_EXP,
+				&gc4653->init_hdrae_exp);
+			if (ret) {
+				dev_err(&gc4653->client->dev,
+					"init exp fail in hdr mode\n");
+				return ret;
+			}
 		}
 	}
-	if (ret)
-		return ret;
 
+	dev_info(&gc4653->client->dev, "is_tb: %d\n", gc4653->is_thunderboot);
 	ret |= gc4653_write_reg(gc4653->client, GC4653_REG_CTRL_MODE,
 				GC4653_REG_VALUE_08BIT, GC4653_MODE_STREAMING);
 	if (gc4653->cur_mode->hdr_mode == NO_HDR)
@@ -939,10 +1047,16 @@ static int __gc4653_start_stream(struct gc4653 *gc4653)
 static int __gc4653_stop_stream(struct gc4653 *gc4653)
 {
 	gc4653->has_init_exp = false;
+
+	if (gc4653->is_thunderboot) {
+		gc4653->is_first_streamoff = true;
+		pm_runtime_put(&gc4653->client->dev);
+	}
 	return gc4653_write_reg(gc4653->client, GC4653_REG_CTRL_MODE,
 				GC4653_REG_VALUE_08BIT, GC4653_MODE_SW_STANDBY);
 }
 
+static int __gc4653_power_on(struct gc4653 *gc4653);
 static int gc4653_s_stream(struct v4l2_subdev *sd, int on)
 {
 	struct gc4653 *gc4653 = to_gc4653(sd);
@@ -955,6 +1069,10 @@ static int gc4653_s_stream(struct v4l2_subdev *sd, int on)
 		goto unlock_and_return;
 
 	if (on) {
+		if (gc4653->is_thunderboot && rkisp_tb_get_state() == RKISP_TB_NG) {
+			gc4653->is_thunderboot = false;
+			__gc4653_power_on(gc4653);
+		}
 		ret = pm_runtime_get_sync(&client->dev);
 		if (ret < 0) {
 			pm_runtime_put_noidle(&client->dev);
@@ -1046,6 +1164,10 @@ static int __gc4653_power_on(struct gc4653 *gc4653)
 		dev_err(dev, "Failed to enable xvclk\n");
 		return ret;
 	}
+
+	if (gc4653->is_thunderboot)
+		return 0;
+
 	if (!IS_ERR(gc4653->reset_gpio))
 		gpiod_set_value_cansleep(gc4653->reset_gpio, 0);
 
@@ -1087,9 +1209,18 @@ static void __gc4653_power_off(struct gc4653 *gc4653)
 	int ret;
 	struct device *dev = &gc4653->client->dev;
 
+	clk_disable_unprepare(gc4653->xvclk);
+	if (gc4653->is_thunderboot) {
+		if (gc4653->is_first_streamoff) {
+			gc4653->is_thunderboot = false;
+			gc4653->is_first_streamoff = false;
+		} else {
+			return;
+		}
+	}
+
 	if (!IS_ERR(gc4653->pwdn_gpio))
 		gpiod_set_value_cansleep(gc4653->pwdn_gpio, 0);
-	clk_disable_unprepare(gc4653->xvclk);
 	if (!IS_ERR(gc4653->reset_gpio))
 		gpiod_set_value_cansleep(gc4653->reset_gpio, 0);
 	if (!IS_ERR_OR_NULL(gc4653->pins_sleep)) {
@@ -1184,6 +1315,7 @@ static const struct v4l2_subdev_core_ops gc4653_core_ops = {
 static const struct v4l2_subdev_video_ops gc4653_video_ops = {
 	.s_stream = gc4653_s_stream,
 	.g_frame_interval = gc4653_g_frame_interval,
+	.s_frame_interval = gc4653_s_frame_interval,
 };
 
 static const struct v4l2_subdev_pad_ops gc4653_pad_ops = {
@@ -1387,6 +1519,11 @@ static int gc4653_check_sensor_id(struct gc4653 *gc4653,
 	u32 reg_L = 0;
 	int ret;
 
+	if (gc4653->is_thunderboot) {
+		dev_info(dev, "Enable thunderboot mode, skip sensor id check\n");
+		return 0;
+	}
+
 	ret = gc4653_read_reg(client, GC4653_REG_CHIP_ID_H,
 			      GC4653_REG_VALUE_08BIT, &reg_H);
 	ret |= gc4653_read_reg(client, GC4653_REG_CHIP_ID_L,
@@ -1446,6 +1583,8 @@ static int gc4653_probe(struct i2c_client *client,
 		dev_err(dev, "could not get module information!\n");
 		return -EINVAL;
 	}
+
+	gc4653->is_thunderboot = IS_ENABLED(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP);
 
 	gc4653->client = client;
 	gc4653->cfg_num = ARRAY_SIZE(supported_modes);
@@ -1547,7 +1686,10 @@ static int gc4653_probe(struct i2c_client *client,
 
 	pm_runtime_set_active(dev);
 	pm_runtime_enable(dev);
-	pm_runtime_idle(dev);
+	if (gc4653->is_thunderboot)
+		pm_runtime_get_sync(dev);
+	else
+		pm_runtime_idle(dev);
 
 	return 0;
 
@@ -1619,7 +1761,11 @@ static void __exit sensor_mod_exit(void)
 	i2c_del_driver(&gc4653_i2c_driver);
 }
 
+#if defined(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP) && !defined(CONFIG_INITCALL_ASYNC)
+subsys_initcall(sensor_mod_init);
+#else
 device_initcall_sync(sensor_mod_init);
+#endif
 module_exit(sensor_mod_exit);
 
 MODULE_DESCRIPTION("galaxycore gc4653 sensor driver");

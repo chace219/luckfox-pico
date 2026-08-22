@@ -22,6 +22,7 @@
 #include <linux/proc_fs.h>
 #include <linux/nospec.h>
 #include <soc/rockchip/pm_domains.h>
+#include <soc/rockchip/rockchip_iommu.h>
 
 #include "mpp_debug.h"
 #include "mpp_common.h"
@@ -314,43 +315,40 @@ fail:
 
 static void *vepu_prepare(struct mpp_dev *mpp, struct mpp_task *mpp_task)
 {
-	struct mpp_taskqueue *queue = mpp->queue;
 	struct vepu_dev *enc = to_vepu_dev(mpp);
 	struct vepu_ccu *ccu = enc->ccu;
 	unsigned long core_idle;
 	unsigned long flags;
-	u32 core_id_max;
 	s32 core_id;
 	u32 i;
 
 	spin_lock_irqsave(&ccu->lock, flags);
 
-	core_idle = queue->core_idle;
-	core_id_max = queue->core_id_max;
+	core_idle = ccu->core_idle;
 
-	for (i = 0; i <= core_id_max; i++) {
-		struct mpp_dev *mpp = queue->cores[i];
+	for (i = 0; i < ccu->core_num; i++) {
+		struct mpp_dev *mpp = ccu->cores[i];
 
 		if (mpp && mpp->disable)
-			clear_bit(i, &core_idle);
+			clear_bit(mpp->core_id, &core_idle);
 	}
 
-	core_id = find_first_bit(&ccu->core_idle, ccu->core_num);
-
-	if (core_id >= core_id_max + 1 || !queue->cores[core_id]) {
+	core_id = find_first_bit(&core_idle, ccu->core_num);
+	if (core_id >= ARRAY_SIZE(ccu->cores)) {
 		mpp_task = NULL;
 		mpp_dbg_core("core %d all busy %lx\n", core_id, ccu->core_idle);
-	} else {
-		unsigned long core_idle = ccu->core_idle;
-
-		clear_bit(core_id, &ccu->core_idle);
-		mpp_task->mpp = ccu->cores[core_id];
-		mpp_task->core_id = core_id;
-
-		mpp_dbg_core("core cnt %d core %d set idle %lx -> %lx\n",
-			     ccu->core_num, core_id, core_idle, ccu->core_idle);
+		goto done;
 	}
 
+	core_id = array_index_nospec(core_id, MPP_MAX_CORE_NUM);
+	clear_bit(core_id, &ccu->core_idle);
+	mpp_task->mpp = ccu->cores[core_id];
+	mpp_task->core_id = core_id;
+
+	mpp_dbg_core("core cnt %d core %d set idle %lx -> %lx\n",
+		     ccu->core_num, core_id, core_idle, ccu->core_idle);
+
+done:
 	spin_unlock_irqrestore(&ccu->lock, flags);
 
 	return mpp_task;
@@ -863,6 +861,8 @@ static int vepu_reset(struct mpp_dev *mpp)
 	struct vepu_dev *enc = to_vepu_dev(mpp);
 	struct vepu_ccu *ccu = enc->ccu;
 
+	mpp_write(mpp, VEPU2_REG_ENC_EN, 0);
+	udelay(5);
 	if (enc->rst_a && enc->rst_h) {
 		/* Don't skip this or iommu won't work after reset */
 		mpp_pmu_idle_request(mpp, true);
@@ -879,6 +879,48 @@ static int vepu_reset(struct mpp_dev *mpp)
 		set_bit(mpp->core_id, &ccu->core_idle);
 		mpp_dbg_core("core %d reset idle %lx\n", mpp->core_id, ccu->core_idle);
 	}
+
+	return 0;
+}
+
+static int vepu2_iommu_fault_handle(struct iommu_domain *iommu, struct device *iommu_dev,
+				    unsigned long iova, int status, void *arg)
+{
+	struct mpp_dev *mpp = (struct mpp_dev *)arg;
+	struct mpp_task *mpp_task;
+	struct vepu_dev *enc = to_vepu_dev(mpp);
+	struct vepu_ccu *ccu = enc->ccu;
+
+	dev_err(iommu_dev, "fault addr 0x%08lx status %x arg %p\n",
+		iova, status, arg);
+
+	if (ccu) {
+		int i;
+		struct mpp_dev *core;
+
+		for (i = 0; i < ccu->core_num; i++) {
+			core = ccu->cores[i];
+			if (core->iommu_info && (&core->iommu_info->pdev->dev == iommu_dev)) {
+				mpp = core;
+				break;
+			}
+		}
+	}
+
+	if (!mpp) {
+		dev_err(iommu_dev, "pagefault without device to handle\n");
+		return 0;
+	}
+	mpp_task = mpp->cur_task;
+	if (mpp_task)
+		mpp_task_dump_mem_region(mpp, mpp_task);
+
+	mpp_task_dump_hw_reg(mpp);
+	/*
+	 * Mask iommu irq, in order for iommu not repeatedly trigger pagefault.
+	 * Until the pagefault task finish by hw timeout.
+	 */
+	rockchip_iommu_mask_irq(mpp->dev);
 
 	return 0;
 }
@@ -1048,7 +1090,8 @@ static int vepu_attach_ccu(struct device *dev, struct vepu_dev *enc)
 		ccu_info = ccu->main_core->iommu_info;
 		cur_info = enc->mpp.iommu_info;
 
-		cur_info->domain = ccu_info->domain;
+		if (cur_info)
+			cur_info->domain = ccu_info->domain;
 		mpp_iommu_attach(cur_info);
 	}
 	enc->ccu = ccu;
@@ -1092,7 +1135,7 @@ static int vepu_core_probe(struct platform_device *pdev)
 
 	ret = devm_request_threaded_irq(dev, mpp->irq,
 					mpp_dev_irq,
-					mpp_dev_isr_sched,
+					NULL,
 					IRQF_SHARED,
 					dev_name(dev), mpp);
 	if (ret) {
@@ -1100,6 +1143,7 @@ static int vepu_core_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
+	mpp->fault_handler = vepu2_iommu_fault_handle;
 	mpp->session_max_buffers = VEPU2_SESSION_MAX_BUFFERS;
 	vepu_procfs_init(mpp);
 	vepu_procfs_ccu_init(mpp);
@@ -1141,7 +1185,7 @@ static int vepu_probe_default(struct platform_device *pdev)
 
 	ret = devm_request_threaded_irq(dev, mpp->irq,
 					mpp_dev_irq,
-					mpp_dev_isr_sched,
+					NULL,
 					IRQF_SHARED,
 					dev_name(dev), mpp);
 	if (ret) {
@@ -1149,6 +1193,7 @@ static int vepu_probe_default(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
+	mpp->fault_handler = vepu2_iommu_fault_handle;
 	mpp->session_max_buffers = VEPU2_SESSION_MAX_BUFFERS;
 	vepu_procfs_init(mpp);
 	/* register current device to mpp service */
@@ -1228,6 +1273,7 @@ struct platform_driver rockchip_vepu2_driver = {
 	.driver = {
 		.name = VEPU2_DRIVER_NAME,
 		.of_match_table = of_match_ptr(mpp_vepu2_dt_match),
+		.pm = &mpp_common_pm_ops,
 	},
 };
 EXPORT_SYMBOL(rockchip_vepu2_driver);

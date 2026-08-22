@@ -99,7 +99,7 @@ mpp_dma_remove_extra_buffer(struct mpp_dma_session *dma)
 				oldest = buffer;
 			}
 		}
-		if (oldest && kref_read(&oldest->ref) <= 1)
+		if (oldest && kref_read(&oldest->ref) == 1)
 			kref_put(&oldest->ref, mpp_dma_release_buffer);
 		mutex_unlock(&dma->list_mutex);
 	}
@@ -191,7 +191,8 @@ struct mpp_dma_buffer *mpp_dma_import_fd(struct mpp_iommu_info *iommu_info,
 	}
 
 	/* remove the oldest before add buffer */
-	mpp_dma_remove_extra_buffer(dma);
+	if (!IS_ENABLED(CONFIG_DMABUF_CACHE))
+		mpp_dma_remove_extra_buffer(dma);
 
 	/* Check whether in dma session */
 	buffer = mpp_dma_find_buffer_fd(dma, fd);
@@ -430,11 +431,18 @@ int mpp_iommu_detach(struct mpp_iommu_info *info)
 
 int mpp_iommu_attach(struct mpp_iommu_info *info)
 {
+	struct mpp_iommu_info *last_info;
+
 	if (!info)
 		return 0;
 
+	last_info = info->queue->last_iommu_info;
+	info->queue->last_iommu_info = info;
 	if (info->domain == iommu_get_domain_for_dev(info->dev))
 		return 0;
+
+	if (last_info)
+		iommu_detach_group(last_info->domain, last_info->group);
 
 	return iommu_attach_group(info->domain, info->group);
 }
@@ -454,10 +462,19 @@ static int mpp_iommu_handle(struct iommu_domain *iommu,
 		return 0;
 	}
 
+	if (mpp->cur_task)
+		mpp_task_dump_mem_region(mpp, mpp->cur_task);
+
 	if (mpp->dev_ops && mpp->dev_ops->dump_dev)
 		mpp->dev_ops->dump_dev(mpp);
 	else
 		mpp_task_dump_hw_reg(mpp);
+
+	/*
+	 * Mask iommu irq, in order for iommu not repeatedly trigger pagefault.
+	 * Until the pagefault task finish by hw timeout.
+	 */
+	rockchip_iommu_mask_irq(mpp->dev);
 
 	return 0;
 }
@@ -519,7 +536,8 @@ mpp_iommu_probe(struct device *dev)
 		goto err_put_group;
 	}
 
-	init_rwsem(&info->rw_sem);
+	init_rwsem(&info->rw_sem_self);
+	info->rw_sem = &info->rw_sem_self;
 	spin_lock_init(&info->dev_lock);
 	info->dev = dev;
 	info->pdev = pdev;
@@ -546,6 +564,7 @@ int mpp_iommu_remove(struct mpp_iommu_info *info)
 	if (!info)
 		return 0;
 
+	mpp_iommu_attach(info);
 	iommu_group_put(info->group);
 	platform_device_put(info->pdev);
 

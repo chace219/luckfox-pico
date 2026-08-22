@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  *
- * (C) COPYRIGHT 2022 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2022-2023 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -27,12 +27,9 @@
 #define _UAPI_KBASE_MODEL_LINUX_H_
 
 /* Generic model IRQs */
-enum model_linux_irqs {
-	MODEL_LINUX_JOB_IRQ,
-	MODEL_LINUX_GPU_IRQ,
-	MODEL_LINUX_MMU_IRQ,
-	MODEL_LINUX_NONE_IRQ,
-	MODEL_LINUX_NUM_TYPE_IRQ
-};
+#define MODEL_LINUX_JOB_IRQ (0x1 << 0)
+#define MODEL_LINUX_GPU_IRQ (0x1 << 1)
+#define MODEL_LINUX_MMU_IRQ (0x1 << 2)
+#define MODEL_LINUX_IRQ_MASK (MODEL_LINUX_JOB_IRQ | MODEL_LINUX_GPU_IRQ | MODEL_LINUX_MMU_IRQ)
 
 #endif /* _UAPI_KBASE_MODEL_LINUX_H_ */

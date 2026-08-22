@@ -14,6 +14,10 @@
 #include "vehicle_samsung_dcphy_common.h"
 #include "../../../media/platform/rockchip/cif/mipi-csi2.h"
 
+/* RK3562 DPHY GRF REG OFFSET */
+#define RK3562_GRF_VI_CON0	(0x0520)
+#define RK3562_GRF_VI_CON1	(0x0524)
+
 /* GRF REG OFFSET */
 #define GRF_VI_CON0	(0x0340)
 #define GRF_VI_CON1	(0x0344)
@@ -37,6 +41,7 @@
 #define CSI2_DPHY_CTRL_LANE_ENABLE	(0x00)
 #define CSI2_DPHY_CLK1_LANE_EN		(0x2C)
 #define CSI2_DPHY_DUAL_CAL_EN		(0x80)
+#define CSI2_DPHY_CLK_CONTINUE_MODE	(0x128)
 #define CSI2_DPHY_CLK_WR_THS_SETTLE	(0x160)
 #define CSI2_DPHY_CLK_CALIB_EN		(0x168)
 #define CSI2_DPHY_LANE0_WR_THS_SETTLE	(0x1e0)
@@ -47,6 +52,7 @@
 #define CSI2_DPHY_LANE2_CALIB_EN	(0x2e8)
 #define CSI2_DPHY_LANE3_WR_THS_SETTLE	(0x360)
 #define CSI2_DPHY_LANE3_CALIB_EN	(0x368)
+#define CSI2_DPHY_CLK1_CONTINUE_MODE	(0x3a8)
 #define CSI2_DPHY_CLK1_WR_THS_SETTLE	(0x3e0)
 #define CSI2_DPHY_CLK1_CALIB_EN		(0x3e8)
 
@@ -125,6 +131,8 @@
 #define CSI2_DPHY_CTRL_DATALANE_SPLIT_LANE2_3_OFFSET_BIT	4
 #define CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT	6
 
+#define CSI2PHY_CLK_CONTINUE_MODE_MASK GENMASK(5, 4)
+
 enum csi2_dphy_index {
 	DPHY0 = 0x0,
 	DPHY1,
@@ -196,6 +204,18 @@ enum grf_reg_id {
 	GRF_DPHY_CSIHOST3_SEL,
 	GRF_DPHY_CSIHOST4_SEL,
 	GRF_DPHY_CSIHOST5_SEL,
+	/* below is for rv1106 only */
+	GRF_MIPI_HOST0_SEL,
+	GRF_LVDS_HOST0_SEL,
+	/* below is for rk3562 */
+	GRF_DPHY1_CLK_INV_SEL,
+	GRF_DPHY1_CLK1_INV_SEL,
+	GRF_DPHY1_CSI2PHY_CLKLANE1_EN,
+	GRF_DPHY1_CSI2PHY_FORCERXMODE,
+	GRF_DPHY1_CSI2PHY_CLKLANE_EN,
+	GRF_DPHY1_CSI2PHY_DATALANE_EN,
+	GRF_DPHY1_CSI2PHY_DATALANE_EN0,
+	GRF_DPHY1_CSI2PHY_DATALANE_EN1,
 };
 
 enum csi2dphy_reg_id {
@@ -274,6 +294,8 @@ enum csi2dphy_reg_id {
 	CSI2PHY_S0D3_DESKEW_CON0,
 	CSI2PHY_S0D3_DESKEW_CON2,
 	CSI2PHY_S0D3_DESKEW_CON4,
+	CSI2PHY_CLK_CONTINUE_MODE,
+	CSI2PHY_CLK1_CONTINUE_MODE,
 };
 
 #define HIWORD_UPDATE(val, mask, shift) \
@@ -290,6 +312,8 @@ enum csi2_dphy_chip_id {
 	CHIP_ID_RK3568 = 0x0,
 	CHIP_ID_RK3588 = 0x1,
 	CHIP_ID_RK3588_DCPHY = 0x2,
+	CHIP_ID_RV1106 = 0x3,
+	CHIP_ID_RK3562 = 0x4,
 };
 
 enum csi2_dphy_rx_pads {
@@ -357,6 +381,7 @@ struct csi2_dphy_hw {
 	u64 data_rate_mbps;
 	struct rkmodule_csi_dphy_param *dphy_param;
 	struct samsung_mipi_dcphy *samsung_phy;
+	int phy_index;
 };
 
 #endif

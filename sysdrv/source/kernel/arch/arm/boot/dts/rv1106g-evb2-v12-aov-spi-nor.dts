@@ -9,10 +9,21 @@
 
 / {
 	model = "Rockchip RV1106G EVB2 V12 Board";
-	compatible = "rockchip,rv1106g-evb2-v12-aov", "rockchip,rv1106";
+	compatible = "rockchip,rv1106g-evb2-v12", "rockchip,rv1106";
 };
 
 &rkcif_mipi_lvds {
-	aov-reserved;
+	rtt-suspend;
+	status = "okay";
+};
+
+&rkisp_vir0 {
+	memory-region-thunderboot = <&rkisp_thunderboot>;
+	rtt-suspend;
+	status = "okay";
+};
+
+&thunder_boot_service {
+	memory-no-free;
 	status = "okay";
 };

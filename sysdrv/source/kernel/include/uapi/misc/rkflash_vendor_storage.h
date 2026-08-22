@@ -1,11 +1,12 @@
 /* SPDX-License-Identifier: ((GPL-2.0+ WITH Linux-syscall-note) OR MIT) */
 
-/* Copyright (c) 2018 Fuzhou Rockchip Electronics Co., Ltd */
-
-#include <linux/ioctl.h>
+/* Copyright (c) 2023 Rockchip Electronics Co., Ltd */
 
 #ifndef _RKFLASH_VENDOR_STORAGE
 #define _RKFLASH_VENDOR_STORAGE
+
+#include <linux/types.h>
+#include <linux/ioctl.h>
 
 struct RK_VENDOR_REQ {
 	__u32 tag;
@@ -15,7 +16,8 @@ struct RK_VENDOR_REQ {
 };
 
 #define VENDOR_REQ_TAG		0x56524551
-#define VENDOR_READ_IO		_IOW('v', 0x01, __u32)
+#define VENDOR_READ_IO_COMPAT	_IOW('v', 0x01, __u32)
+#define VENDOR_READ_IO		_IOWR('v', 0x01, __u32)
 #define VENDOR_WRITE_IO		_IOW('v', 0x02, __u32)
 
 #endif

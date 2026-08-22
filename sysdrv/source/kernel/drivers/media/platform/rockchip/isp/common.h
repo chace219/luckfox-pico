@@ -49,6 +49,8 @@
 #include <media/videobuf2-dma-contig.h>
 #include <media/videobuf2-v4l2.h>
 
+#include "isp_ispp.h"
+
 #define RKISP_DEFAULT_WIDTH		800
 #define RKISP_DEFAULT_HEIGHT		600
 
@@ -75,6 +77,8 @@ enum rkisp_isp_ver {
 	ISP_V30 = 0x60,
 	ISP_V32 = 0x70,
 	ISP_V32_L = 0x80,
+	ISP_V33 = 0x90,
+	ISP_V39 = 0xa0,
 };
 
 enum rkisp_sd_type {
@@ -138,7 +142,10 @@ extern int rkisp_debug;
 extern bool rkisp_monitor;
 extern bool rkisp_irq_dbg;
 extern bool rkisp_buf_dbg;
+extern bool rkisp_wrap_no_dvbm;
 extern u64 rkisp_debug_reg;
+extern unsigned int rkisp_vicap_buf[DEV_MAX];
+extern unsigned int rkisp_hdr_wrap_line[DEV_MAX];
 extern struct platform_driver rkisp_plat_drv;
 
 static inline

@@ -139,19 +139,11 @@ int spinand_select_target(struct spinand_device *spinand, unsigned int target)
 	return 0;
 }
 
-static int spinand_init_cfg_cache(struct spinand_device *spinand)
+static int spinand_read_cfg(struct spinand_device *spinand)
 {
 	struct nand_device *nand = spinand_to_nand(spinand);
-	struct device *dev = &spinand->spimem->spi->dev;
 	unsigned int target;
 	int ret;
-
-	spinand->cfg_cache = devm_kcalloc(dev,
-					  nand->memorg.ntargets,
-					  sizeof(*spinand->cfg_cache),
-					  GFP_KERNEL);
-	if (!spinand->cfg_cache)
-		return -ENOMEM;
 
 	for (target = 0; target < nand->memorg.ntargets; target++) {
 		ret = spinand_select_target(spinand, target);
@@ -167,6 +159,21 @@ static int spinand_init_cfg_cache(struct spinand_device *spinand)
 		if (ret)
 			return ret;
 	}
+
+	return 0;
+}
+
+static int spinand_init_cfg_cache(struct spinand_device *spinand)
+{
+	struct nand_device *nand = spinand_to_nand(spinand);
+	struct device *dev = &spinand->spimem->spi->dev;
+
+	spinand->cfg_cache = devm_kcalloc(dev,
+					  nand->memorg.ntargets,
+					  sizeof(*spinand->cfg_cache),
+					  GFP_KERNEL);
+	if (!spinand->cfg_cache)
+		return -ENOMEM;
 
 	return 0;
 }
@@ -523,27 +530,55 @@ static int spinand_lock_block(struct spinand_device *spinand, u8 lock)
 	return spinand_write_reg_op(spinand, REG_BLOCK_LOCK, lock);
 }
 
+static int spinand_read_page_wait(struct spinand_device *spinand, u8 *s)
+{
+	unsigned long timeo =  jiffies + msecs_to_jiffies(400);
+	u8 status;
+	int ret;
+
+	do {
+		ret = spinand_read_status(spinand, &status);
+		if (ret)
+			return ret;
+
+		if (status & STATUS_BUSY)
+			continue;
+
+		ret = spinand_read_status(spinand, &status);
+		if (ret)
+			return ret;
+
+		if (!(status & STATUS_BUSY))
+			break;
+
+	} while (time_before(jiffies, timeo));
+
+	*s = status;
+
+	return status & STATUS_BUSY ? -ETIMEDOUT : 0;
+}
+
 static int spinand_read_page(struct spinand_device *spinand,
 			     const struct nand_page_io_req *req,
 			     bool ecc_enabled)
 {
-	u8 status = 8;
+	u8 status;
 	int ret;
 
 	ret = spinand_load_page_op(spinand, req);
 	if (ret)
 		return ret;
 
-	ret = spinand_wait(spinand, &status);
-	/*
-	 * When there is data outside of OIP in the status, the status data is
-	 * inaccurate and needs to be reconfirmed
-	 */
-	if (spinand->id.data[0] == 0x01 && status && !ret)
+	/* Workaround for Skyhigh */
+	if (spinand->id.data[0] == 0x01) {
+		ret = spinand_read_page_wait(spinand, &status);
+		if (ret)
+			return ret;
+	} else {
 		ret = spinand_wait(spinand, &status);
-
-	if (ret < 0)
-		return ret;
+		if (ret < 0)
+			return ret;
+	}
 
 	ret = spinand_read_from_cache_op(spinand, req);
 	if (ret)
@@ -856,24 +891,90 @@ static const struct nand_ops spinand_ops = {
 };
 
 static const struct spinand_manufacturer *spinand_manufacturers[] = {
+#ifdef CONFIG_MTD_SPI_NAND_BIWIN
 	&biwin_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_CHUCUN
+	&chucun_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_DOSILICON
 	&dosilicon_spinand_manufacturer,
-	&esmt_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_ESMT
+	&esmt_8c_spinand_manufacturer,
+	&esmt_c8_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_ETRON
 	&etron_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_FMSH
 	&fmsh_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_FORESEE
 	&foresee_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_GIGADEVICE
 	&gigadevice_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_GSTO
+	&gsto_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_HIKSEMI
+	&hiksemi_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_HYF
 	&hyf_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_ISSI
+	&issi_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_JSC
 	&jsc_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_KINGSTON
+	&kingston_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_MACRONIX
 	&macronix_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_MICRON
 	&micron_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_MK
+	&mk_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_PARAGON
 	&paragon_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_SILICONGO
 	&silicongo_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_SKYHIGH
 	&skyhigh_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_TITAN
+	&titan_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_TOSHIBA
 	&toshiba_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_UNIM
 	&unim_spinand_manufacturer,
+	&unim_zl_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_WINBOND
 	&winbond_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_XINCUN
+	&xincun_spinand_manufacturer,
+	&xincun_6c_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_XTX
 	&xtx_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_ZBIT
+	&zbit_spinand_manufacturer,
+#endif
 };
 
 static int spinand_manufacturer_match(struct spinand_device *spinand,
@@ -1079,12 +1180,15 @@ static int spinand_detect(struct spinand_device *spinand)
 	return 0;
 }
 
-static int spinand_reinit(struct mtd_info *mtd)
+static int spinand_init_flash(struct spinand_device *spinand)
 {
-	struct spinand_device *spinand = mtd_to_spinand(mtd);
-	struct nand_device *nand = mtd_to_nanddev(mtd);
 	struct device *dev = &spinand->spimem->spi->dev;
+	struct nand_device *nand = spinand_to_nand(spinand);
 	int ret, i;
+
+	ret = spinand_read_cfg(spinand);
+	if (ret)
+		return ret;
 
 	ret = spinand_init_quad_enable(spinand);
 	if (ret)
@@ -1097,16 +1201,8 @@ static int spinand_reinit(struct mtd_info *mtd)
 	ret = spinand_manufacturer_init(spinand);
 	if (ret) {
 		dev_err(dev,
-			"Failed to initialize the SPI NAND chip (err = %d)\n",
-			ret);
-		return ret;
-	}
-
-	ret = spinand_create_dirmaps(spinand);
-	if (ret) {
-		dev_err(dev,
-			"Failed to create direct mappings for read/write operations (err = %d)\n",
-			ret);
+		"Failed to initialize the SPI NAND chip (err = %d)\n",
+		ret);
 		return ret;
 	}
 
@@ -1114,56 +1210,51 @@ static int spinand_reinit(struct mtd_info *mtd)
 	for (i = 0; i < nand->memorg.ntargets; i++) {
 		ret = spinand_select_target(spinand, i);
 		if (ret)
-			return ret;
+			break;
+
+		/* HWP_EN must be enabled first before block unlock region is set */
+		if (spinand->id.data[0] == 0x01) {
+			ret = spinand_lock_block(spinand, HWP_EN);
+			if (ret)
+				break;
+		}
 
 		ret = spinand_lock_block(spinand, BL_ALL_UNLOCKED);
 		if (ret)
-			return ret;
+			break;
 	}
+
+	if (ret)
+		spinand_manufacturer_cleanup(spinand);
 
 	return ret;
 }
 
-/**
- * spinand_mtd_suspend - [MTD Interface] Suspend the spinand flash
- * @mtd: MTD device structure
- *
- * Returns 0 for success or negative error code otherwise.
- */
 static int spinand_mtd_suspend(struct mtd_info *mtd)
 {
 	struct spinand_device *spinand = mtd_to_spinand(mtd);
-	int ret = 0;
 
 	mutex_lock(&spinand->lock);
 
-	return ret;
+	return 0;
 }
 
-/**
- * spinand_mtd_resume - [MTD Interface] Resume the spinand flash
- * @mtd: MTD device structure
- */
 static void spinand_mtd_resume(struct mtd_info *mtd)
 {
 	struct spinand_device *spinand = mtd_to_spinand(mtd);
-	struct device *dev = &spinand->spimem->spi->dev;
 	int ret;
 
-	ret = spinand_reinit(mtd);
-	if (ret)
-		dev_err(dev, "Failed to resume, ret =%d !\n", ret);
 	mutex_unlock(&spinand->lock);
-}
 
-/**
- * spinand_mtd_shutdown - [MTD Interface] Finish the current spinand operation and
- *                 prevent further operations
- * @mtd: MTD device structure
- */
-static void spinand_mtd_shutdown(struct mtd_info *mtd)
-{
-	spinand_mtd_suspend(mtd);
+	ret = spinand_reset_op(spinand);
+	if (ret)
+		return;
+
+	ret = spinand_init_flash(spinand);
+	if (ret)
+		return;
+
+	spinand_ecc_enable(spinand, false);
 }
 
 static int spinand_init(struct spinand_device *spinand)
@@ -1171,7 +1262,7 @@ static int spinand_init(struct spinand_device *spinand)
 	struct device *dev = &spinand->spimem->spi->dev;
 	struct mtd_info *mtd = spinand_to_mtd(spinand);
 	struct nand_device *nand = mtd_to_nanddev(mtd);
-	int ret, i;
+	int ret;
 
 	/*
 	 * We need a scratch buffer because the spi_mem interface requires that
@@ -1204,21 +1295,9 @@ static int spinand_init(struct spinand_device *spinand)
 	if (ret)
 		goto err_free_bufs;
 
-	ret = spinand_init_quad_enable(spinand);
+	ret = spinand_init_flash(spinand);
 	if (ret)
 		goto err_free_bufs;
-
-	ret = spinand_upd_cfg(spinand, CFG_OTP_ENABLE, 0);
-	if (ret)
-		goto err_free_bufs;
-
-	ret = spinand_manufacturer_init(spinand);
-	if (ret) {
-		dev_err(dev,
-			"Failed to initialize the SPI NAND chip (err = %d)\n",
-			ret);
-		goto err_free_bufs;
-	}
 
 	ret = spinand_create_dirmaps(spinand);
 	if (ret) {
@@ -1226,17 +1305,6 @@ static int spinand_init(struct spinand_device *spinand)
 			"Failed to create direct mappings for read/write operations (err = %d)\n",
 			ret);
 		goto err_manuf_cleanup;
-	}
-
-	/* After power up, all blocks are locked, so unlock them here. */
-	for (i = 0; i < nand->memorg.ntargets; i++) {
-		ret = spinand_select_target(spinand, i);
-		if (ret)
-			goto err_manuf_cleanup;
-
-		ret = spinand_lock_block(spinand, BL_ALL_UNLOCKED);
-		if (ret)
-			goto err_manuf_cleanup;
 	}
 
 	ret = nanddev_init(nand, &spinand_ops, THIS_MODULE);
@@ -1258,9 +1326,8 @@ static int spinand_init(struct spinand_device *spinand)
 	mtd->_block_isreserved = spinand_mtd_block_isreserved;
 	mtd->_erase = spinand_mtd_erase;
 	mtd->_max_bad_blocks = nanddev_mtd_max_bad_blocks;
-	mtd->_suspend = spinand_mtd_suspend;
 	mtd->_resume = spinand_mtd_resume;
-	mtd->_reboot = spinand_mtd_shutdown;
+	mtd->_suspend = spinand_mtd_suspend;
 
 	if (spinand->eccinfo.ooblayout)
 		mtd_set_ooblayout(mtd, spinand->eccinfo.ooblayout);

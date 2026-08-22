@@ -160,14 +160,14 @@
 		hdmim0_tx1_scl: hdmim0-tx1-scl {
 			rockchip,pins =
 				/* hdmim0_tx1_scl */
-				<2 RK_PB5 4 &pcfg_pull_none>;
+				<2 RK_PB5 4 &pcfg_pull_none_drv_level_3_smt>;
 		};
 
 		/omit-if-no-ref/
 		hdmim0_tx1_sda: hdmim0-tx1-sda {
 			rockchip,pins =
 				/* hdmim0_tx1_sda */
-				<2 RK_PB4 4 &pcfg_pull_none>;
+				<2 RK_PB4 4 &pcfg_pull_none_drv_level_1_smt>;
 		};
 	};
 
@@ -261,24 +261,33 @@
 
 	i2s2 {
 		/omit-if-no-ref/
+		i2s2m0_idle: i2s2m0-idle {
+			rockchip,pins =
+				/* i2s2m0_lrck_gpio */
+				<2 RK_PC0 0 &pcfg_pull_none>,
+				/* i2s2m0_sclk_gpio */
+				<2 RK_PB7 0 &pcfg_pull_none>;
+		};
+
+		/omit-if-no-ref/
 		i2s2m0_lrck: i2s2m0-lrck {
 			rockchip,pins =
 				/* i2s2m0_lrck */
-				<2 RK_PC0 2 &pcfg_pull_none>;
+				<2 RK_PC0 2 &pcfg_pull_none_smt>;
 		};
 
 		/omit-if-no-ref/
 		i2s2m0_mclk: i2s2m0-mclk {
 			rockchip,pins =
 				/* i2s2m0_mclk */
-				<2 RK_PB6 2 &pcfg_pull_none>;
+				<2 RK_PB6 2 &pcfg_pull_none_smt>;
 		};
 
 		/omit-if-no-ref/
 		i2s2m0_sclk: i2s2m0-sclk {
 			rockchip,pins =
 				/* i2s2m0_sclk */
-				<2 RK_PB7 2 &pcfg_pull_none>;
+				<2 RK_PB7 2 &pcfg_pull_none_smt>;
 		};
 
 		/omit-if-no-ref/

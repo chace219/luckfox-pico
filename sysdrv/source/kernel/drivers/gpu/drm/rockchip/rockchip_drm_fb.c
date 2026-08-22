@@ -38,6 +38,7 @@ static void __rockchip_drm_fb_destroy(struct drm_framebuffer *fb)
 #ifndef MODULE
 		rockchip_free_loader_memory(fb->dev);
 #endif
+		drm_gem_object_release(rockchip_logo_fb->fb.obj[0]);
 		kfree(rockchip_logo_fb);
 	} else {
 		for (i = 0; i < 4; i++) {
@@ -141,6 +142,7 @@ rockchip_drm_logo_fb_alloc(struct drm_device *dev, const struct drm_mode_fb_cmd2
 	fb->flags |= ROCKCHIP_DRM_MODE_LOGO_FB;
 	rockchip_logo_fb->logo = logo;
 	rockchip_logo_fb->fb.obj[0] = &rockchip_logo_fb->rk_obj.base;
+	drm_gem_object_init(dev, rockchip_logo_fb->fb.obj[0], PAGE_ALIGN(logo->size));
 	rockchip_logo_fb->rk_obj.dma_addr = logo->dma_addr;
 	rockchip_logo_fb->rk_obj.kvaddr = logo->kvaddr;
 	logo->count++;
@@ -161,6 +163,7 @@ static int rockchip_drm_bandwidth_atomic_check(struct drm_device *dev,
 	vop_bw_info->line_bw_mbyte = 0;
 	vop_bw_info->frame_bw_mbyte = 0;
 	vop_bw_info->plane_num = 0;
+	vop_bw_info->plane_num_4k = 0;
 
 	for_each_old_crtc_in_state(state, crtc, old_crtc_state, i) {
 		funcs = priv->crtc_funcs[drm_crtc_index(crtc)];
@@ -172,8 +175,48 @@ static int rockchip_drm_bandwidth_atomic_check(struct drm_device *dev,
 	return 0;
 }
 
-static void drm_atomic_helper_connector_commit(struct drm_device *dev,
-					       struct drm_atomic_state *old_state)
+static int rockchip_drm_aclk_adjust(struct drm_device *dev,
+				    struct drm_atomic_state *state,
+				    struct dmcfreq_vop_info *vop_bw_info)
+{
+	struct rockchip_drm_private *priv = dev->dev_private;
+	const struct rockchip_crtc_funcs *funcs;
+	struct drm_crtc *crtc;
+	int crtc_num = 0;
+
+	drm_for_each_crtc(crtc, dev) {
+		if (!crtc->state->active)
+			continue;
+		crtc_num++;
+	}
+
+	drm_for_each_crtc(crtc, dev) {
+		if (!crtc->state->active)
+			continue;
+
+		funcs = priv->crtc_funcs[drm_crtc_index(crtc)];
+		if (funcs && funcs->set_aclk) {
+			if (vop_bw_info->plane_num_4k || crtc_num > 1 ||
+			    crtc->state->adjusted_mode.crtc_hdisplay > 4096) {
+				funcs->set_aclk(crtc, ROCKCHIP_VOP_ACLK_ADVANCED_MODE);
+				priv->aclk_adjust_frame_num = 2;
+			} else {
+				if (priv->aclk_adjust_frame_num >= 1) {
+					funcs->set_aclk(crtc, ROCKCHIP_VOP_ACLK_ADVANCED_MODE);
+					priv->aclk_adjust_frame_num--;
+				} else {
+					funcs->set_aclk(crtc, ROCKCHIP_VOP_ACLK_NORMAL_MODE);
+				}
+			}
+		}
+	}
+
+	return 0;
+}
+
+static void
+rockchip_drm_atomic_helper_connector_commit(struct drm_device *dev,
+					    struct drm_atomic_state *old_state)
 {
 	struct drm_connector *connector;
 	struct drm_connector_state *new_conn_state;
@@ -212,6 +255,8 @@ static void rockchip_drm_atomic_helper_commit_tail_rpm(struct drm_atomic_state *
 
 	rockchip_drm_bandwidth_atomic_check(dev, old_state, &vop_bw_info);
 
+	rockchip_drm_aclk_adjust(dev, old_state, &vop_bw_info);
+
 	rockchip_dmcfreq_vop_bandwidth_update(&vop_bw_info);
 
 	mutex_lock(&prv->ovl_lock);
@@ -220,7 +265,7 @@ static void rockchip_drm_atomic_helper_commit_tail_rpm(struct drm_atomic_state *
 
 	drm_atomic_helper_fake_vblank(old_state);
 
-	drm_atomic_helper_connector_commit(dev, old_state);
+	rockchip_drm_atomic_helper_connector_commit(dev, old_state);
 
 	drm_atomic_helper_commit_hw_done(old_state);
 
@@ -267,12 +312,7 @@ rockchip_fb_create(struct drm_device *dev, struct drm_file *file,
 	if (drm_is_afbc(mode_cmd->modifier[0])) {
 		ret = drm_gem_fb_afbc_init(dev, mode_cmd, afbc_fb);
 		if (ret) {
-			struct drm_gem_object **obj = afbc_fb->base.obj;
-
-			for (i = 0; i < info->num_planes; ++i)
-				drm_gem_object_put(obj[i]);
-
-			kfree(afbc_fb);
+			drm_framebuffer_put(&afbc_fb->base);
 			return ERR_PTR(ret);
 		}
 	}

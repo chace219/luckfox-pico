@@ -506,7 +506,7 @@
 		status = "disabled";
 	};
 
-	vepu: vepu@0x10106000 {
+	vepu: vepu@10106000 {
 		compatible = "rockchip,vpu-encoder-v1";
 		reg = <0x10106000 0x400>;
 		interrupts = <GIC_SPI 6 IRQ_TYPE_LEVEL_HIGH>;
@@ -1182,6 +1182,7 @@
 		interrupts = <GIC_SPI 23 IRQ_TYPE_LEVEL_HIGH>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&spi0m0_tx &spi0m0_rx &spi0m0_clk &spi0m0_cs0 &spi0m0_cs1>;
+		clocks = <&cru SCLK_SPI0>, <&cru PCLK_SPI0>;
 		clock-names = "spiclk", "apb_pclk";
 		dmas = <&pdma 8>, <&pdma 9>;
 		dma-names = "tx", "rx";

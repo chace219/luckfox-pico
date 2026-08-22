@@ -97,6 +97,7 @@ struct rk630_phy_switched {
 	unsigned int detected_count;
 	bool config_rx_signal;
 	int old_link;
+	unsigned int config_max_speed;
 
 	/* linked process */
 	unsigned int linked_count;
@@ -480,6 +481,37 @@ static bool rk630_phy_switch_config_by_packets(struct phy_device *phydev)
 	return false;
 }
 
+static void rk630_phy_force_speed(struct phy_device *phydev, u32 max_speed)
+{
+	struct rk630_phy_priv *priv = phydev->priv;
+
+	if (priv->switched.config_max_speed != max_speed) {
+		if (max_speed == SPEED_10) {
+			linkmode_clear_bit(ETHTOOL_LINK_MODE_100baseFX_Full_BIT,
+					   phydev->supported);
+			linkmode_clear_bit(ETHTOOL_LINK_MODE_100baseFX_Half_BIT,
+					   phydev->supported);
+			linkmode_clear_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT,
+					   phydev->supported);
+			linkmode_clear_bit(ETHTOOL_LINK_MODE_100baseT_Half_BIT,
+					   phydev->supported);
+		} else {
+			linkmode_set_bit(ETHTOOL_LINK_MODE_100baseFX_Full_BIT,
+					 phydev->supported);
+			linkmode_set_bit(ETHTOOL_LINK_MODE_100baseFX_Half_BIT,
+					 phydev->supported);
+			linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT,
+					 phydev->supported);
+			linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Half_BIT,
+					 phydev->supported);
+			linkmode_or(phydev->advertising,
+				    phydev->advertising, phydev->supported);
+		}
+		__genphy_config_aneg(priv->phydev, false);
+		priv->switched.config_max_speed = max_speed;
+	}
+}
+
 static void rk630_phy_service_task(struct work_struct *work)
 {
 	struct rk630_phy_priv *priv = container_of(work, struct rk630_phy_priv,
@@ -507,6 +539,7 @@ static void rk630_phy_service_task(struct work_struct *work)
 			priv->switched.linked_count = 0;
 			delay_time = 2 * RX_DETECT_SCHEDULE_TIME;
 			/* Goto default config if no rj45 signal plugin */
+			rk630_phy_force_speed(priv->phydev, SPEED_100);
 			rk630_phy_switch_config(priv->phydev, false);
 
 			/* Also go to 10M default config */
@@ -526,12 +559,17 @@ static void rk630_phy_service_task(struct work_struct *work)
 				rk630_phy_switch_config(priv->phydev, true);
 			} else if (priv->switched.detected_count == ALL_RX_DETECT_MAX_COUNT &&
 				   !priv->switched.finished) {
+				/* drop down to 10M speed */
+				rk630_phy_force_speed(priv->phydev, SPEED_10);
+			 } else if (priv->switched.detected_count == (ALL_RX_DETECT_MAX_COUNT + RX_DETECT_MAX_COUNT) &&
+				 !priv->switched.finished) {
 				/* After another detect, we lost the last chance,
 				 * go back to default config0.
 				 */
+				rk630_phy_force_speed(priv->phydev, SPEED_100);
 				rk630_phy_switch_config(priv->phydev, false);
 				priv->switched.finished = true;
-			} else if (priv->switched.detected_count > ALL_RX_DETECT_MAX_COUNT ||
+			} else if (priv->switched.detected_count > (ALL_RX_DETECT_MAX_COUNT + RX_DETECT_MAX_COUNT) ||
 				   priv->switched.finished) {
 				/* Slow schedule work for 2 * SCHEDULE_TIME, if
 				 * detected finish.
@@ -640,7 +678,7 @@ static ssize_t rk630_phy_disable_switch_store(struct device *dev,
 
 	mutex_lock(&priv->lock);
 	if (disabled) {
-		cancel_delayed_work_sync(&priv->service_task);
+		cancel_delayed_work(&priv->service_task);
 
 		/* Save to default config */
 		rk630_phy_10m_switch_config(priv->phydev, false);
@@ -697,9 +735,8 @@ static int rk630_phy_probe(struct phy_device *phydev)
 						IRQF_TRIGGER_FALLING | IRQF_SHARED | IRQF_ONESHOT,
 						"wol_irq", priv);
 		if (ret) {
-			wake_lock_destroy(&priv->wol_wake_lock);
 			phydev_err(phydev, "request wol_irq failed: %d\n", ret);
-			return ret;
+			goto irq_err;
 		}
 		disable_irq(priv->wol_irq);
 		enable_irq_wake(priv->wol_irq);
@@ -720,16 +757,29 @@ static int rk630_phy_probe(struct phy_device *phydev)
 
 	ret = device_create_file(&phydev->mdio.dev, &dev_attr_rk630_phy_disable_switch);
 	if (ret)
-		return ret;
+		goto file_err;
 
 	priv->phydev = phydev;
 
 	return 0;
+
+file_err:
+	cancel_delayed_work_sync(&priv->service_task);
+	mutex_destroy(&priv->lock);
+irq_err:
+	if (priv->wol_irq > 0)
+		wake_lock_destroy(&priv->wol_wake_lock);
+	return ret;
 }
 
 static void rk630_phy_remove(struct phy_device *phydev)
 {
 	struct rk630_phy_priv *priv = phydev->priv;
+
+	device_remove_file(&phydev->mdio.dev, &dev_attr_rk630_phy_disable_switch);
+
+	cancel_delayed_work_sync(&priv->service_task);
+	mutex_destroy(&priv->lock);
 
 	if (priv->wol_irq > 0)
 		wake_lock_destroy(&priv->wol_wake_lock);

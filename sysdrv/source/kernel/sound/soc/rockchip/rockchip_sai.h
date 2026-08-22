@@ -9,6 +9,17 @@
 #define _ROCKCHIP_SAI_H
 
 /* XCR Transmit / Receive Control Register */
+#define SAI_XCR_FLE_MASK		BIT(26)
+#define SAI_XCR_FLE(x)			((x) << 26)
+#define SAI_XCR_FPC_MASK		BIT(25)
+#define SAI_XCR_FPC_EN			BIT(25)
+#define SAI_XCR_FPC_DIS			0
+#define SAI_XCR_SFC_MASK		BIT(24)
+#define SAI_XCR_SFC_ONE			BIT(24)
+#define SAI_XCR_SFC_ALL			0
+#define SAI_XCR_START_SEL_MASK		BIT(23)
+#define SAI_XCR_START_SEL_CHAINED	BIT(23)
+#define SAI_XCR_START_SEL_STANDALONE	0
 #define SAI_XCR_EDGE_SHIFT_MASK		BIT(22)
 #define SAI_XCR_EDGE_SHIFT_1		BIT(22)
 #define SAI_XCR_EDGE_SHIFT_0		0
@@ -40,6 +51,7 @@
 #define SAI_FSCR_FPW(x)			((x - 1) << 12)
 #define SAI_FSCR_FW_MASK		GENMASK(11, 0)
 #define SAI_FSCR_FW(x)			((x - 1) << 0)
+#define SAI_FSCR_FW_V(v)		((((v) & SAI_FSCR_FW_MASK) >> 0) + 1)
 
 /* MONO_CR Mono Control Register */
 #define SAI_MCR_RX_MONO_SLOT_MASK	GENMASK(8, 2)
@@ -55,6 +67,14 @@
 #define SAI_XFER_RX_IDLE		BIT(8)
 #define SAI_XFER_TX_IDLE		BIT(7)
 #define SAI_XFER_FS_IDLE		BIT(6)
+/*
+ * Used for TX only (VERSION >= SAI_VER_2311)
+ *
+ * SCLK/FSYNC auto gated when TX FIFO empty.
+ */
+#define SAI_XFER_TX_AUTO_MASK		BIT(6)
+#define SAI_XFER_TX_AUTO_EN		BIT(6)
+#define SAI_XFER_TX_AUTO_DIS		0
 #define SAI_XFER_RX_CNT_MASK		BIT(5)
 #define SAI_XFER_RX_CNT_EN		BIT(5)
 #define SAI_XFER_RX_CNT_DIS		0
@@ -75,6 +95,7 @@
 #define SAI_XFER_CLK_DIS		0
 
 /* CLR Clear Logic Register */
+#define SAI_CLR_FCR			BIT(3)
 #define SAI_CLR_FSC			BIT(2)
 #define SAI_CLR_RXC			BIT(1)
 #define SAI_CLR_TXC			BIT(0)
@@ -82,6 +103,7 @@
 /* CKR Clock Generation Register */
 #define SAI_CKR_MDIV_MASK		GENMASK(14, 3)
 #define SAI_CKR_MDIV(x)			((x - 1) << 3)
+#define SAI_CKR_MDIV_V(v)		((((v) & SAI_CKR_MDIV_MASK) >> 3) + 1)
 #define SAI_CKR_MSS_MASK		BIT(2)
 #define SAI_CKR_MSS_SLAVE		BIT(2)
 #define SAI_CKR_MSS_MASTER		0
@@ -97,28 +119,130 @@
 #define SAI_DMACR_RDE(x)		((x) << 24)
 #define SAI_DMACR_RDL_MASK		GENMASK(20, 16)
 #define SAI_DMACR_RDL(x)		((x - 1) << 16)
+#define SAI_DMACR_RDL_V(v)		((((v) & SAI_DMACR_RDL_MASK) >> 16) + 1)
 #define SAI_DMACR_TDE_MASK		BIT(8)
 #define SAI_DMACR_TDE(x)		((x) << 8)
 #define SAI_DMACR_TDL_MASK		GENMASK(4, 0)
 #define SAI_DMACR_TDL(x)		((x) << 0)
+#define SAI_DMACR_TDL_V(v)		(((v) & SAI_DMACR_TDL_MASK) >> 0)
 
 /* INTCR Interrupt Ctrl Register */
+#define SAI_INTCR_FSLOSTC			BIT(28)
+#define SAI_INTCR_FSLOST_MASK		BIT(27)
+#define SAI_INTCR_FSLOST(x)		((x) << 27)
+#define SAI_INTCR_FSERRC			BIT(26)
+#define SAI_INTCR_FSERR_MASK		BIT(25)
+#define SAI_INTCR_FSERR(x)		((x) << 25)
 #define SAI_INTCR_RXOIC			BIT(18)
 #define SAI_INTCR_RXOIE_MASK		BIT(17)
 #define SAI_INTCR_RXOIE(x)		((x) << 17)
+#define SAI_INTCR_RXFLC			BIT(12)
+#define SAI_INTCR_RXFLE_MASK		BIT(11)
+#define SAI_INTCR_RXFLE(x)		((x) << 11)
+#define SAI_INTCR_TXFLC			BIT(10)
+#define SAI_INTCR_TXFLE_MASK		BIT(9)
+#define SAI_INTCR_TXFLE(x)		((x) << 9)
 #define SAI_INTCR_TXUIC			BIT(2)
 #define SAI_INTCR_TXUIE_MASK		BIT(1)
 #define SAI_INTCR_TXUIE(x)		((x) << 1)
 
 /* INTSR Interrupt Status Register */
+#define SAI_INTSR_RXFLI_INA		0
+#define SAI_INTSR_RXFLI_ACT		BIT(21)
+#define SAI_INTSR_TXFLI_INA		0
+#define SAI_INTSR_TXFLI_ACT		BIT(20)
+#define SAI_INTSR_FSLOSTI_INA		0
+#define SAI_INTSR_FSLOSTI_ACT		BIT(19)
+#define SAI_INTSR_FSERRI_INA		0
+#define SAI_INTSR_FSERRI_ACT		BIT(18)
 #define SAI_INTSR_RXOI_INA		0
 #define SAI_INTSR_RXOI_ACT		BIT(17)
 #define SAI_INTSR_TXUI_INA		0
 #define SAI_INTSR_TXUI_ACT		BIT(1)
 
+/* PATH_SEL: Transfer / Receive Path Select Register */
+#define SAI_RX_PATH_SHIFT(x)		(8 + (x) * 2)
+#define SAI_RX_PATH_MASK(x)		(0x3 << SAI_RX_PATH_SHIFT(x))
+#define SAI_RX_PATH(x, v)		((v) << SAI_RX_PATH_SHIFT(x))
+#define SAI_TX_PATH_SHIFT(x)		(0 + (x) * 2)
+#define SAI_TX_PATH_MASK(x)		(0x3 << SAI_TX_PATH_SHIFT(x))
+#define SAI_TX_PATH(x, v)		((v) << SAI_TX_PATH_SHIFT(x))
+
 /* XSHIFT: Transfer / Receive Frame Sync Shift Register */
-#define SAI_XSHIFT_SEL_MASK		GENMASK(23, 0)
-#define SAI_XSHIFT_SEL(x)		(x)
+
+/*
+ * TX-ONLY: LEFT Direction Feature
+ * +------------------------------------------------+
+ * | DATA LEFTx (step: 0.5 cycle) | FSYNC Edge      |
+ * +------------------------------------------------+
+ */
+#define SAI_XSHIFT_LEFT_MASK		GENMASK(25, 24)
+#define SAI_XSHIFT_LEFT(x)		((x) << 24)
+/*
+ * +------------------------------------------------+
+ * | FSYNC Edge | DATA RIGHTx (step: 0.5 cycle)     |
+ * +------------------------------------------------+
+ */
+#define SAI_XSHIFT_RIGHT_MASK		GENMASK(23, 0)
+#define SAI_XSHIFT_RIGHT(x)		(x)
+
+/* XFIFOLR: Transfer / Receive FIFO Level Register */
+#define SAI_FIFOLR_XFL3_SHIFT		18
+#define SAI_FIFOLR_XFL3_MASK		GENMASK(23, 18)
+#define SAI_FIFOLR_XFL2_SHIFT		12
+#define SAI_FIFOLR_XFL2_MASK		GENMASK(17, 12)
+#define SAI_FIFOLR_XFL1_SHIFT		6
+#define SAI_FIFOLR_XFL1_MASK		GENMASK(11, 6)
+#define SAI_FIFOLR_XFL0_SHIFT		0
+#define SAI_FIFOLR_XFL0_MASK		GENMASK(5, 0)
+
+/* STATUS Status Register (VERSION >= SAI_VER_2307) */
+#define SAI_STATUS_RX_IDLE		BIT(3)
+#define SAI_STATUS_TX_IDLE		BIT(2)
+#define SAI_STATUS_FS_IDLE		BIT(1)
+
+/* VERSION */
+/*
+ * Updates:
+ *
+ * VERSION >= SAI_VER_2311
+ *
+ * Support Frame Sync xN (FSXN)
+ * Support Frame Sync Error Detect (FSE)
+ * Support Frame Sync Lost Detect (FSLOST)
+ * Support Force Clear (FCR)
+ * Support SAIn-Chained (e.g. SAI0-CLK-DATA + SAI3-DATA +...)
+ * Support Transmit Auto Gate Mode
+ * Support Timing Shift Left for TX
+ *
+ * Optimize SCLK/FSYNC Timing Alignment
+ *
+ * VERSION >= SAI_VER_2403
+ *
+ * Support Loopback LR Select (e.g. L:MIC R:LP)
+ *
+ * VERSION >= SAI_VER_2411
+ *
+ * Enhance Frame Integrity Robustness
+ * Support FIFO Interleaved Cfg
+ * Support Data Debug
+ */
+#define SAI_VER_2307			0x23073576
+#define SAI_VER_2311			0x23112118
+#define SAI_VER_2401			0x24013506
+#define SAI_VER_2403			0x24031103
+#define SAI_VER_2411			0x24111126
+
+/* FS_TIMEOUT: Frame Sync Timeout Register */
+#define SAI_FS_TIMEOUT_VAL_MASK		GENMASK(31, 1)
+#define SAI_FS_TIMEOUT_VAL(x)		((x) << 1)
+#define SAI_FS_TIMEOUT_EN_MASK		BIT(0)
+#define SAI_FS_TIMEOUT_EN(x)		((x) << 0)
+
+/* FIFO_CFG: FIFO Config Register */
+#define SAI_FIFO_CHG_MASK		BIT(0)
+#define SAI_FIFO_CHG_EN			BIT(0)
+#define SAI_FIFO_CHG_DIS		0
 
 /* SAI Registers */
 #define SAI_TXCR			(0x0000)
@@ -148,6 +272,24 @@
 #define SAI_RX_DATA_CNT			(0x0060)
 #define SAI_TX_SHIFT			(0x0064)
 #define SAI_RX_SHIFT			(0x0068)
+#define SAI_STATUS			(0x006c)
 #define SAI_VERSION			(0x0070)
+#define SAI_FSXN			(0x0074)
+#define SAI_FS_TIMEOUT			(0x0078)
+#define SAI_LOOPBACK_LR			(0x007c)
+#define SAI_FIFO_CFG			(0x0080)
+#define SAI_TXFL_TIMEOUT		(0x0084)
+#define SAI_RXFL_TIMEOUT		(0x0088)
+#define SAI_DEBUG			(0x008c)
+#define SAI_TXDATA0			(0x0090)
+#define SAI_TXDATA1			(0x0094)
+#define SAI_TXDATA2			(0x0098)
+#define SAI_TXDATA3			(0x009c)
+#define SAI_RXDATA0			(0x00a0)
+#define SAI_RXDATA1			(0x00a4)
+#define SAI_RXDATA2			(0x00a8)
+#define SAI_RXDATA3			(0x00ac)
+#define SAI_TXDR2			(0x0100)
+#define SAI_RXDR2			(0x0104)
 
 #endif /* _ROCKCHIP_SAI_H */

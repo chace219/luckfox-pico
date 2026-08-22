@@ -10,6 +10,7 @@
  * V0.0X01.0X04 add enum_frame_interval function.
  * V0.0X01.0X05 add quick stream on/off
  * V0.0X01.0X06 support thunder boot function.
+ * V0.0X01.0X07 support sleep wakeup for aov function.
  */
 
 #include <linux/clk.h>
@@ -33,8 +34,10 @@
 #include <media/v4l2-subdev.h>
 #include <linux/pinctrl/consumer.h>
 #include "../platform/rockchip/isp/rkisp_tb_helper.h"
+#include "cam-tb-setup.h"
+#include "cam-sleep-wakeup.h"
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x06)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x07)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
@@ -114,7 +117,7 @@
 #define OF_CAMERA_HDR_MODE		"rockchip,camera-hdr-mode"
 #define SC401AI_NAME			"sc401ai"
 
-static const char * const sc401ai_supply_names[] = {
+static const char *const sc401ai_supply_names[] = {
 	"avdd",		/* Analog power */
 	"dovdd",	/* Digital I/O power */
 	"dvdd",		/* Digital core power */
@@ -175,9 +178,11 @@ struct sc401ai {
 	const char		*module_name;
 	const char		*len_name;
 	u32			cur_vts;
+	bool			has_init_exp;
 	bool			is_thunderboot;
 	bool			is_first_streamoff;
 	struct preisp_hdrae_exp_s init_hdrae_exp;
+	struct			cam_sw_info *cam_sw_inf;
 };
 
 #define to_sc401ai(sd) container_of(sd, struct sc401ai, subdev)
@@ -446,6 +451,10 @@ static const struct sc401ai_mode supported_modes[] = {
 	},
 };
 
+static const u32 bus_code[] = {
+	MEDIA_BUS_FMT_SBGGR10_1X10,
+};
+
 static const s64 link_freq_menu_items[] = {
 	SC401AI_LINK_FREQ_315,
 	SC401AI_LINK_FREQ_630,
@@ -455,7 +464,7 @@ static int __sc401ai_power_on(struct sc401ai *sc401ai);
 
 /* Write registers up to 4 at a time */
 static int sc401ai_write_reg(struct i2c_client *client, u16 reg,
-			    u32 len, u32 val)
+			     u32 len, u32 val)
 {
 	u32 buf_i, val_i;
 	u8 buf[6];
@@ -628,7 +637,7 @@ static int sc401ai_set_gain_reg(struct sc401ai *sc401ai, u32 gain)
 		ANA_Fine_gain_reg = abs(100 * gain / (Dcg_gainx100 * Coarse_gain) / 16);
 	else
 		DIG_Fine_gain_reg = abs(800 * gain / (Dcg_gainx100 * Coarse_gain *
-							DIG_gain) / ANA_Fine_gainx64);
+						      DIG_gain) / ANA_Fine_gainx64);
 
 	if (sc401ai->is_thunderboot && rkisp_tb_get_state() == RKISP_TB_NG) {
 		sc401ai->is_thunderboot = false;
@@ -676,6 +685,10 @@ sc401ai_find_best_fit(struct v4l2_subdev_format *fmt)
 		if (cur_best_fit_dist == -1 || dist < cur_best_fit_dist) {
 			cur_best_fit_dist = dist;
 			cur_best_fit = i;
+		} else if (dist == cur_best_fit_dist &&
+			   framefmt->code == supported_modes[i].bus_fmt) {
+			cur_best_fit = i;
+			break;
 		}
 	}
 
@@ -757,11 +770,9 @@ static int sc401ai_enum_mbus_code(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_pad_config *cfg,
 				  struct v4l2_subdev_mbus_code_enum *code)
 {
-	struct sc401ai *sc401ai = to_sc401ai(sd);
-
-	if (code->index != 0)
+	if (code->index >= ARRAY_SIZE(bus_code))
 		return -EINVAL;
-	code->code = sc401ai->cur_mode->bus_fmt;
+	code->code = bus_code[code->index];
 
 	return 0;
 }
@@ -814,17 +825,80 @@ static int sc401ai_g_frame_interval(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static const struct sc401ai_mode *sc401ai_find_mode(struct sc401ai *sc401ai, int fps)
+{
+	const struct sc401ai_mode *mode = NULL;
+	const struct sc401ai_mode *match = NULL;
+	int cur_fps = 0;
+	int i = 0;
+
+	for (i = 0; i < ARRAY_SIZE(supported_modes); i++) {
+		mode = &supported_modes[i];
+		if (mode->width == sc401ai->cur_mode->width &&
+		    mode->height == sc401ai->cur_mode->height &&
+		    mode->hdr_mode == sc401ai->cur_mode->hdr_mode &&
+		    mode->bus_fmt == sc401ai->cur_mode->bus_fmt) {
+			cur_fps = DIV_ROUND_CLOSEST(mode->max_fps.denominator, mode->max_fps.numerator);
+			if (cur_fps == fps) {
+				match = mode;
+				break;
+			}
+		}
+	}
+	return match;
+}
+
+static int sc401ai_s_frame_interval(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_frame_interval *fi)
+{
+	struct sc401ai *sc401ai = to_sc401ai(sd);
+	const struct sc401ai_mode *mode = NULL;
+	struct v4l2_fract *fract = &fi->interval;
+	s64 h_blank, vblank_def;
+	int fps;
+
+	if (sc401ai->streaming)
+		return -EBUSY;
+
+	if (fi->pad != 0)
+		return -EINVAL;
+
+	if (fract->numerator == 0) {
+		v4l2_err(sd, "error param, check interval param\n");
+		return -EINVAL;
+	}
+	fps = DIV_ROUND_CLOSEST(fract->denominator, fract->numerator);
+	mode = sc401ai_find_mode(sc401ai, fps);
+	if (mode == NULL) {
+		v4l2_err(sd, "couldn't match fi\n");
+		return -EINVAL;
+	}
+
+	sc401ai->cur_mode = mode;
+
+	h_blank = mode->hts_def - mode->width;
+	__v4l2_ctrl_modify_range(sc401ai->hblank, h_blank,
+				 h_blank, 1, h_blank);
+	vblank_def = mode->vts_def - mode->height;
+	__v4l2_ctrl_modify_range(sc401ai->vblank, vblank_def,
+				 SC401AI_VTS_MAX - mode->height,
+				 1, vblank_def);
+	sc401ai->cur_fps = mode->max_fps;
+
+	return 0;
+}
+
 static int sc401ai_g_mbus_config(struct v4l2_subdev *sd,
-				unsigned int pad_id,
-				struct v4l2_mbus_config *config)
+				 unsigned int pad_id,
+				 struct v4l2_mbus_config *config)
 {
 	struct sc401ai *sc401ai = to_sc401ai(sd);
 	const struct sc401ai_mode *mode = sc401ai->cur_mode;
 	u32 val = 0;
 
 	val = 1 << (sc401ai->lane_num - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
+	      V4L2_MBUS_CSI2_CHANNEL_0 |
+	      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
 
 	if (mode->hdr_mode != NO_HDR)
 		val |= V4L2_MBUS_CSI2_CHANNEL_1;
@@ -869,9 +943,12 @@ static long sc401ai_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 			ret = -1;
 		break;
 	case PREISP_CMD_SET_HDRAE_EXP:
+#if defined(CONFIG_VIDEO_CAM_SLEEP_WAKEUP)
+		memcpy(&sc401ai->cam_sw_inf->hdr_ae, (struct preisp_hdrae_exp_s *)(arg),
+		       sizeof(struct preisp_hdrae_exp_s));
+#endif
 		break;
 	case RKMODULE_SET_QUICK_STREAM:
-
 		stream = *((u32 *)arg);
 
 		if (stream)
@@ -1012,14 +1089,15 @@ static int __sc401ai_start_stream(struct sc401ai *sc401ai)
 	}
 
 	return sc401ai_write_reg(sc401ai->client,
-				SC401AI_REG_CTRL_MODE,
-				SC401AI_REG_VALUE_08BIT,
-				SC401AI_MODE_STREAMING);
+				 SC401AI_REG_CTRL_MODE,
+				 SC401AI_REG_VALUE_08BIT,
+				 SC401AI_MODE_STREAMING);
 
 }
 
 static int __sc401ai_stop_stream(struct sc401ai *sc401ai)
 {
+	sc401ai->has_init_exp = false;
 	if (sc401ai->is_thunderboot) {
 		sc401ai->is_first_streamoff = true;
 		pm_runtime_put(&sc401ai->client->dev);
@@ -1203,6 +1281,47 @@ static void __sc401ai_power_off(struct sc401ai *sc401ai)
 	regulator_bulk_disable(SC401AI_NUM_SUPPLIES, sc401ai->supplies);
 }
 
+#if defined(CONFIG_VIDEO_CAM_SLEEP_WAKEUP)
+static int sc401ai_resume(struct device *dev)
+{
+	int ret;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct sc401ai *sc401ai = to_sc401ai(sd);
+
+	cam_sw_prepare_wakeup(sc401ai->cam_sw_inf, dev);
+
+	usleep_range(4000, 5000);
+	cam_sw_write_array(sc401ai->cam_sw_inf);
+
+	if (__v4l2_ctrl_handler_setup(&sc401ai->ctrl_handler))
+		dev_err(dev, "__v4l2_ctrl_handler_setup fail!");
+
+	if (sc401ai->has_init_exp && sc401ai->cur_mode != NO_HDR) {	// hdr mode
+		ret = sc401ai_ioctl(&sc401ai->subdev, PREISP_CMD_SET_HDRAE_EXP,
+				    &sc401ai->cam_sw_inf->hdr_ae);
+		if (ret) {
+			dev_err(&sc401ai->client->dev, "set exp fail in hdr mode\n");
+			return ret;
+		}
+	}
+	return 0;
+}
+
+static int sc401ai_suspend(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct sc401ai *sc401ai = to_sc401ai(sd);
+
+	cam_sw_write_array_cb_init(sc401ai->cam_sw_inf, client,
+				   (void *)sc401ai->cur_mode->reg_list, (sensor_write_array)sc401ai_write_array);
+	cam_sw_prepare_sleep(sc401ai->cam_sw_inf);
+
+	return 0;
+}
+#endif
+
 static int sc401ai_runtime_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
@@ -1228,7 +1347,7 @@ static int sc401ai_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
 	struct sc401ai *sc401ai = to_sc401ai(sd);
 	struct v4l2_mbus_framefmt *try_fmt =
-				v4l2_subdev_get_try_format(sd, fh->pad, 0);
+		v4l2_subdev_get_try_format(sd, fh->pad, 0);
 	const struct sc401ai_mode *def_mode = &supported_modes[0];
 
 	mutex_lock(&sc401ai->mutex);
@@ -1262,7 +1381,10 @@ static int sc401ai_enum_frame_interval(struct v4l2_subdev *sd,
 
 static const struct dev_pm_ops sc401ai_pm_ops = {
 	SET_RUNTIME_PM_OPS(sc401ai_runtime_suspend,
-			   sc401ai_runtime_resume, NULL)
+	sc401ai_runtime_resume, NULL)
+#if defined(CONFIG_VIDEO_CAM_SLEEP_WAKEUP)
+	SET_LATE_SYSTEM_SLEEP_PM_OPS(sc401ai_suspend, sc401ai_resume)
+#endif
 };
 
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
@@ -1282,6 +1404,7 @@ static const struct v4l2_subdev_core_ops sc401ai_core_ops = {
 static const struct v4l2_subdev_video_ops sc401ai_video_ops = {
 	.s_stream = sc401ai_s_stream,
 	.g_frame_interval = sc401ai_g_frame_interval,
+	.s_frame_interval = sc401ai_s_frame_interval,
 };
 
 static const struct v4l2_subdev_pad_ops sc401ai_pad_ops = {
@@ -1456,9 +1579,9 @@ static int sc401ai_initialize_controls(struct sc401ai *sc401ai)
 	handler->lock = &sc401ai->mutex;
 
 	sc401ai->link_freq = v4l2_ctrl_new_int_menu(handler, NULL,
-				V4L2_CID_LINK_FREQ,
-				ARRAY_SIZE(link_freq_menu_items) - 1, 0,
-				link_freq_menu_items);
+			     V4L2_CID_LINK_FREQ,
+			     ARRAY_SIZE(link_freq_menu_items) - 1, 0,
+			     link_freq_menu_items);
 	__v4l2_ctrl_s_ctrl(sc401ai->link_freq, mode->mipi_freq_idx);
 
 	if (ret < 0)
@@ -1509,6 +1632,7 @@ static int sc401ai_initialize_controls(struct sc401ai *sc401ai)
 	}
 
 	sc401ai->subdev.ctrl_handler = handler;
+	sc401ai->has_init_exp = false;
 	sc401ai->cur_fps = mode->max_fps;
 	sc401ai->cur_vts = mode->vts_def;
 

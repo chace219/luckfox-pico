@@ -15,12 +15,14 @@
 #include <linux/dma-mapping.h>
 #include <linux/iopoll.h>
 #include <linux/interrupt.h>
+#include <linux/mfd/syscon.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/regmap.h>
 #include <linux/slab.h>
 #include <linux/spi/spi-mem.h>
 #include <linux/of_gpio.h>
@@ -117,6 +119,10 @@
 #define  SFC_VER_6			0x6
 #define  SFC_VER_8			0x8
 
+/* Ext ctrl */
+#define SFC_EXT_CTRL			0x34
+#define  SFC_SCLK_X2_BYPASS		BIT(24)
+
 /* Delay line controller resiter */
 #define SFC_DLL_CTRL0			0x3C
 #define SFC_DLL_CTRL0_SCLK_SMP_DLL	BIT(15)
@@ -177,6 +183,16 @@
 
 #define ROCKCHIP_AUTOSUSPEND_DELAY	2000
 
+struct rockchip_sfc_powergood {
+	bool	valid;
+	u32	grf_offset;
+	u8	bits_mask;
+};
+
+struct rockchip_sfc_data {
+	struct rockchip_sfc_powergood powergood;
+};
+
 struct rockchip_sfc {
 	struct device *dev;
 	void __iomem *regbase;
@@ -190,11 +206,15 @@ struct rockchip_sfc {
 	dma_addr_t dma_buffer;
 	struct completion cp;
 	bool use_dma;
+	bool sclk_x2_bypass;
 	u32 max_iosize;
+	u32 max_dll_cells;
 	u32 dll_cells[SFC_MAX_CHIPSELECT_NUM];
 	u16 version;
 	struct gpio_desc **cs_gpiods;
 	struct spi_master *master;
+	struct regmap *grf;
+	const struct rockchip_sfc_data *data;
 };
 
 static int rockchip_sfc_reset(struct rockchip_sfc *sfc)
@@ -233,16 +253,15 @@ static u32 rockchip_sfc_get_max_iosize(struct rockchip_sfc *sfc)
 
 static u32 rockchip_sfc_get_max_dll_cells(struct rockchip_sfc *sfc)
 {
-	switch (rockchip_sfc_get_version(sfc)) {
-	case SFC_VER_8:
-	case SFC_VER_6:
-	case SFC_VER_5:
+	if (sfc->max_dll_cells)
+		return sfc->max_dll_cells;
+
+	if (sfc->version >= SFC_VER_5)
 		return SFC_DLL_CTRL0_DLL_MAX_VER5;
-	case SFC_VER_4:
+	else if (sfc->version == SFC_VER_4)
 		return SFC_DLL_CTRL0_DLL_MAX_VER4;
-	default:
+	else
 		return 0;
-	}
 }
 
 static void rockchip_sfc_set_delay_lines(struct rockchip_sfc *sfc, u16 cells, u8 cs)
@@ -261,18 +280,18 @@ static void rockchip_sfc_set_delay_lines(struct rockchip_sfc *sfc, u16 cells, u8
 
 static int rockchip_sfc_clk_set_rate(struct rockchip_sfc *sfc, unsigned long  speed)
 {
-	if (sfc->version >= SFC_VER_8)
-		return clk_set_rate(sfc->clk, speed * 2);
-	else
+	if (sfc->version < SFC_VER_8 || sfc->sclk_x2_bypass)
 		return clk_set_rate(sfc->clk, speed);
+	else
+		return clk_set_rate(sfc->clk, speed * 2);
 }
 
 static unsigned long rockchip_sfc_clk_get_rate(struct rockchip_sfc *sfc)
 {
-	if (sfc->version >= SFC_VER_8)
-		return clk_get_rate(sfc->clk) / 2;
-	else
+	if (sfc->version < SFC_VER_8 || sfc->sclk_x2_bypass)
 		return clk_get_rate(sfc->clk);
+	else
+		return clk_get_rate(sfc->clk) / 2;
 }
 
 static void rockchip_sfc_irq_unmask(struct rockchip_sfc *sfc, u32 mask)
@@ -297,11 +316,18 @@ static void rockchip_sfc_irq_mask(struct rockchip_sfc *sfc, u32 mask)
 
 static int rockchip_sfc_init(struct rockchip_sfc *sfc)
 {
+	u32 reg;
+
 	writel(0, sfc->regbase + SFC_CTRL);
 	writel(0xFFFFFFFF, sfc->regbase + SFC_ICLR);
 	rockchip_sfc_irq_mask(sfc, 0xFFFFFFFF);
 	if (rockchip_sfc_get_version(sfc) >= SFC_VER_4)
 		writel(SFC_LEN_CTRL_TRB_SEL, sfc->regbase + SFC_LEN_CTRL);
+	if (rockchip_sfc_get_version(sfc) >= SFC_VER_8 && sfc->sclk_x2_bypass) {
+		reg = readl(sfc->regbase + SFC_EXT_CTRL);
+		reg |= SFC_SCLK_X2_BYPASS;
+		writel(reg, sfc->regbase + SFC_EXT_CTRL);
+	}
 
 	return 0;
 }
@@ -362,6 +388,11 @@ static int rockchip_sfc_xfer_setup(struct rockchip_sfc *sfc,
 {
 	u32 ctrl = 0, cmd = 0;
 	u8 cs = mem->spi->chip_select;
+	u32 voltage;
+
+#ifdef CONFIG_MTD_SPI_NOR_AUTO_MERGE
+	cs = mem->spi->cs_gpio;
+#endif
 
 	/* set CMD */
 	cmd = op->cmd.opcode;
@@ -414,6 +445,15 @@ static int rockchip_sfc_xfer_setup(struct rockchip_sfc *sfc,
 		op->dummy.nbytes, op->dummy.buswidth);
 	dev_dbg(sfc->dev, "sfc ctrl=%x cmd=%x addr=%llx len=%x cs=%d\n",
 		ctrl, cmd, op->addr.val, len, cs);
+
+	if (sfc->data && sfc->data->powergood.valid) {
+		if (regmap_read_poll_timeout(sfc->grf, sfc->data->powergood.grf_offset,
+					     voltage, voltage & sfc->data->powergood.bits_mask,
+					     1000, jiffies_to_usecs(HZ))) {
+			dev_err(sfc->dev, "wait for powergood failed\n");
+			return -EIO;
+		}
+	}
 
 	writel(ctrl, sfc->regbase + cs * SFC_CS1_REG_OFFSET + SFC_CTRL);
 	writel(cmd, sfc->regbase + SFC_CMD);
@@ -685,6 +725,11 @@ static void rockchip_sfc_delay_lines_tuning(struct rockchip_sfc *sfc, struct spi
 			left, right, sfc->dll_cells[cs], sfc->speed[cs],
 			rockchip_sfc_get_max_dll_cells(sfc), rockchip_sfc_get_version(sfc));
 		rockchip_sfc_set_delay_lines(sfc, (u16)sfc->dll_cells[cs], cs);
+#ifdef CONFIG_MTD_SPI_NOR_AUTO_MERGE
+		sfc->speed[1] = sfc->cur_speed;
+		sfc->dll_cells[1] = sfc->dll_cells[0];
+		rockchip_sfc_set_delay_lines(sfc, (u16)sfc->dll_cells[1], 1);
+#endif
 	} else {
 		dev_err(sfc->dev, "%d %d dll training failed in %dMHz, reduce the frequency\n",
 			left, right, sfc->speed[cs]);
@@ -703,6 +748,10 @@ static int rockchip_sfc_exec_mem_op(struct spi_mem *mem, const struct spi_mem_op
 	u32 len = op->data.nbytes;
 	int ret;
 	u8 cs = mem->spi->chip_select;
+
+#ifdef CONFIG_MTD_SPI_NOR_AUTO_MERGE
+	cs = mem->spi->cs_gpio;
+#endif
 
 	ret = pm_runtime_get_sync(sfc->dev);
 	if (ret < 0) {
@@ -893,12 +942,12 @@ static int rockchip_sfc_probe(struct platform_device *pdev)
 
 	sfc->use_dma = !of_property_read_bool(sfc->dev->of_node,
 					      "rockchip,sfc-no-dma");
+	sfc->sclk_x2_bypass = of_property_read_bool(sfc->dev->of_node,
+						    "rockchip,sclk-x2-bypass");
 
-	ret = rockchip_sfc_get_gpio_descs(master, sfc);
-	if (ret) {
-		dev_err(&pdev->dev, "Failed to get gpio_descs\n");
-		return ret;
-	}
+	device_property_read_u32(&pdev->dev, "rockchip,max-dll", &sfc->max_dll_cells);
+	if (sfc->max_dll_cells > SFC_DLL_CTRL0_DLL_MAX_VER5)
+		sfc->max_dll_cells = SFC_DLL_CTRL0_DLL_MAX_VER5;
 
 	ret = clk_prepare_enable(sfc->hclk);
 	if (ret) {
@@ -927,15 +976,38 @@ static int rockchip_sfc_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	sfc->data = device_get_match_data(&pdev->dev);
+	if (sfc->data) {
+		sfc->grf = syscon_regmap_lookup_by_phandle(dev->of_node, "rockchip,grf");
+		if (IS_ERR_OR_NULL(sfc->grf)) {
+			ret = -EINVAL;
+			dev_err(dev, "Failed to find grf\n");
+
+			goto err_irq;
+		}
+	}
+
 	platform_set_drvdata(pdev, sfc);
 
-	if (IS_ENABLED(CONFIG_ROCKCHIP_THUNDER_BOOT)) {
+	if (IS_ENABLED(CONFIG_ROCKCHIP_THUNDER_BOOT_SFC)) {
 		u32 status;
 
-		if (readl_poll_timeout(sfc->regbase + SFC_SR, status,
-				       !(status & SFC_SR_IS_BUSY), 10,
-				       5000 * USEC_PER_MSEC))
+		ret = readl_poll_timeout(sfc->regbase + SFC_SR, status,
+					 !(status & SFC_SR_IS_BUSY), 100,
+					 5000 * USEC_PER_MSEC);
+		if (ret) {
 			dev_err(dev, "Wait for SFC idle timeout!\n");
+		} else {
+			readl_poll_timeout(sfc->regbase + SFC_RISR, status,
+					   !(status & SFC_RISR_DMA), 10,
+					   100 * USEC_PER_MSEC);
+		}
+	}
+
+	ret = rockchip_sfc_get_gpio_descs(master, sfc);
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to get gpio_descs\n");
+		goto err_irq;
 	}
 
 	ret = rockchip_sfc_init(sfc);
@@ -1065,7 +1137,17 @@ static const struct dev_pm_ops rockchip_sfc_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(rockchip_sfc_suspend, rockchip_sfc_resume)
 };
 
+static const struct rockchip_sfc_data rv1103b_fspi_data = {
+	.powergood = {
+		.valid = true,
+		.grf_offset = 0x60030,
+		.bits_mask = BIT(3),
+	},
+};
+
 static const struct of_device_id rockchip_sfc_dt_ids[] = {
+	{ .compatible = "rockchip,fspi",},
+	{ .compatible = "rockchip,rv1103b-fspi", .data = &rv1103b_fspi_data},
 	{ .compatible = "rockchip,sfc"},
 	{ /* sentinel */ }
 };

@@ -40,6 +40,27 @@
 		};
 	};
 
+	bt_sco: bt-sco {
+		status = "disabled";
+		compatible = "delta,dfbmcs320";
+		#sound-dai-cells = <1>;
+	};
+
+	bt_sound: bt-sound {
+		status = "disabled";
+		compatible = "simple-audio-card";
+		simple-audio-card,format = "dsp_a";
+		simple-audio-card,bitclock-inversion;
+		simple-audio-card,mclk-fs = <256>;
+		simple-audio-card,name = "rockchip,bt";
+		simple-audio-card,cpu {
+			sound-dai = <&sai0>;
+		};
+		simple-audio-card,codec {
+			sound-dai = <&bt_sco 1>;
+		};
+	};
+
 	dc_12v: dc-12v {
 		compatible = "regulator-fixed";
 		regulator-name = "dc_12v";
@@ -151,16 +172,6 @@
 		pinctrl-0 = <&vcc5v0_host_en>;
 	};
 
-	vdd_fixed: vdd-fixed {
-		compatible = "regulator-fixed";
-		regulator-name = "vdd_fixed";
-		regulator-min-microvolt = <900000>;
-		regulator-max-microvolt = <900000>;
-		regulator-always-on;
-		regulator-boot-on;
-		vin-supply = <&vcc5v0_sys>;
-	};
-
 	vdd_logic: vdd-logic {
 		compatible = "pwm-regulator";
 		pwms = <&pwm2 0 5000 1>;
@@ -247,7 +258,16 @@
 	status = "okay";
 };
 
+&dfi {
+	status = "okay";
+};
+
 &display_subsystem {
+	status = "okay";
+};
+
+&dmc {
+	center-supply = <&vdd_logic>;
 	status = "okay";
 };
 
@@ -256,7 +276,12 @@
 };
 
 &gpu {
-	mali-supply = <&vdd_fixed>;
+	mali-supply = <&vdd_logic>;
+	status = "okay";
+};
+
+&gpu_bus {
+	bus-supply = <&vdd_logic>;
 	status = "okay";
 };
 
@@ -367,6 +392,11 @@
 		| RKPM_PWM1_M0_REGULATOR_EN
 		)
 	>;
+};
+
+&sai0 {
+	pinctrl-0 = <&i2s0m0_lrck &i2s0m0_sclk &i2s0m0_sdi &i2s0m0_sdo>;
+	status = "disabled";
 };
 
 &sai2 {

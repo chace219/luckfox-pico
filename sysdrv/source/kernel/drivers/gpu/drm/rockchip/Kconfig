@@ -20,15 +20,9 @@ config DRM_ROCKCHIP
 
 if DRM_ROCKCHIP
 
-config ROCKCHIP_DRM_CUBIC_LUT
-	bool "Support 3D cubic LUT"
-	depends on NO_GKI
-	help
-	  This add properties to support provision of a 3D cubic
-	  look up table, allowing for color specific adjustments.
-
 config ROCKCHIP_DRM_DEBUG
 	bool "Rockchip DRM debug"
+	default y if !ROCKCHIP_MINI_KERNEL
 	depends on DEBUG_FS
 	help
 	  This option add a debug node to dump buf from userspace
@@ -163,6 +157,5 @@ config ROCKCHIP_DW_HDCP2
 	  Designware HDCP2 Controller.
 
 source "drivers/gpu/drm/rockchip/rk618/Kconfig"
-source "drivers/gpu/drm/rockchip/rk628/Kconfig"
 
 endif

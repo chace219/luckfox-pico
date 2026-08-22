@@ -283,6 +283,33 @@ struct arm_smccc_res sip_smc_get_amp_info(u32 sub_func_id, u32 arg1)
 }
 EXPORT_SYMBOL_GPL(sip_smc_get_amp_info);
 
+struct arm_smccc_res sip_smc_get_pvtpll_info(u32 sub_func_id, u32 arg1)
+{
+	struct arm_smccc_res res;
+
+	/*
+	 * res.a0: error code(0: success, !0: error).
+	 * res.a1: low temp config flag(0: support, !0: don't support).
+	 */
+	arm_smccc_smc(SIP_PVTPLL_CFG, sub_func_id, arg1, 0, 0, 0, 0, 0, &res);
+	return res;
+}
+EXPORT_SYMBOL_GPL(sip_smc_get_pvtpll_info);
+
+struct arm_smccc_res sip_smc_pvtpll_config(u32 sub_func_id, u32 arg1, u32 arg2,
+					   u32 arg3, u32 arg4, u32 arg5, u32 arg6)
+{
+	struct arm_smccc_res res;
+
+	/*
+	 * res.a0: error code(0: success, !0: error).
+	 */
+	arm_smccc_smc(SIP_PVTPLL_CFG, sub_func_id, arg1, arg2, arg3, arg4, arg5,
+		      arg6, &res);
+	return res;
+}
+EXPORT_SYMBOL_GPL(sip_smc_pvtpll_config);
+
 void __iomem *sip_hdcp_request_share_memory(int id)
 {
 	static void __iomem *base;
@@ -471,16 +498,21 @@ static ulong cpu_logical_map_mpidr(u32 cpu)
 {
 #ifdef MODULE
 	/* Empirically, local "cpu_logical_map()" for rockchip platforms */
-	ulong mpidr = 0x00;
+	ulong mpidr = read_cpuid_mpidr();
 
-	if (cpu < 4)
-		/* 0x00, 0x01, 0x02, 0x03 */
-		mpidr = cpu;
-	else if (cpu < 8)
-		/* 0x100, 0x101, 0x102, 0x103 */
-		mpidr = 0x100 | (cpu - 4);
-	else
-		pr_err("Unsupported map cpu: %d\n", cpu);
+	if (mpidr & MPIDR_MT_BITMASK) {
+		/* 0x100, 0x200, 0x300, 0x400 ... */
+		mpidr = (cpu & 0xff) << 8;
+	} else {
+		if (cpu < 4)
+			/* 0x00, 0x01, 0x02, 0x03 */
+			mpidr = cpu;
+		else if (cpu < 8)
+			/* 0x100, 0x101, 0x102, 0x103 */
+			mpidr = 0x100 | (cpu - 4);
+		else
+			pr_err("Unsupported map cpu: %d\n", cpu);
+	}
 
 	return mpidr;
 #else
@@ -622,6 +654,16 @@ int sip_hdcpkey_init(u32 hdcp_id)
 }
 EXPORT_SYMBOL_GPL(sip_hdcpkey_init);
 
+int sip_smc_mcu_config(unsigned long mcu_id,
+		       unsigned long func,
+		       unsigned long arg2)
+{
+	struct arm_smccc_res res;
+
+	res = __invoke_sip_fn_smc(SIP_MCU_CFG, mcu_id, func, arg2);
+	return res.a0;
+}
+EXPORT_SYMBOL_GPL(sip_smc_mcu_config);
 /******************************************************************************/
 #ifdef CONFIG_ARM
 static __init int sip_firmware_init(void)

@@ -14,13 +14,14 @@ on a trigger, not a date.
 
 | | Version | Local delta | NVD matches |
 |---|---|---|---|
-| Kernel | 5.10.160, vendored in-tree | 20 commits / 14 files / +2539/-11 | ~5100 (1683 at CVSS ≥ 7.0), `report-only` |
+| Kernel | **5.10.252** in-tree since 2026-08-22 (was 5.10.160) | carried as the six-patch series in `kernel-port/` | **2867**, `report-only` (was **5155**) |
 | U-Boot | 2017.09 Rockchip fork | **none** — all 7 commits are Luckfox's | 41, `report-only` |
 
 Both are `MODE=report-only` in `cpe-extra.csv` on the stated grounds that a
 vendor kernel is remediated by moving its base, not by dispositioning five
-thousand records. That reasoning is sound and unchanged. What has changed is
-that the base is about to stop receiving fixes at all.
+thousand records. That reasoning is sound and unchanged — and the refresh
+below is it being acted on rather than merely asserted. What forced the timing
+is that 5.10.160 was about to stop receiving fixes at all.
 
 ## The date that forces it
 
@@ -83,6 +84,47 @@ Extracted, curated and **verified** as a six-patch series in
 it reproduces the current kernel tree byte-for-byte. The procedure, and an
 honest account of which steps are real work, are in that directory's README.
 
+**Measured against the real target 2026-08-21**, which is better news than
+the headline numbers suggest. Rockchip's `develop-5.10` at 5.10.252 differs
+from this tree in **10,391 files** — but that is 92 stable releases touching
+the rest of the kernel, which is the security content we are going for. On
+the path this board actually depends on the divergence is almost nil:
+
+| | Divergence |
+|---|---|
+| `rv1106-pinctrl.dtsi` | **byte-identical** |
+| `rv1106.dtsi` | **one node**, 7 diff lines of 1558 |
+
+Every node the Ultra board DTS references (`spi0`, `npu`, `i2c3`, `gmac`)
+exists in both. The hand-carry set is **17 Luckfox DTS/DTSI files and 9
+config files**, and the dtb builds by pattern rule so no Makefile wiring
+moves with them.
+
+### The OTP node, which is the one dangerous difference
+
+That single divergent node in `rv1106.dtsi` is the **OTP controller's clock
+list** — and the SoC OTP is one of the two sources the secrets sidecar is
+keyed on (`core/secretbox.c`, HKDF over OTP + eMMC CID). The two trees are
+each internally consistent and disagree with each other:
+
+| Tree | `rockchip-otp.c` expects | `rv1106.dtsi` provides |
+|---|---|---|
+| Luckfox 5.10.160 | 6 — `usr, sbpi, apb, phy, arb, pmc` | 6 |
+| Rockchip 5.10.252 | 4 — `usr, sbpi, apb, phy` | 4 |
+
+**Take Rockchip's driver and its dtsi node together. Do not carry Luckfox's
+OTP node across.** The tempting move — preserving "our" board files wholesale
+— puts a 6-clock dtsi node under a 4-clock driver, or worse the reverse:
+`clk_bulk_get` then asks for clocks the node does not name, the OTP probe
+fails, and `secrets_at_rest.mode` degrades **with no error anyone would
+see**. A security control regressing silently is the exact failure shape this
+programme keeps recording, and this one would survive every host test,
+because the host suite fakes the binding sources.
+
+So `secrets_at_rest.mode = encrypted` is a **required bench assertion after
+the port**, not an assumption. It is cheap — one field in
+`diagnostics.json` — and it is the only way the claim is checkable.
+
 ## U-Boot: leave it
 
 Zero local changes, so there is nothing to port and no drift to lose. It is
@@ -115,10 +157,66 @@ RV1106 base on ≥ 6.6, or mainline RV1106 gaining GMAC and NPU. Fall back to
 contractually requiring a non-EOL kernel. Either makes 6.1 necessary sooner
 and the driver-port cost has to be funded rather than avoided.
 
+## Status: built, confirmed on hardware, migrated in-tree
+
+**2026-08-21** — the port was executed and **built clean at 5.10.252**:
+`make kernel` and `make drv` both exit 0, all four carried drivers compile
+untouched, and the dtb's OTP node came out as the matched 4-clock pair. Full
+measurements in [`kernel-port/README.md`](kernel-port/README.md).
+
+**2026-08-21, on the board** — a unit was flashed with the 5.10.252 image and
+**T1S, the OPC UA server and the CAN gateway were confirmed working.** That is
+the bench evidence this plan was waiting on: the claim is no longer "it
+compiles".
+
+**2026-08-22** — 5.10.252 was **migrated in-tree as the default kernel**.
+`sysdrv/source/kernel` is now the merged tree (Rockchip `develop-5.10` + the
+17-file carry set + the six patches), `sysdrv/Makefile.param` is unmodified
+vendor code, and a plain `./build.sh` produces a 5.10.252 image with no
+environment variable, staging directory or objects redirection. Rebuilt and
+re-verified from the migrated tree: `Linux version 5.10.252`, A/B FIT
+byte-identical to the packed `boot.img`, rootfs carrying only
+`/lib/modules/5.10.252/`. The migration is **10,217 files changed** — 9,915
+modified, 302 deleted, 1,044 added — which is what a 92-release stable bump
+looks like.
+
+Three defconfig symbols were dropped in the move, all Luckfox-local drivers
+absent from Rockchip's tree and none on this product's path (`OF_DTBO`,
+`USB_SERIAL_CH343`, `ROCKCHIP_DVBM_PROC_FS`). Letting them go is a recorded
+decision, not an oversight.
+
+The build procedure now lives in
+[`release-build-runbook.md`](release-build-runbook.md), which also covers the
+`.swu` and the kernel/module cross-version hazard.
+
+**Still open: `secrets_at_rest.mode`.** The hardware pass covered the
+networking and protocol stacks; it did not read back the one field the OTP
+clock-list finding makes load-bearing. Until `diagnostics.json` reports
+`mode = encrypted` on a 5.10.252 unit, that specific claim rests on a dtb
+inspection rather than on the device. It is one command — see the runbook.
+
 ## Owed
 
-- The refresh itself, per `kernel-port/README.md`, then a bench pass and a
-  reflash — **before first shipment**.
-- `./build.sh cve` before and after, recorded. The count will fall; by how
-  much is not predictable from here and should not be guessed at.
+- ~~The refresh itself, per `kernel-port/README.md`.~~ **Built 2026-08-21,
+  confirmed on hardware the same day (T1S, OPC UA, CAN), migrated in-tree
+  2026-08-22.** The reflash requirement stands for any unit already carrying
+  5.10.160 — the updater cannot deliver a kernel.
+- **`secrets_at_rest.mode = encrypted` read off a 5.10.252 unit** — the one
+  bench assertion the confirmed pass did not cover.
+- ~~`./build.sh cve` before and after, recorded.~~ **Done 2026-08-21**, same
+  image and same NVD cache, only the `cpe-extra.csv` version differing:
+
+  | | Kernel matches | Gate |
+  |---|---|---|
+  | 5.10.160 | **5155** | passed, 0 blocking |
+  | 5.10.252 | **2867** | passed, 0 blocking |
+
+  **2288 records retired — 44%** — by 92 stable releases, for a port in which
+  not one driver source needed editing. Nothing else moved: 68 monitor, 32
+  suppressed, 41 of 69 components checked, both runs. U-Boot stays at 41,
+  as expected from a decision not to touch it.
+
+  The residual 2867 is still dominated by subsystems this SoC configuration
+  does not build, so the row stays `report-only` on unchanged grounds. The
+  number is evidence for the re-base *cadence*, not for a clean kernel.
 - Compliance-plan item 5d and both Annex I matrices updated when it lands.

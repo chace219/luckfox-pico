@@ -6,8 +6,10 @@
 
 #include <linux/acpi.h>
 #include <linux/clk.h>
+#include <linux/delay.h>
 #include <linux/dmaengine.h>
 #include <linux/interrupt.h>
+#include <linux/ioctl.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -15,8 +17,11 @@
 #include <linux/pinctrl/devinfo.h>
 #include <linux/platform_device.h>
 #include <linux/spi/spi.h>
+#include <linux/uaccess.h>
 #include <linux/pm_runtime.h>
 #include <linux/scatterlist.h>
+
+#include <uapi/linux/rk-spi.h>
 
 #define DRIVER_NAME "rockchip-spi"
 
@@ -159,18 +164,16 @@
 /* max sclk of driver strength 4mA */
 #define IO_DRIVER_4MA_MAX_SCLK_OUT	24000000U
 
-/*
- * SPI_CTRLR1 is 16-bits, so we should support lengths of 0xffff + 1. However,
- * the controller seems to hang when given 0x10000, so stick with this for now.
- */
-#define ROCKCHIP_SPI_MAX_TRANLEN		0xffff
-
 /* 2 for native cs, 2 for cs-gpio */
 #define ROCKCHIP_SPI_MAX_CS_NUM			4
 #define ROCKCHIP_SPI_VER2_TYPE1			0x05EC0002
 #define ROCKCHIP_SPI_VER2_TYPE2			0x00110002
+#define ROCKCHIP_SPI_VER3			0x03110003
 
 #define ROCKCHIP_SPI_REGISTER_SIZE		0x1000
+
+#define ROCKCHIP_SPI_XFER_TIMEOUT_MS		4000
+#define ROCKCHIP_AUTOSUSPEND_TIMEOUT		500
 
 enum rockchip_spi_xfer_mode {
 	ROCKCHIP_SPI_DMA,
@@ -199,6 +202,7 @@ struct rockchip_spi {
 	unsigned int rx_left;
 
 	atomic_t state;
+	struct completion xfer_done;
 
 	u32 version;
 	/*depth of the FIFO buffer */
@@ -207,18 +211,23 @@ struct rockchip_spi {
 	u32 freq;
 	/* speed of io rate */
 	u32 speed_hz;
+	u32 max_transfer_size;
+	u8 tx_idle_type;
 
 	u8 n_bytes;
 	u8 rsd;
 	u8 csm;
 	bool poll; /* only support transfer data by cpu polling */
+	bool retry_poll; /* SPI adjustment when the system irq abnormally */
+	bool retry_poll_active;
 
 	bool cs_asserted[ROCKCHIP_SPI_MAX_CS_NUM];
 
 	struct pinctrl_state *high_speed_state;
-	bool slave_abort;
+	bool slave_aborted;
 	bool cs_inactive; /* spi slave tansmition stop when cs inactive */
 	bool cs_high_supported; /* native CS supports active-high polarity */
+	struct gpio_desc *ready; /* spi slave transmission ready */
 
 	struct spi_transfer *xfer; /* Store xfer temporarily */
 	phys_addr_t base_addr_phy;
@@ -236,28 +245,30 @@ static inline void spi_enable_chip(struct rockchip_spi *rs, bool enable)
 static inline void wait_for_tx_idle(struct rockchip_spi *rs, bool slave_mode)
 {
 	unsigned long timeout = jiffies + msecs_to_jiffies(5);
-	u32 busy = SR_BUSY;
+	u32 bit_field = SR_BUSY;
+	u32 idle_val = 0;
+	uint32_t speed, us;
 
-	if (slave_mode && rs->version == ROCKCHIP_SPI_VER2_TYPE2)
-		busy = SR_SLAVE_TX_BUSY;
+	if (slave_mode && rs->tx_idle_type == 1) {
+		bit_field = SR_SLAVE_TX_BUSY;
+		idle_val = 0;
+	} else if (slave_mode) {
+		bit_field = SR_TF_EMPTY;
+		idle_val = SR_TF_EMPTY;
+	}
 
 	do {
-		if (!(readl_relaxed(rs->regs + ROCKCHIP_SPI_SR) & busy))
+		if ((readl_relaxed(rs->regs + ROCKCHIP_SPI_SR) & bit_field) == idle_val) {
+			if (bit_field == SR_TF_EMPTY) {
+				speed = rs->speed_hz;
+				us = (8 * 1000000 / speed) * 2 + 1;
+				udelay(us);
+			}
 			return;
+		}
 	} while (!time_after(jiffies, timeout));
 
 	dev_warn(rs->dev, "spi controller is in busy state!\n");
-}
-
-static u32 get_fifo_len(struct rockchip_spi *rs)
-{
-	switch (rs->version) {
-	case ROCKCHIP_SPI_VER2_TYPE1:
-	case ROCKCHIP_SPI_VER2_TYPE2:
-		return 64;
-	default:
-		return 32;
-	}
 }
 
 static void rockchip_spi_set_cs(struct spi_device *spi, bool enable)
@@ -296,6 +307,8 @@ static void rockchip_spi_handle_err(struct spi_controller *ctlr,
 {
 	struct rockchip_spi *rs = spi_controller_get_devdata(ctlr);
 
+	if (rs->retry_poll)
+		dev_err(rs->dev, "poll=%d-%d\n", rs->poll, rs->retry_poll_active);
 	dev_err(rs->dev, "state=%x\n", atomic_read(&rs->state));
 	dev_err(rs->dev, "tx_left=%x\n", rs->tx_left);
 	dev_err(rs->dev, "rx_left=%x\n", rs->rx_left);
@@ -315,6 +328,9 @@ static void rockchip_spi_handle_err(struct spi_controller *ctlr,
 
 	if (atomic_read(&rs->state) & RXDMA)
 		dmaengine_terminate_async(ctlr->dma_rx);
+	atomic_set(&rs->state, 0);
+	if (rs->retry_poll)
+		rs->retry_poll_active = true;
 }
 
 static void rockchip_spi_pio_writer(struct rockchip_spi *rs)
@@ -392,7 +408,7 @@ static irqreturn_t rockchip_spi_isr(int irq, void *dev_id)
 		spi_enable_chip(rs, false);
 		writel_relaxed(0, rs->regs + ROCKCHIP_SPI_IMR);
 		writel_relaxed(0xffffffff, rs->regs + ROCKCHIP_SPI_ICR);
-		spi_finalize_current_transfer(ctlr);
+		complete(&rs->xfer_done);
 	}
 
 	return IRQ_HANDLED;
@@ -427,7 +443,7 @@ static void rockchip_spi_dma_rxcb(void *data)
 	struct rockchip_spi *rs = spi_controller_get_devdata(ctlr);
 	int state = atomic_fetch_andnot(RXDMA, &rs->state);
 
-	if (state & TXDMA && !rs->slave_abort)
+	if (state & TXDMA && !rs->slave_aborted)
 		return;
 
 	if (rs->cs_inactive)
@@ -436,7 +452,7 @@ static void rockchip_spi_dma_rxcb(void *data)
 	spi_enable_chip(rs, false);
 	writel_relaxed(0, rs->regs + ROCKCHIP_SPI_IMR);
 	writel_relaxed(0xffffffff, rs->regs + ROCKCHIP_SPI_ICR);
-	spi_finalize_current_transfer(ctlr);
+	complete(&rs->xfer_done);
 }
 
 static void rockchip_spi_dma_txcb(void *data)
@@ -445,7 +461,7 @@ static void rockchip_spi_dma_txcb(void *data)
 	struct rockchip_spi *rs = spi_controller_get_devdata(ctlr);
 	int state = atomic_fetch_andnot(TXDMA, &rs->state);
 
-	if (state & RXDMA && !rs->slave_abort)
+	if (state & RXDMA && !rs->slave_aborted)
 		return;
 
 	/* Wait until the FIFO data completely. */
@@ -454,15 +470,15 @@ static void rockchip_spi_dma_txcb(void *data)
 	spi_enable_chip(rs, false);
 	writel_relaxed(0, rs->regs + ROCKCHIP_SPI_IMR);
 	writel_relaxed(0xffffffff, rs->regs + ROCKCHIP_SPI_ICR);
-	spi_finalize_current_transfer(ctlr);
+	complete(&rs->xfer_done);
 }
 
 static u32 rockchip_spi_calc_burst_size(u32 data_len)
 {
 	u32 i;
 
-	/* burst size: 1, 2, 4, 8 */
-	for (i = 1; i < 8; i <<= 1) {
+	/* burst size: 1, 2, 4, 8, 16 */
+	for (i = 1; i < 16; i <<= 1) {
 		if (data_len & i)
 			break;
 	}
@@ -559,7 +575,7 @@ static int rockchip_spi_pio_transfer(struct rockchip_spi *rs,
 
 	ms = 8LL * 1000LL * xfer->len;
 	do_div(ms, speed_hz);
-	ms += ms + 200; /* some tolerance */
+	ms += ROCKCHIP_SPI_XFER_TIMEOUT_MS; /* some tolerance */
 
 	if (ms > UINT_MAX || ctlr->slave)
 		ms = UINT_MAX;
@@ -609,14 +625,14 @@ static int rockchip_spi_config(struct rockchip_spi *rs,
 
 	if (slave_mode)
 		cr0 |= CR0_OPM_SLAVE << CR0_OPM_OFFSET;
-	rs->slave_abort = false;
+	rs->slave_aborted = false;
 
 	cr0 |= rs->rsd << CR0_RSD_OFFSET;
 	cr0 |= rs->csm << CR0_CSM_OFFSET;
 	cr0 |= (spi->mode & 0x3U) << CR0_SCPH_OFFSET;
 	if (spi->mode & SPI_LSB_FIRST)
 		cr0 |= CR0_FBM_LSB << CR0_FBM_OFFSET;
-	if (spi->mode & SPI_CS_HIGH)
+	if (spi->mode & SPI_CS_HIGH && !spi->cs_gpiod)
 		cr0 |= BIT(spi->chip_select) << CR0_SOI_OFFSET;
 
 	if (xfer->rx_buf && xfer->tx_buf) {
@@ -723,56 +739,63 @@ static int rockchip_spi_config(struct rockchip_spi *rs,
 
 static size_t rockchip_spi_max_transfer_size(struct spi_device *spi)
 {
-	return ROCKCHIP_SPI_MAX_TRANLEN;
+	struct rockchip_spi *rs = spi_controller_get_devdata(spi->controller);
+
+	return rs->max_transfer_size;
 }
 
 static int rockchip_spi_slave_abort(struct spi_controller *ctlr)
 {
 	struct rockchip_spi *rs = spi_controller_get_devdata(ctlr);
 	u32 rx_fifo_left;
-	struct dma_tx_state state;
-	enum dma_status status;
 
-	/* Get current dma rx point */
-	if (atomic_read(&rs->state) & RXDMA) {
-		dmaengine_pause(ctlr->dma_rx);
-		status = dmaengine_tx_status(ctlr->dma_rx, ctlr->dma_rx->cookie, &state);
-		if (status == DMA_ERROR) {
-			rs->rx = rs->xfer->rx_buf;
-			rs->xfer->len = 0;
-			rx_fifo_left = readl_relaxed(rs->regs + ROCKCHIP_SPI_RXFLR);
-			for (; rx_fifo_left; rx_fifo_left--)
-				readl_relaxed(rs->regs + ROCKCHIP_SPI_RXDR);
-			goto out;
-		} else {
-			rs->rx += rs->xfer->len - rs->n_bytes * state.residue;
+	/* Flush rx fifo */
+	rx_fifo_left = readl_relaxed(rs->regs + ROCKCHIP_SPI_RXFLR);
+	for (; rx_fifo_left; rx_fifo_left--)
+		readl_relaxed(rs->regs + ROCKCHIP_SPI_RXDR);
+
+	rs->slave_aborted = true;
+	complete(&rs->xfer_done);
+
+	return 0;
+}
+
+static int rockchip_spi_transfer_wait(struct spi_controller *ctlr,
+				      struct spi_transfer *xfer)
+{
+	struct rockchip_spi *rs = spi_controller_get_devdata(ctlr);
+	u32 speed_hz = xfer->speed_hz;
+	unsigned long long ms;
+
+	if (spi_controller_is_slave(ctlr)) {
+		if (wait_for_completion_interruptible(&rs->xfer_done)) {
+			dev_dbg(rs->dev, "RK SPI transfer interrupted\n");
+			return -EINTR;
+		}
+
+		if (rs->slave_aborted) {
+			dev_err(rs->dev, "RK SPI transfer slave abort\n");
+			return -EIO;
+		}
+	} else {
+		if (!speed_hz)
+			speed_hz = 100000;
+
+		ms = 8LL * 1000LL * xfer->len;
+		do_div(ms, speed_hz);
+		ms += ROCKCHIP_SPI_XFER_TIMEOUT_MS; /* some tolerance */
+
+		if (ms > UINT_MAX)
+			ms = UINT_MAX;
+
+		ms = wait_for_completion_timeout(&rs->xfer_done,
+						 msecs_to_jiffies(ms));
+
+		if (ms == 0) {
+			dev_err(rs->dev, "RK SPI transfer timed out\n");
+			return -ETIMEDOUT;
 		}
 	}
-
-	/* Get the valid data left in rx fifo and set rs->xfer->len real rx size */
-	if (rs->rx) {
-		rx_fifo_left = readl_relaxed(rs->regs + ROCKCHIP_SPI_RXFLR);
-		for (; rx_fifo_left; rx_fifo_left--) {
-			u32 rxw = readl_relaxed(rs->regs + ROCKCHIP_SPI_RXDR);
-
-			if (rs->n_bytes == 1)
-				*(u8 *)rs->rx = (u8)rxw;
-			else
-				*(u16 *)rs->rx = (u16)rxw;
-			rs->rx += rs->n_bytes;
-		}
-		rs->xfer->len = (unsigned int)(rs->rx - rs->xfer->rx_buf);
-	}
-
-out:
-	if (atomic_read(&rs->state) & RXDMA)
-		dmaengine_terminate_sync(ctlr->dma_rx);
-	if (atomic_read(&rs->state) & TXDMA)
-		dmaengine_terminate_sync(ctlr->dma_tx);
-	atomic_set(&rs->state, 0);
-	spi_enable_chip(rs, false);
-	rs->slave_abort = true;
-	complete(&ctlr->xfer_completion);
 
 	return 0;
 }
@@ -789,7 +812,7 @@ static int rockchip_spi_transfer_one(
 
 	/* Zero length transfers won't trigger an interrupt on completion */
 	if (!xfer->len) {
-		spi_finalize_current_transfer(ctlr);
+		complete(&rs->xfer_done);
 		return 1;
 	}
 
@@ -801,14 +824,14 @@ static int rockchip_spi_transfer_one(
 		return -EINVAL;
 	}
 
-	if (xfer->len > ROCKCHIP_SPI_MAX_TRANLEN) {
+	if (xfer->len > rs->max_transfer_size) {
 		dev_err(rs->dev, "Transfer is too long (%d)\n", xfer->len);
 		return -EINVAL;
 	}
 
 	rs->n_bytes = xfer->bits_per_word <= 8 ? 1 : 2;
 	rs->xfer = xfer;
-	if (rs->poll) {
+	if (rs->poll || rs->retry_poll_active) {
 		xfer_mode = ROCKCHIP_SPI_POLL;
 	} else {
 		use_dma = ctlr->can_dma ? ctlr->can_dma(ctlr, spi, xfer) : false;
@@ -825,14 +848,32 @@ static int rockchip_spi_transfer_one(
 	rs->tx = xfer->tx_buf;
 	rs->rx = xfer->rx_buf;
 
+	reinit_completion(&rs->xfer_done);
+
 	switch (xfer_mode) {
 	case ROCKCHIP_SPI_POLL:
-		return rockchip_spi_pio_transfer(rs, ctlr, xfer);
+		ret = rockchip_spi_pio_transfer(rs, ctlr, xfer);
+		break;
 	case ROCKCHIP_SPI_DMA:
-		return rockchip_spi_prepare_dma(rs, ctlr, xfer);
+		ret = rockchip_spi_prepare_dma(rs, ctlr, xfer);
+		break;
 	default:
-		return rockchip_spi_prepare_irq(rs, ctlr, xfer);
+		ret = rockchip_spi_prepare_irq(rs, ctlr, xfer);
 	}
+
+	if (rs->ready) {
+		gpiod_set_value(rs->ready, 0);
+		udelay(1);
+		gpiod_set_value(rs->ready, 1);
+	}
+
+	if (ret > 0)
+		ret = rockchip_spi_transfer_wait(ctlr, xfer);
+
+	if (rs->ready)
+		gpiod_set_value(rs->ready, 0);
+
+	return ret;
 }
 
 static bool rockchip_spi_can_dma(struct spi_controller *ctlr,
@@ -854,22 +895,47 @@ static int rockchip_spi_setup(struct spi_device *spi)
 	struct rockchip_spi *rs = spi_controller_get_devdata(spi->controller);
 	u32 cr0;
 
-	if (!spi->cs_gpiod && (spi->mode & SPI_CS_HIGH) && !rs->cs_high_supported) {
-		dev_warn(&spi->dev, "setup: non GPIO CS can't be active-high\n");
-		return -EINVAL;
-	}
-
 	pm_runtime_get_sync(rs->dev);
 
 	cr0 = readl_relaxed(rs->regs + ROCKCHIP_SPI_CTRLR0);
 
 	cr0 |= ((spi->mode & 0x3) << CR0_SCPH_OFFSET);
-	if (spi->mode & SPI_CS_HIGH)
+	if (spi->mode & SPI_CS_HIGH && !spi->cs_gpiod)
 		cr0 |= BIT(spi->chip_select) << CR0_SOI_OFFSET;
+	if (spi_controller_is_slave(spi->controller))
+		cr0 |= CR0_OPM_SLAVE << CR0_OPM_OFFSET;
 
 	writel_relaxed(cr0, rs->regs + ROCKCHIP_SPI_CTRLR0);
 
 	pm_runtime_put(rs->dev);
+
+	return 0;
+}
+
+static long rockchip_spi_misc_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	struct miscdevice *misc = filp->private_data;
+	struct spi_controller *ctlr = dev_get_drvdata(misc->parent);
+	struct rockchip_spi *rs = spi_controller_get_devdata(ctlr);
+	u32 rsd_value;
+
+	switch (cmd) {
+	case ROCKCHIP_SPI_SET_RSD:
+		rsd_value = arg;
+
+		if (rsd_value > CR0_RSD_MAX) {
+			dev_warn(rs->dev, "Invalid RSD value %u, max is %u\n",
+				 rsd_value, CR0_RSD_MAX);
+			return -EINVAL;
+		}
+
+		rs->rsd = (u8)rsd_value;
+		break;
+
+	default:
+		dev_warn(rs->dev, "Unknown ioctl command: 0x%x\n", cmd);
+		return -EINVAL;
+	}
 
 	return 0;
 }
@@ -926,6 +992,8 @@ static const struct file_operations rockchip_spi_misc_fops = {
 	.open		= rockchip_spi_misc_open,
 	.release	= rockchip_spi_misc_release,
 	.mmap		= rockchip_spi_mmap,
+	.unlocked_ioctl	= rockchip_spi_misc_ioctl,
+	.compat_ioctl	= rockchip_spi_misc_ioctl,
 };
 
 static int rockchip_spi_probe(struct platform_device *pdev)
@@ -939,6 +1007,7 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 	bool slave_mode;
 	struct pinctrl *pinctrl = NULL;
 	const struct rockchip_spi_quirks *quirks_cfg;
+	u32 val;
 
 	slave_mode = of_property_read_bool(np, "spi-slave");
 
@@ -952,6 +1021,7 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 	if (!ctlr)
 		return -ENOMEM;
 
+	ctlr->rt = device_property_read_bool(&pdev->dev, "rockchip,rt");
 	platform_set_drvdata(pdev, ctlr);
 
 	rs = spi_controller_get_devdata(ctlr);
@@ -1055,22 +1125,47 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 	}
 
 	rs->version = readl_relaxed(rs->regs + ROCKCHIP_SPI_VERSION);
-	rs->fifo_len = get_fifo_len(rs);
-	if (!rs->fifo_len) {
-		dev_err(&pdev->dev, "Failed to get fifo length\n");
-		ret = -EINVAL;
-		goto err_disable_sclk_in;
+	switch (rs->version) {
+	case ROCKCHIP_SPI_VER3:
+	case ROCKCHIP_SPI_VER2_TYPE2:
+		rs->tx_idle_type = 1;
+		rs->cs_inactive = true;
+		rs->fifo_len = 64;
+		rs->cs_high_supported = true;
+		rs->max_transfer_size = 0xffffffff;
+		break;
+	case ROCKCHIP_SPI_VER2_TYPE1:
+		rs->tx_idle_type = 0;
+		rs->cs_inactive = true;
+		rs->fifo_len = 64;
+		rs->cs_high_supported = false;
+		rs->max_transfer_size = 0xffff;
+		break;
+	default:
+		rs->tx_idle_type = 0;
+		rs->cs_inactive = false;
+		rs->fifo_len = 32;
+		rs->cs_high_supported = false;
+		rs->max_transfer_size = 0xffff;
 	}
+
 	quirks_cfg = device_get_match_data(&pdev->dev);
 	if (quirks_cfg)
 		rs->max_baud_div_in_cpha = quirks_cfg->max_baud_div_in_cpha;
 
+	device_property_read_u32(&pdev->dev, "rockchip,autosuspend-delay-ms", &val);
+	if (val <= 0)
+		val = ROCKCHIP_AUTOSUSPEND_TIMEOUT;
+	pm_runtime_set_autosuspend_delay(&pdev->dev, val);
+	pm_runtime_use_autosuspend(&pdev->dev);
 	pm_runtime_set_active(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
 
 	ctlr->auto_runtime_pm = true;
 	ctlr->bus_num = pdev->id;
 	ctlr->mode_bits = SPI_CPOL | SPI_CPHA | SPI_LOOP | SPI_LSB_FIRST;
+	if (rs->cs_high_supported)
+		ctlr->mode_bits |= SPI_CS_HIGH;
 	if (slave_mode) {
 		ctlr->mode_bits |= SPI_NO_CS;
 		ctlr->slave_abort = rockchip_spi_slave_abort;
@@ -1125,20 +1220,16 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 	}
 
 	rs->poll = device_property_read_bool(&pdev->dev, "rockchip,poll-only");
-
-	switch (rs->version) {
-	case ROCKCHIP_SPI_VER2_TYPE2:
-		rs->cs_high_supported = true;
-		ctlr->mode_bits |= SPI_CS_HIGH;
-		if (slave_mode)
-			rs->cs_inactive = true;
-		else
-			rs->cs_inactive = false;
-		break;
-	default:
-		rs->cs_inactive = false;
-		break;
+	rs->retry_poll = device_property_read_bool(&pdev->dev, "rockchip,failed-retry-poll");
+	init_completion(&rs->xfer_done);
+	if ((rs->poll || rs->retry_poll) && slave_mode) {
+		dev_err(rs->dev, "only support rockchip,poll-only property in master mode\n");
+		ret = -EINVAL;
+		goto err_free_dma_rx;
 	}
+
+	if (!slave_mode || device_property_read_bool(&pdev->dev, "rockchip,cs-inactive-disable"))
+		rs->cs_inactive = false;
 
 	pinctrl = devm_pinctrl_get(&pdev->dev);
 	if (!IS_ERR(pinctrl)) {
@@ -1147,6 +1238,13 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 			dev_warn(&pdev->dev, "no high_speed pinctrl state\n");
 			rs->high_speed_state = NULL;
 		}
+	}
+
+	rs->ready = devm_gpiod_get_optional(&pdev->dev, "ready", GPIOD_OUT_HIGH);
+	if (IS_ERR(rs->ready)) {
+		ret = dev_err_probe(&pdev->dev, PTR_ERR(rs->ready),
+				    "invalid ready-gpios property in node\n");
+		goto err_free_dma_rx;
 	}
 
 	ret = devm_spi_register_controller(&pdev->dev, ctlr);
@@ -1171,7 +1269,8 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 			dev_info(&pdev->dev, "register misc device %s\n", misc_name);
 	}
 
-	dev_info(rs->dev, "probed, poll=%d, rsd=%d\n", rs->poll, rs->rsd);
+	dev_info(rs->dev, "probed, poll=%d, rsd=%d, cs-inactive=%d, ready=%d\n",
+		 rs->poll, rs->rsd, rs->cs_inactive, rs->ready ? 1 : 0);
 
 	return 0;
 
@@ -1248,6 +1347,9 @@ static int rockchip_spi_runtime_resume(struct device *dev)
 	ret = clk_prepare_enable(rs->spiclk);
 	if (ret < 0)
 		clk_disable_unprepare(rs->apb_pclk);
+
+	if (rs->retry_poll)
+		rs->retry_poll_active = false;
 
 	return 0;
 }
