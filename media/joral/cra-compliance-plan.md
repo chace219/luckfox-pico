@@ -58,7 +58,7 @@ was found by executing, not by reading. Per-product detail lives in each tree's
 |---|---|
 | §1 SBOM per release | **met** — `./build.sh sbom`, Buildroot legal-info + hand-declared app layer |
 | §2 Address vulnerabilities without delay | **met at the gate** — triage rows carry an owner and a `REVIEW_BY` date; first expiries 2026-11 |
-| §3 Periodic security testing | **partial** — hardware bench is the loop that finds the real defects; **two** legs outstanding (item 8 b, which needs a broker whose authentication we control, and g, which gates nothing). a, c–f closed 08-19/20; h–k opened and closed 2026-08-21, and that session found three defects no reading of the tree could have shown: a renamed init script shipping twice, a purge whose silence was unreadable, and a command both customer manuals told operators to run that this image has never had |
+| §3 Periodic security testing | **partial** — **CI and parser fuzzing landed 2026-08-23** (`make test` on every push in both repos; a deterministic fuzz replay inside `make test`, coverage-guided libFuzzer nightly; one defect found and fixed — see the dated entry). Owed on that half: the coverage-guided run has never executed, only ~24M/~32M random rounds. The hardware bench is the loop that finds the real defects; **two** legs outstanding (item 8 b, which needs a broker whose authentication we control, and g, which gates nothing). a, c–f closed 08-19/20; h–k opened and closed 2026-08-21, and that session found three defects no reading of the tree could have shown: a renamed init script shipping twice, a purge whose silence was unreadable, and a command both customer manuals told operators to run that this image has never had |
 | §4–6 Coordinated disclosure | **partial — the only deadline-bound row, and nothing on it is engineering's.** Policy, address and the publishable `security.txt` + policy page are all done (08-09, 08-18, `disclosure/`); the **mailbox does not exist yet**, and until mail is received the row is not met |
 
 **The one date that binds: 11 Sep 2026**, ~3.5 weeks out. Nothing on the
@@ -69,6 +69,91 @@ what remains is a Workspace group and a web upload, in that order.
 ## Closed since the audit
 
 *Appended as items land. The table above stays a snapshot of the 2026-07-26 audit.*
+
+- **2026-08-23 — both products, Annex I Part II §3: the suites became a
+  control, and the first parser fuzzing exists.** This row had two named gaps
+  and they were the same gap twice: nothing *ran* anything. `make test` was
+  effective and irregular — the only thing that invoked it was a developer at a
+  terminal remembering to — and neither product had ever fuzzed the parser at
+  its network boundary.
+
+  **CI.** `.github/workflows/ci.yml` in both repositories runs `make test` on
+  every push and pull request, plus a wider deterministic fuzz pass, plus a
+  nightly coverage-guided run. Its scope note is written into the workflow
+  rather than left to be discovered: the two cJSON-linked satisense suites
+  (`test-turn`, `test-config`) link cJSON out of this superproject's Buildroot
+  output, which does not exist in a standalone checkout, so they are **not**
+  covered and stay developer- and bench-run. A green tick means the
+  self-contained suite passed, not that everything did.
+
+  **Fuzzing, and the shape it was given.** One harness per product, at the
+  parser that reads untrusted bytes:
+
+  - media-gateway — `gw_decode()` / `gw_decode_datagram()`, the codec behind
+    the unauthenticated TCP and UDP :8001 listeners;
+  - satisense-edge — the J1939 decode core, whose payload comes off the CAN bus
+    and whose SPN spec comes out of `gateway.json`, i.e. the config-import
+    path. Both untrusted inputs meet in one call, so the harness drives them
+    as one.
+
+  Each harness is written to libFuzzer's ABI and driven two ways, because
+  *effective* and *regular* are different problems. `make fuzz` is
+  clang/libFuzzer and its job is to FIND crashes. `make fuzz-replay` is plain
+  gcc under ASan/UBSan, replays the checked-in corpus and every input that has
+  ever crashed the parser, then runs a fixed-seed mutation pass — under a
+  second, and wired into `make test`, so its job is to make sure a fixed crash
+  STAYS fixed. The gate is the replay. A fuzzer that has to be remembered is
+  the same failure as a control claimed from a document nobody executed.
+
+  The assertions are the promises each decoder's callers already rely on, not
+  "it did not crash" — consumed length never exceeds input length, an accepted
+  message carries a known type and a DLC inside its frame's data area,
+  re-encoding yields exactly the bytes consumed, `j1939_bits_put()` disturbs no
+  neighbouring bit, and so on. Input is copied to a heap allocation of the
+  **exact** length before every call, so an ASan redzone sits immediately after
+  the last valid byte; a padded stack buffer would absorb a one-byte over-read
+  silently, which is the class this is for.
+
+  **It found one defect, in satisense.** `j1939_bits_get()` and
+  `j1939_bits_put()` both bounds-checked with
+  `start_bit_abs + nbits > len * 8` in `int`, which overflows for extreme
+  arguments — undefined behaviour in the one check whose entire job is to
+  reject extreme arguments. Widened to `int64_t`, not `long`: the target is
+  32-bit ARM, where `long` overflows too. **Not reachable from the wire
+  today** — the only in-tree caller is `j1939_spn_raw()`, which passes values
+  `j1939_spn_validate()` has already bounded — so it is a contract violation in
+  exported API rather than a live vulnerability, and the next caller would have
+  inherited it silently. Two corpus entries pin it, and they were checked the
+  only way that means anything: both reproduce the UBSan report against the
+  **unfixed** function and pass against the fixed one. The 112-check J1939
+  suite still passes.
+
+  **The crash-to-regression loop is exercised, not assumed.** A deliberately
+  broken harness was built twice — once failing by `assert()`, once by an ASan
+  heap overflow — to confirm the driver writes the offending bytes to
+  `crashes/` on both paths (a signal handler and
+  `__sanitizer_set_death_callback`), that replaying the saved file reproduces
+  the failure, and that the file alone gates the build once committed. Finding
+  a crash and having no artifact for it would have been the whole exercise
+  wasted.
+
+  **What this row still owes, stated rather than rounded up.** The
+  coverage-guided half has not run anywhere: there is no clang on the build
+  workstation, so what has executed is ~24M (media-gateway) and ~32M
+  (satisense) deterministic random rounds under ASan/UBSan with no finding.
+  Random mutation is weaker than libFuzzer and must not be quoted as if it were
+  the same thing — the first nightly CI run is the evidence for that half. The
+  hardware bench is also still scheduled by hand.
+
+  **One observation filed, not a defect.** `j1939_spn_validate()` accepts any
+  non-zero `scale`, including NaN and infinity, and `j1939_profile_validate()`
+  adds no numeric check — so a hand-edited `gateway.json` can put a non-finite
+  scale on an SPN and the decode will emit non-finite engineering values into
+  the data model. The harness deliberately does not assert finiteness, because
+  whether that is a defect is a product question about config validation rather
+  than a settled contract of the decode core. Recorded here and in
+  `satisense-edge/tests/fuzz/README.md` so it is a known property rather than a
+  discovery during an audit.
 
 - **2026-08-22 — both products, Annex I #7: the A/B update path and the
   downgrade refusal are demonstrated on hardware.** The row had been
