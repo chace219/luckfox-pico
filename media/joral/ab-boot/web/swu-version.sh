@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: LicenseRef-Joral-Proprietary
+# Copyright (c) 2026 Joral LLC. All rights reserved.
 # swu-version.sh — the release identity of a platform image, and its ORDER.
 #
 # One-way door #4 (swupdate-implementation-plan.md, "Item 5"). Until this

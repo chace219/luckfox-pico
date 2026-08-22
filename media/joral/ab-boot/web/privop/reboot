@@ -1,0 +1,23 @@
+#!/bin/sh
+# SPDX-License-Identifier: LicenseRef-Joral-Proprietary
+# Copyright (c) 2026 Joral LLC. All rights reserved.
+# privop/reboot — reboot the unit, detached, after the CGI's response is out.
+#
+# The CGI has already refused this while an update operation holds the lock;
+# the two-second delay lets httpd flush the JSON reply. 9>&- so the detached
+# rebooter does not inherit the operation lock and hold it for its short life
+# (or longer, if the reboot stalls).
+#
+# Shared verb: byte-identical in both product trees. With SWU_PREFIX set
+# (tests/test_privop.sh) the reboot is inert — nothing outside a prefix tree
+# may move — which is the same idiom the factory-reset scripts use.
+set -u
+[ $# -eq 0 ] || { echo usage; exit 2; }
+if [ -n "${SWU_PREFIX:-}" ]; then
+	echo "reboot (inert: SWU_PREFIX set)" > "$SWU_PREFIX/tmp/reboot.requested" 2>/dev/null
+	echo ok
+	exit 0
+fi
+setsid sh -c 'sleep 2; sync; reboot' >/dev/null 2>&1 </dev/null 9>&- &
+echo ok
+exit 0

@@ -1,0 +1,29 @@
+#!/bin/sh
+# SPDX-License-Identifier: LicenseRef-Joral-Proprietary
+# Copyright (c) 2026 Joral LLC. All rights reserved.
+# privop/misc-status — print the A/B slot record (misc_ab status).
+#
+# The misc partition is a block device the console cannot read; this verb
+# finds it the same way the initramfs and S99ab-health do (by PARTNAME in
+# sysfs) and prints misc_ab's one-key-per-line status. It takes NO arguments:
+# the device is never chosen by the caller.
+#
+# Shared verb: byte-identical in both product trees. SWU_PREFIX roots the
+# paths for tests/test_privop.sh — on a device the dispatcher scrubs the
+# environment, so it is always empty there.
+set -u
+R="${SWU_PREFIX:-}"
+[ $# -eq 0 ] || { echo "usage: misc-status" >&2; exit 2; }
+
+find_part() {
+	for u in "$R"/sys/block/mmcblk*/mmcblk*/uevent; do
+		[ -f "$u" ] || continue
+		if grep -q "^PARTNAME=$1$" "$u"; then
+			echo "$R/dev/$(grep '^DEVNAME=' "$u" | cut -d= -f2)"
+			return 0
+		fi
+	done
+	return 1
+}
+MISC=$(find_part misc) || { echo "misc-status: no misc partition (single-slot layout)" >&2; exit 1; }
+exec misc_ab status "$MISC"

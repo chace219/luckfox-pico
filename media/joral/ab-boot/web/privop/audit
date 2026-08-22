@@ -1,0 +1,27 @@
+#!/bin/sh
+# SPDX-License-Identifier: LicenseRef-Joral-Proprietary
+# Copyright (c) 2026 Joral LLC. All rights reserved.
+# privop/audit — append one security-event record to the durable audit log.
+#
+# The console CGIs run as www-data and the durable log is root:www-data 0640:
+# they can READ the trail and this verb is the only way they append to it, so
+# a compromised CGI can forge a record but can never truncate or rewrite the
+# history (CRA Annex I #6). Shape, not truth, is what is checked here — one
+# record, the four fixed fields in order, bounded — because the CGI layer is
+# where the record's content is decided and this is a boundary, not a judge.
+#
+# Shared verb: byte-identical in both product trees. Sources webauth.sh by its
+# own location (../webauth.sh), the same way swu-install.sh does, so the one
+# file serves both products.
+set -u
+. "$(dirname "$0")/../webauth.sh"
+
+[ $# -eq 1 ] || { echo "usage: audit <record>" >&2; exit 2; }
+line=$1
+case "$line" in
+	event=*" result="*" user="*" src="*) ;;
+	*) echo "audit: not an audit record" >&2; exit 2 ;;
+esac
+[ ${#line} -le 1024 ] || { echo "audit: record too long" >&2; exit 2; }
+_audit_persist "$line"
+exit 0

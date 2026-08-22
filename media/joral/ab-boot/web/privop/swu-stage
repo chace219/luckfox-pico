@@ -1,0 +1,70 @@
+#!/bin/sh
+# SPDX-License-Identifier: LicenseRef-Joral-Proprietary
+# Copyright (c) 2026 Joral LLC. All rights reserved.
+# privop/swu-stage — receive a firmware package on stdin, verify it, stage it.
+#
+#   swu-stage <length>      stdin: exactly <length> bytes of .swu
+#
+# Writes /userdata/update.swu.tmp, checks the byte count, runs swupdate's dry
+# run (-c: CMS signature chain + per-image sha256, with the SAME software-set
+# selection the install will use) and only then renames it onto the staged
+# path. A package that fails verification is deleted on the spot. The staged
+# path is FIXED — the console never names a file — and the verification log
+# is left at /tmp/swu-check.log (0644) for the CGI to quote from.
+#
+# Exit / first stdout line:
+#   0 ok            staged and verified
+#   2 usage         bad length argument
+#   3 no_slot       no A/B layout or unreadable misc record
+#   4 short_body    fewer bytes arrived than announced
+#   5 verify_failed signature or hash check failed (detail in the log)
+#
+# Shared verb: byte-identical in both product trees. SWU_PREFIX roots the
+# paths for tests/test_privop.sh; the dispatcher scrubs it on a device.
+set -u
+R="${SWU_PREFIX:-}"
+STAGED=$R/userdata/update.swu
+CHECK_LOG=$R/tmp/swu-check.log
+MAX_BYTES=268435456   # 256 MB cap: rootfs slot is 1536M, image ~160M today
+
+[ $# -eq 1 ] || { echo "usage: swu-stage <length>" >&2; echo usage; exit 2; }
+len=$1
+case "$len" in ''|*[!0-9]*) echo usage; exit 2 ;; esac
+if [ "$len" -lt 512 ] || [ "$len" -gt "$MAX_BYTES" ]; then echo usage; exit 2; fi
+
+find_part() {
+	for u in "$R"/sys/block/mmcblk*/mmcblk*/uevent; do
+		[ -f "$u" ] || continue
+		if grep -q "^PARTNAME=$1$" "$u"; then
+			echo "$R/dev/$(grep '^DEVNAME=' "$u" | cut -d= -f2)"
+			return 0
+		fi
+	done
+	return 1
+}
+inactive_slot() {
+	misc=$(find_part misc) || return 1
+	cur=$(misc_ab status "$misc" 2>/dev/null | sed -n 's/^last_boot=//p')
+	case "$cur" in a) echo b ;; b) echo a ;; *) return 1 ;; esac
+}
+SEL=$(inactive_slot) || { echo no_slot; exit 3; }
+
+rm -f "$STAGED"
+umask 022
+dd of="$STAGED.tmp" bs=64k 2>/dev/null
+got=$(wc -c < "$STAGED.tmp")
+if [ "$got" != "$len" ]; then
+	rm -f "$STAGED.tmp"
+	echo "short_body got=$got want=$len"
+	exit 4
+fi
+if swupdate -c -i "$STAGED.tmp" -e "stable,$SEL" > "$CHECK_LOG" 2>&1; then
+	chmod 0644 "$CHECK_LOG" 2>/dev/null
+	mv "$STAGED.tmp" "$STAGED" && chmod 0644 "$STAGED"
+	echo ok
+	exit 0
+fi
+chmod 0644 "$CHECK_LOG" 2>/dev/null
+rm -f "$STAGED.tmp"
+echo verify_failed
+exit 5

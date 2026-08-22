@@ -53,7 +53,31 @@ require_auth() { :; }
 current_user() { echo operator; }
 audit_log() { printf '%s\n' "$*" >> "$AUDIT"; }
 EOF
+# $T is not in the CGI's environment, so the dispatcher path is written out
+# expanded rather than referenced.
+printf 'PRIVOP="%s/bin/privop"\nprivop() { "$PRIVOP" "$@"; }\n' "$T" >> "$T/lib/webauth.sh"
 cp "$VERSION_LIB" "$T/lib/swu-version.sh"
+
+# The privilege boundary. On a unit the CGI runs as www-data and reaches misc,
+# the staging path and the worker only through the setuid dispatcher, which
+# runs a NAMED verb from the product's privop/ directory. Here the dispatcher
+# is a one-line stand-in — the C binary is contract-tested in each product
+# tree — but the VERBS are the real master scripts from web/privop/, run
+# against the same prefix tree, so the gate is proven through the same code
+# that ships on both consoles. swu-apply finds the worker beside webauth.sh
+# (../swu-install.sh from its own directory), which is why the stub worker
+# lives in $T/lib.
+mkdir -p "$T/lib/privop"
+for v in audit misc-status swu-stage swu-apply reboot; do
+	cp "$HERE/../web/privop/$v" "$T/lib/privop/$v"
+	chmod 755 "$T/lib/privop/$v"
+done
+cat > "$T/bin/privop" <<EOF
+#!/bin/sh
+v=\$1; shift
+exec "$T/lib/privop/\$v" "\$@"
+EOF
+chmod +x "$T/bin/privop"
 
 # The partition the CGI discovers by walking sysfs — same method the initramfs
 # and the health check use, so the real find_part() runs here.
@@ -255,7 +279,7 @@ echo "== the product copies are the template =="
 # nothing else in either tree would notice.
 # Skipped, not failed, when a sibling product tree is absent (ab-boot builds
 # standalone).
-check_copy() { # check_copy <label> <cgi path> <lib path> <webauth path>
+check_copy() { # check_copy <label> <cgi> <swu-version> <webauth path> <privop dir> <privop.c>
 	if [ ! -f "$2" ]; then
 		echo "  skip: $1 not present"
 		return
@@ -265,16 +289,34 @@ check_copy() { # check_copy <label> <cgi path> <lib path> <webauth path>
 	if diff -q "$(sed "s|@WEBAUTH@|$4|g" "$TEMPLATE" > "$T/expect.sh"; echo "$T/expect.sh")" \
 		"$2" >/dev/null 2>&1; then ok
 	else bad "$1 api-update.sh is stale — regenerate it from web/api-update.sh.in"; fi
+	# The shared privop verbs the template calls are byte-identical copies too
+	# (they locate webauth.sh and the worker by their own path, so one file
+	# serves both products). $5 is the product's privop/ source directory.
+	for v in audit misc-status swu-stage swu-apply reboot; do
+		if diff -q "$HERE/../web/privop/$v" "$5/$v" >/dev/null 2>&1; then ok
+		else bad "$1 privop/$v differs from ab-boot/web/privop/$v"; fi
+	done
+	# The dispatcher itself. Both products vendor the SAME C file and differ
+	# only in two -D defines set by their Makefiles, so a divergence here is
+	# always a mistake — and it is the shape of divergence this programme has
+	# already paid for once (certgen_pair_valid, which sat different in the two
+	# vendored copies until a review found it). $6 is the product's copy.
+	if diff -q "$HERE/../web/privop/privop.c" "$6" >/dev/null 2>&1; then ok
+	else bad "$1 privop.c differs from ab-boot/web/privop/privop.c"; fi
 }
 P="$HERE/../.."
 check_copy "satisense-edge" \
 	"$P/satisense-edge/web/cgi/api-update.sh" \
 	"$P/satisense-edge/web/cgi-lib/swu-version.sh" \
-	/usr/lib/intelligence-edge/webauth.sh
+	/usr/lib/intelligence-edge/webauth.sh \
+	"$P/satisense-edge/web/privop" \
+	"$P/satisense-edge/src/privop/privop.c"
 check_copy "media-gateway" \
 	"$P/media-gateway/src/web/cgi/api-update.sh" \
 	"$P/media-gateway/src/web/cgi-lib/swu-version.sh" \
-	/usr/lib/media-gateway/webauth.sh
+	/usr/lib/media-gateway/webauth.sh \
+	"$P/media-gateway/src/web/privop" \
+	"$P/media-gateway/src/privop/privop.c"
 
 echo
 echo "update-gate: $PASS passed, $FAIL failed"

@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: LicenseRef-Joral-Proprietary
+# Copyright (c) 2026 Joral LLC. All rights reserved.
 # api-update.sh — console CGI for the A/B firmware update (CRA Annex I #7).
 #
 # TEMPLATE: each product tree installs a copy with @WEBAUTH@ replaced by its
@@ -31,12 +33,20 @@
 #     /etc/swupdate/trusted-certs.pem (the same check a tampered or
 #     wrong-key .swu fails on the bench);
 #   - the running slot can never be written: the target is computed from
-#     misc_ab last_boot, never taken from the client;
+#     misc_ab last_boot, never taken from the client — and re-checked on the
+#     root side of the privilege boundary (privop/swu-apply);
 #   - upload and apply are separate steps so the operator confirms against
 #     the verified version string, not a filename;
 #   - a package that is not an upgrade needs the operator to type a phrase,
 #     re-checked HERE and not in the console JavaScript, so it also covers a
 #     caller driving the CGI directly.
+#
+# This CGI runs as www-data. The four things in it that need root — reading
+# the misc partition, receiving and verifying the package into /userdata,
+# launching the install worker, and the reboot — are the privop verbs
+# misc-status / swu-stage / swu-apply / reboot (console-privilege-separation-
+# plan.md). The decisions stay HERE: the gate, the audit records and the
+# responses are this script's; the verbs perform and re-validate.
 #
 # The downgrade gate (one-way door #4, swupdate-implementation-plan.md
 # "Item 5"). The signature says a package is genuinely ours; it says nothing
@@ -67,13 +77,12 @@ SW_VERSIONS_FILE="${SW_VERSIONS_FILE:-$R/etc/sw-versions}"
 require_auth
 
 STAGED=$R/userdata/update.swu
-MAX_BYTES=268435456   # 256 MB cap: rootfs slot is 1536M, image ~160M today
+CHECK_LOG=$R/tmp/swu-check.log
 # Detached-install bookkeeping (see the apply/progress actions). Small files in
-# /tmp; the install itself outlives the CGI request that starts it.
+# /tmp, written by the root-side worker; this script only reads them.
 APPLY_PID=$R/tmp/swu-apply.pid
 APPLY_PCT=$R/tmp/swu-apply.pct
 APPLY_STATE=$R/tmp/swu-apply.state
-APPLY_LOG=$R/tmp/swu-apply.log
 OP_LOCK=$R/tmp/swu-op.lock   # flock target, see op_lock() below
 
 printf 'Content-Type: application/json\r\n\r\n'
@@ -109,19 +118,24 @@ json_escape() { sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' '; }
 # first was recovering a stale lock.
 #
 # The descriptor is inherited across fork and exec, so the DETACHED installer
-# keeps holding the same lock for as long as it runs, with no handover.
+# keeps holding the same lock for as long as it runs, with no handover. The
+# privop dispatcher passes fd 9 — and only fd 9 — through to the root side for
+# exactly this reason.
 op_lock() {
 	exec 9>>"$OP_LOCK" || return 1
 	flock -n 9
 }
 op_unlock() { flock -u 9 2>/dev/null; exec 9>&-; }
 
+# The A/B slot record. misc is a block device this CGI cannot read, so the
+# verb reads it; the verb takes no arguments and finds the partition itself.
+misc_status() { privop misc-status 2>/dev/null; }
+
 # The slot an install would target: the one NOT booted last. Echoes "a" or
 # "b"; fails on a single-slot layout or an unreadable misc record.
 inactive_slot() {
-	local misc cur
-	misc=$(find_part misc) || return 1
-	cur=$(misc_ab status "$misc" 2>/dev/null | sed -n 's/^last_boot=//p')
+	local cur
+	cur=$(misc_status | sed -n 's/^last_boot=//p')
 	case "$cur" in
 		a) echo b ;;
 		b) echo a ;;
@@ -131,7 +145,7 @@ inactive_slot() {
 
 slot_json() { # emits {"layout":...,"slots":...,"pending":...} fragment
 	MISC=$(find_part misc) || { printf '"layout":"single-slot"'; return; }
-	RAW=$(misc_ab status "$MISC" 2>/dev/null)
+	RAW=$(misc_status)
 	S=$(printf '%s' "$RAW" | json_escape)
 	# A switch is pending when the slot the selector would boot next differs
 	# from the one running now — i.e. an installed update is waiting for the
@@ -192,36 +206,25 @@ upload)
 	trap op_unlock EXIT INT TERM
 	len="${CONTENT_LENGTH:-0}"
 	case "$len" in ''|*[!0-9]*) len=0 ;; esac
-	if [ "$len" -lt 512 ] || [ "$len" -gt "$MAX_BYTES" ]; then
-		printf '{"ok":false,"error":"body must be 512..%s bytes"}' "$MAX_BYTES"; exit 0
+	if [ "$len" -lt 512 ] || [ "$len" -gt 268435456 ]; then
+		printf '{"ok":false,"error":"body must be 512..268435456 bytes"}'; exit 0
 	fi
 	# Space check before we stream a couple hundred MB at /userdata.
 	free_kb=$(df -k "$R/userdata" 2>/dev/null | awk 'NR==2{print $4}')
 	if [ -n "$free_kb" ] && [ $((len / 1024 + 4096)) -gt "$free_kb" ]; then
 		printf '{"ok":false,"error":"not enough space on /userdata"}'; exit 0
 	fi
-	rm -f "$STAGED"
-	dd of="$STAGED.tmp" bs=64k 2>/dev/null
-	got=$(wc -c < "$STAGED.tmp")
-	if [ "$got" != "$len" ]; then
-		rm -f "$STAGED.tmp"
-		audit_log fw_upload fail "$(current_user)" "reason=short_body got=$got want=$len"
-		printf '{"ok":false,"error":"short upload (%s of %s bytes)"}' "$got" "$len"; exit 0
-	fi
-	# Verify BEFORE accepting: signature chain + per-image sha256, with the
-	# SAME software-set selection the install will use. Without -e this
-	# two-mode sw-description selects nothing and swupdate 2022.12 aborts
-	# with only a bare "Image invalid or corrupted" (bench, 2026-08-14);
-	# with it, the payload hash for the target slot is verified here, not
-	# just the cpio member CRCs. -c is a dry run — the handler is replaced
-	# by a dummy, so nothing is written to the slot.
-	SEL=$(inactive_slot) || {
-		rm -f "$STAGED.tmp"
-		audit_log fw_upload fail "$(current_user)" "reason=no_slot"
-		printf '{"ok":false,"error":"cannot determine target slot — single-slot layout or unreadable misc record"}'; exit 0
-	}
-	if swupdate -c -i "$STAGED.tmp" -e "stable,$SEL" >"$R/tmp/swu-check.log" 2>&1; then
-		mv "$STAGED.tmp" "$STAGED"
+	# The body goes to the root side on THIS process's stdin: swu-stage reads
+	# exactly $len bytes into the fixed staging path, verifies BEFORE accepting
+	# (signature chain + per-image sha256, with the SAME software-set selection
+	# the install will use — without -e this two-mode sw-description selects
+	# nothing and swupdate 2022.12 aborts with only a bare "Image invalid or
+	# corrupted"; -c is a dry run, nothing is written to the slot), and renames
+	# onto the staged path only on success. Its first stdout line says why
+	# when it does not.
+	RES=$(privop swu-stage "$len" 2>/dev/null); rc=$?
+	case "$rc:$RES" in
+	0:ok*)
 		V=$(sw_version_from_swu "$STAGED") || V=""
 		# Order it now, so the console can warn the moment the package is
 		# accepted rather than only when the operator clicks install. The
@@ -233,16 +236,29 @@ upload)
 			"version=$V running=$RUNNING order=$ORD bytes=$len"
 		printf '{"ok":true,"verified":true,"version":"%s","order":"%s","downgrade":%s,"running":"%s"}' \
 			"$V" "$ORD" "$DG" "$RUNNING"
-	else
-		rm -f "$STAGED.tmp"
+		;;
+	*:no_slot*)
+		audit_log fw_upload fail "$(current_user)" "reason=no_slot"
+		printf '{"ok":false,"error":"cannot determine target slot — single-slot layout or unreadable misc record"}'
+		;;
+	*:short_body*)
+		audit_log fw_upload fail "$(current_user)" "reason=short_body $(printf '%s' "$RES" | sed 's/^short_body //')"
+		printf '{"ok":false,"error":"short upload (%s)"}' "$(printf '%s' "$RES" | sed 's/^short_body //' | json_escape)"
+		;;
+	*:verify_failed*)
 		# The PRIMARY error is an [ERROR] line that can scroll far above the
 		# end of the log; a bare tail showed only secondary noise (broken
 		# internal pipes) and cost two bench debugging rounds on 2026-08-14.
-		ERR=$({ grep -iE "error|fail" "$R/tmp/swu-check.log" | head -n4;
-			tail -n1 "$R/tmp/swu-check.log"; } | json_escape)
+		ERR=$({ grep -iE "error|fail" "$CHECK_LOG" 2>/dev/null | head -n4;
+			tail -n1 "$CHECK_LOG" 2>/dev/null; } | json_escape)
 		audit_log fw_upload fail "$(current_user)" "reason=verify_failed"
 		printf '{"ok":false,"error":"verification failed — wrong signature or corrupt file","detail":"%s"}' "$ERR"
-	fi
+		;;
+	*)
+		audit_log fw_upload fail "$(current_user)" "reason=stage_helper rc=$rc"
+		printf '{"ok":false,"error":"the update helper could not stage the package (rc=%s)"}' "$rc"
+		;;
+	esac
 	;;
 
 apply)
@@ -315,27 +331,31 @@ apply)
 	audit_log fw_apply started "$(current_user)" \
 		"target=$TARGET from=$RUNNING to=$SV order=$ORD downgrade=$DG"
 	AUSER=$(current_user)
-	echo 0 > "$APPLY_PCT"
-	rm -f "$APPLY_STATE"
 	# The install writes ~150 MB to the standby slot and takes a minute or two,
-	# far longer than a browser will wait on one request. Hand it to the worker
-	# beside webauth.sh under a fresh session (setsid) with fds off the HTTP
-	# socket, so httpd closes THIS response at once while the install runs on.
-	# The browser then polls ?action=progress.
-	INSTALLER="$(dirname "$WEBAUTH")/swu-install.sh"
-	[ -x "$INSTALLER" ] || {
+	# far longer than a browser will wait on one request. swu-apply resets the
+	# progress bookkeeping and hands the install to the worker beside webauth.sh
+	# under a fresh session (setsid) with fds off the HTTP socket, so httpd
+	# closes THIS response at once while the install runs on. The browser then
+	# polls ?action=progress. The worker INHERITS fd 9 — through the dispatcher,
+	# which keeps exactly that descriptor — and with it the flock, so the lock
+	# stays held for the whole install with no handover and nothing to clean up
+	# if it dies. It stamps its own pid into $APPLY_PID for the progress action.
+	# The verb re-checks the one invariant that must hold at the root boundary:
+	# the target is never the running slot.
+	RES=$(privop swu-apply "$TARGET" "$AUSER" "$RUNNING" "$SV" 2>/dev/null); rc=$?
+	case "$rc:$RES" in
+	0:ok*)
+		printf '{"ok":true,"started":true,"target":"%s","note":"installing to the standby slot — poll ?action=progress"}' "$TARGET"
+		;;
+	*:no_worker*)
 		audit_log fw_apply fail "$AUSER" "target=$TARGET reason=worker_missing"
-		printf '{"ok":false,"error":"install worker %s missing from this image"}' "$INSTALLER"; exit 0
-	}
-	# The worker INHERITS fd 9 and with it the flock, so the lock stays held for
-	# the whole install with no handover and nothing to clean up if it dies.
-	# It stamps its own pid into $APPLY_PID for the progress action; neither $!
-	# nor setsid's pid can be trusted for that, since setsid may fork and its
-	# pid can vanish immediately -- which would make `progress` report a running
-	# install as finished.
-	rm -f "$APPLY_PID"
-	setsid "$INSTALLER" "$STAGED" "$TARGET" "$MISC" "$AUSER" >/dev/null 2>&1 </dev/null &
-	printf '{"ok":true,"started":true,"target":"%s","note":"installing to the standby slot — poll ?action=progress"}' "$TARGET"
+		printf '{"ok":false,"error":"install worker missing from this image"}'
+		;;
+	*)
+		audit_log fw_apply fail "$AUSER" "target=$TARGET reason=apply_helper rc=$rc detail=$(printf '%s' "$RES" | head -n1)"
+		printf '{"ok":false,"error":"the update helper refused the install (%s)"}' "$(printf '%s' "$RES" | head -n1 | json_escape)"
+		;;
+	esac
 	;;
 
 progress)
@@ -353,7 +373,9 @@ progress)
 			printf '{"ok":false,"state":"failed","percent":%s,"error":"install failed — running system untouched","detail":"%s"}' "$PCT" "$DET"
 			;;
 		esac
-	elif [ -f "$APPLY_PID" ] && kill -0 "$(cat "$APPLY_PID" 2>/dev/null)" 2>/dev/null; then
+	# /proc, not kill -0: the worker is root and this CGI is not, so a signal
+	# probe would answer EPERM for a running install and report it idle.
+	elif [ -f "$APPLY_PID" ] && [ -d "/proc/$(cat "$APPLY_PID" 2>/dev/null)" ]; then
 		printf '{"ok":true,"state":"running","percent":%s}' "$PCT"
 	else
 		printf '{"ok":true,"state":"idle","percent":0}'
@@ -378,11 +400,11 @@ reboot)
 	}
 	trap op_unlock EXIT INT TERM
 	audit_log fw_reboot requested "$(current_user)" ""
-	# Detach so this JSON response reaches the browser before the unit goes
-	# down; the sleep gives httpd time to flush the socket.
-	# 9>&- so the detached rebooter does not inherit the lock and keep it held
-	# for its two-second life (or longer, if the reboot stalls).
-	setsid sh -c 'sleep 2; sync; reboot' >/dev/null 2>&1 </dev/null 9>&- &
+	# The verb detaches the actual reboot (sleep 2; sync; reboot) so this JSON
+	# response reaches the browser before the unit goes down. 9>&- so neither
+	# the helper nor the rebooter inherits the lock and keeps it held for its
+	# two-second life (or longer, if the reboot stalls).
+	privop reboot >/dev/null 2>&1 9>&-
 	printf '{"ok":true,"note":"rebooting — the console drops for ~40 s, then answers from the newly selected slot"}'
 	;;
 
