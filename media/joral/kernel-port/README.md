@@ -149,6 +149,18 @@ fakes the binding sources.
 `secrets_at_rest.mode = encrypted` in `diagnostics.json` is therefore a
 **required bench assertion after this port**, not an assumption.
 
+**Correction, 2026-08-22: `mode = encrypted` is not sufficient on its own.**
+`secretbox_seal` derives from every provider that works, so if the OTP probe
+fails on a unit provisioned *after* the port, it binds to `emmc-cid` alone and
+still reports `mode = encrypted`. The field that exposes it is **`binding`,
+which must contain `soc-otp`**. (`mode` does catch the other shape: a unit
+provisioned *before* the port stores `binding=soc-otp+emmc-cid` in its
+envelope, and `build_ikm` refuses to derive from a subset, so the unseal fails
+outright and the mode becomes `unreadable`.) Check `binding` and `mode`
+together, plus `ls /sys/bus/nvmem/devices/` for the OTP device itself. Full
+procedure in [`release-build-runbook.md`](release-build-runbook.md).
+
+
 ## Executed, confirmed on hardware, and migrated in-tree
 
 The procedure above has been run end to end, **confirmed on hardware**, and

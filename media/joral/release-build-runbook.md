@@ -209,19 +209,40 @@ There is no scaffolding to undo: the migration replaced the tree in place and
 Confirmed on hardware for 5.10.252 on 2026-08-21: **T1S link, OPC UA server,
 CAN gateway.**
 
-One check is easy to skip and cannot be inferred from the others, because the
-host test suite fakes the binding sources and passes either way:
+What is left is the OTP binding, and it needs three checks rather than the one
+this document first claimed. **`mode = encrypted` on its own does not prove
+it.**
+
+**1. The kernel found the OTP at all** — the most direct question, and the one
+the clock-list change could break:
 
 ```sh
-# on the unit
-grep -o '"secrets_at_rest":{[^}]*}' /path/to/diagnostics.json
-#   mode must be "encrypted"
+ls /sys/bus/nvmem/devices/          # expect an entry matching *otp* (rockchip-otp0)
+dmesg | grep -i otp                 # expect no probe/clk_bulk_get failure
 ```
 
-The secrets sidecar is keyed by HKDF over the **SoC OTP** and the eMMC CID.
-The OTP controller's clock list is the one node that differed between the two
-kernel trees (6 clocks vs 4), and a mismatch makes the OTP probe fail and the
-mode degrade **with no error anyone would see**. The built dtb was verified to
-name the matching four, so this is expected to pass — but "expected to pass"
-is not a bench result, and this is the assertion that makes the claim
-checkable.
+**2. The sidecar is bound to it.** `secretbox.c` discovers the OTP through
+`/sys/bus/nvmem/devices/*otp*/nvmem` and derives its key by HKDF over every
+provider that works — `soc-otp` and `emmc-cid`:
+
+```sh
+cat /var/run/intelligence-edge/diagnostics.json | grep -o '"secrets_at_rest":{[^}]*}'
+```
+
+Both fields matter, for different failure shapes:
+
+| Field | Required | Catches |
+|---|---|---|
+| `mode` | `encrypted` | a unit **provisioned before** the port: its envelope names `soc-otp+emmc-cid`, and `build_ikm` refuses to derive from a subset, so a vanished OTP fails the unseal outright and the mode becomes `unreadable` |
+| `binding` | must contain **`soc-otp`** | a unit **provisioned after** the port: sealing uses whatever works, so a dead OTP silently binds to `emmc-cid` alone and `mode` still reads `encrypted` |
+
+A `binding` of `emmc-cid` alone with `mode = encrypted` is the silent
+regression this whole finding is about. It is a weaker key bound only to the
+storage device, and nothing else reports it.
+
+**3. `mode = none-stored` is not a pass.** It means no secrets are stored, so
+nothing was exercised. Configure a secret first, then re-read.
+
+Why this cannot be inferred from the host suite: it fakes the binding
+providers, so it passes either way.
+

@@ -3126,11 +3126,21 @@ gap items 4c/4d/4e are closed above. What is actually left, deadline item first:
       including the `.swu`, is
       [`release-build-runbook.md`](release-build-runbook.md).
 
-      **One assertion still outstanding:** `secrets_at_rest.mode = encrypted`
-      read off a 5.10.252 unit. The hardware pass covered the networking and
-      protocol stacks but not that field, and it is the one the OTP clock-list
-      finding makes load-bearing — the host suite fakes the binding sources,
-      so only the device can answer it.
+      **One assertion still outstanding:** the OTP binding, read off a
+      5.10.252 unit. The hardware pass covered the networking and protocol
+      stacks but not this, and it is what the OTP clock-list finding makes
+      load-bearing — the host suite fakes the binding providers, so only the
+      device can answer it.
+
+      Note the assertion is **not** `secrets_at_rest.mode = encrypted` alone,
+      as first recorded. `secretbox_seal` derives from every provider that
+      works, so on a unit provisioned after the port a dead OTP binds to
+      `emmc-cid` alone and still reports `encrypted`. The check is
+      **`binding` must contain `soc-otp`**, together with `mode` (which
+      catches the other shape — a unit provisioned before the port stores
+      `soc-otp+emmc-cid` in its envelope and fails the unseal outright,
+      reporting `unreadable`). Procedure in
+      [`release-build-runbook.md`](release-build-runbook.md).
 
       **Delivery constraint, unchanged:** the kernel travels in the
       single-copy `boot` FIT, so 5.10.252 reaches a unit only by reflash. A
