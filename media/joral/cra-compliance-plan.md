@@ -48,10 +48,10 @@ was found by executing, not by reading. Per-product detail lives in each tree's
 | 1 Secure by default | **met** — HTTPS on 443 by default, per-unit cert, factory credential buys only a password change | **met** — `signencrypt` + `web.tls` by default, same credential gate | ✅ 08-09/08-12 | first-use trust is a self-signed fingerprint; **anonymous OPC UA closed 2026-08-19** — factory `allow_anonymous: false`, no shipped OPC UA credential, not yet on a unit |
 | 2 No known CVEs at shipment | **met at the gate** — `./build.sh cve` **0 blocking**, OpenSSL 3.5.7 LTS | same (shared rootfs) | ✅ 08-12 | kernel (5155) + U-Boot (41) are report-only. the GNU wget accepted-risk was **resolved 08-16 by dropping the package**, leaving **python3 ×5** as the only accepted-risk. **dhcpcd was reclassified `not-affected` 2026-08-19** — it had been mis-filed `fixed-pending-release` for a mitigation that was ours and had already shipped, so it would have expired 2026-11-12 into a blocking finding for an unreachable code path; the config it rests on is now guarded by a test. **python3 removal was staged the same day and then reversed** — the interpreter is **kept** and the fix is a version bump, 3.11.6 → **3.11.16** (12 Aug 2026), carried as a tracked package replacement. **CVE-2020-29396 was reclassified `not-affected` 2026-08-19** — it is an Odoo sandbox escape with python listed only as the running-with platform, so it was never a CPython defect and no bump could ever have retired it. **BUILT AND GATED 2026-08-19**: the image carries 3.11.16 (read out of `rootfs.img`), `./build.sh cve` **0 blocking**. The bump retired **two** of the four — CVE-2024-6232 and CVE-2024-7592 now match nothing and their triage rows were deleted — and did **not** retire **CVE-2026-15308 and CVE-2026-4519**, which still match 3.11.16 and remain accepted-risk on the unchanged reachability argument. So: python3 ×2, not ×0 |
 | 3 Confidentiality / integrity | **met** for the console path | **met** — secrets in a 0600 sidecar, **encrypted at rest and bound to the board since 08-16**, never served to the browser; MQTT TLS verification proven enforced | ✅ 08-12/13, **sealing confirmed on a unit 2026-08-22** (`mode=encrypted`, `binding=soc-otp+emmc-cid`) | the sealing protects the stored file, **not** a running unit against root (no secure element); MQTT mutual TLS unexercised; **`/oem` still carries build-user ownership on every fielded unit and no update can fix it — only a reflash** (item 14). Nothing loads from it any more: the daemon since 2026.08.5 (`ldd`-confirmed on a unit), interactive root shells since 2026.08.6 (`RkEnv.sh` removed) |
-| 4 Minimise attack surface | **met** — BSP daemons and 118 packages gone, default-deny IPv4+IPv6 firewall, **`wifi_app` userspace dropped 2026-08-22 (claimed 08-12, never true until now — see the correction below)**, image inodes root-owned, and since **2026-08-21** the `oem` partition ships **empty** (198 files / 21 MB of Rockchip demo suite, a Wi-Fi driver for a removed radio, and a divergent copy of the console — none of it in the SBOM or the CVE gate, both of which read the rootfs) | same (shared rootfs) | ✅ 08-12/08-16, **oem strip and board hardening confirmed on a unit 08-21** | ~~httpd + CGIs run as root~~ — **console confirmed running as `www-data` on a unit 2026-08-22** (setuid `privop` dispatcher for the few root verbs). The same check found **stunnel still root** because its `setuid` was emitted inside `[web]` where `drop_privileges()` never reads it — **fixed in 2026.08.17, not yet re-checked on hardware**; root password is off the **published** vendor default since 08-16 (`$6$`, undocumented to customers) but is still one short shared value — unreachable over the network, serial-console login withdrawn with the getty. **All 16 board profiles are hardened since 08-21** (14 were not; two served an unauthenticated root shell) — but 15 of them have never been booted here |
+| 4 Minimise attack surface | **met** — BSP daemons and 118 packages gone, default-deny IPv4+IPv6 firewall, **`wifi_app` userspace dropped 2026-08-22 (claimed 08-12, never true until now — see the correction below)**, image inodes root-owned, and since **2026-08-21** the `oem` partition ships **empty** (198 files / 21 MB of Rockchip demo suite, a Wi-Fi driver for a removed radio, and a divergent copy of the console — none of it in the SBOM or the CVE gate, both of which read the rootfs) | same (shared rootfs) | ✅ 08-12/08-16, **oem strip and board hardening confirmed on a unit 08-21** | ~~httpd + CGIs run as root~~ — **console confirmed running as `www-data` on a unit 2026-08-22** (setuid `privop` dispatcher for the few root verbs). The same check found **stunnel still root** because its `setuid` was emitted inside `[web]` where `drop_privileges()` never reads it — **fixed and confirmed on a unit 2026-08-22**, both terminators now `www-data`; root password is off the **published** vendor default since 08-16 (`$6$`, undocumented to customers) but is still one short shared value — unreachable over the network, serial-console login withdrawn with the getty. **All 16 board profiles are hardened since 08-21** (14 were not; two served an unauthenticated root shell) — but 15 of them have never been booted here |
 | 5 Access control | **met** for the console | **met** for the console and, since 2026-08-19, the OPC UA endpoint | ✅ 08-09, OPC UA identity ⚠️ not on a unit | CAN :8001 unauthenticated by protocol design |
 | 6 Security-event logging | **met** — console trail complete, and CAN peer identity is recorded on **both** transports since the 08-18 recovery (`50ec9b9`) | **met** | ✅ 08-12 (IE) | the UDP peer record has not been exercised on a unit (`grep can_udp_peer_seen /var/log/messages` after sending from two hosts); no off-device forwarding on either |
-| 7 Update mechanism | **met** — signed A/B SWUpdate, ordered releases, downgrade gate | same | ⚠️ partial | DEV signing key only; downgrade **refusal** never run on hardware. Partition layout **frozen 2026-08-19** (gated by `./build.sh partitions`) |
+| 7 Update mechanism | **met** — signed A/B SWUpdate, ordered releases, downgrade gate | same | ✅ **08-22 — full cycle and the downgrade refusal, on a unit** | DEV signing key only (the remaining gap, and the shipping blocker). Partition layout **frozen 2026-08-19** (gated by `./build.sh partitions`) |
 | 8 Factory reset | **met** | **met** | ✅ 08-12 | — |
 
 | Annex I Part II | Status |
@@ -69,6 +69,85 @@ what remains is a Workspace group and a web upload, in that order.
 ## Closed since the audit
 
 *Appended as items land. The table above stays a snapshot of the 2026-07-26 audit.*
+
+- **2026-08-22 — both products, Annex I #7: the A/B update path and the
+  downgrade refusal are demonstrated on hardware.** The row had been
+  "⚠️ partial" since the bench spike closed on 2026-08-14; what was missing
+  was an ordinary update performed by an operator, and a refusal nobody had
+  ever seen fire.
+
+  *The full cycle*, from the unit's own audit log, upgrading 2026.08.15 to
+  2026.08.17 by `.swu` — no reflash, because everything that changed was in
+  the rootfs and the unit already ran the 5.10.252 kernel:
+
+  ```
+  fw_upload  success  version=2026.08.17 running=2026.08.15 order=newer
+  fw_apply   started  target=b from=2026.08.15 to=2026.08.17 downgrade=false
+  fw_apply   success  target=b
+  fw_reboot  requested
+  ab_slot_marked_successful slot=b
+  ```
+
+  Signed upload, signature and hash verification, install to the **inactive**
+  slot, an operator-timed reboot rather than an automatic one, and the new
+  slot marked good. Every record carries the version transition, which is the
+  property that makes the trail answer "was this unit ever running an affected
+  build" rather than only "which slot".
+
+  *The refusal, proven as a control rather than a screen.* `.16` was uploaded
+  onto the unit now running `.17` and correctly classified
+  (`fw_upload success … order=older`). The console shows a warning banner, but
+  that is JavaScript. The gate was then driven **directly against the CGI with
+  curl**, bypassing the browser entirely:
+
+  ```
+  POST /cgi-bin/api-update.sh?action=apply        (no confirm parameter)
+  {"ok":false,"code":"confirm_required","order":"older",
+   "running":"2026.08.17","staged":"2026.08.16","phrase":"DOWNGRADE", …}
+  ```
+
+  Refused server-side, nothing installed. That is the same distinction the
+  default-password gate turns on, and the reason `sw_version_needs_confirm`
+  lives in the CGI and not in the UI. The ordering comparison also ran on real
+  data in both directions — `order=newer` for .17 over .15, `order=older` for
+  .16 over .17.
+
+  **What is still owed on this row is only the key ceremony**: every `.swu` to
+  date is DEV-signed, and the policy forbids shipping on a DEV-keyed trust
+  store.
+
+- **2026-08-22 — both products, Annex I #4/#5: the stunnel privilege drop is
+  fixed and confirmed on a unit.** After installing 2026.08.17:
+
+  ```
+  497 www-data stunnel        /var/run/media-gateway/stunnel-web.conf
+  816 www-data /usr/bin/stunnel /var/run/intelligence-edge/stunnel-web.conf
+  ```
+
+  Both terminators unprivileged, against `Uid: 0 0 0 0` on the same unit
+  before the fix. `drop_privileges()` calls plain `setuid()`, which when
+  called as root sets the real, effective and saved ids together, so an
+  effective uid of 33 is the drop. (The direct `/proc/<pid>/status` read was
+  not captured before a service restart changed the pid; worth taking
+  opportunistically, but `ps` is runtime evidence rather than the source
+  inspection that misled us the first time.)
+
+  **The `wifi_app` removal is confirmed on the same unit** — `/usr/bin/hostapd`
+  and `/usr/bin/wpa_supplicant` both absent, closing the claim that had been
+  false in the plan from 2026-08-12 until 2026-08-22.
+
+- **2026-08-22 — observation, not a defect: audit timestamps before the first
+  NTP sync are wrong.** The unit's log opens with
+  `2021-01-01T12:00:19Z event=ab_slot_marked_successful slot=a` — a first boot
+  with an unset RTC. Ordering is preserved by position in an append-only file,
+  and every later record is correct, but an assessor reading timestamps will
+  meet a 2021 entry in a 2026 trail. Recorded here so it is a known property
+  rather than a discovery during an audit.
+
+  Also confirmed correct in the same log: `src=unknown-via-tls`. With TLS on,
+  httpd sees only `127.0.0.1`, and recording that would produce a trail that is
+  complete, well-formed and names the wrong principal. stunnel 5.65 neither
+  strips nor injects `X-Forwarded-For`, so "unknown" is the honest value.
 
 - **2026-08-22 — both products, Annex I #4/#5: the console is confirmed
   unprivileged on a unit, and the same check found the TLS terminator was
