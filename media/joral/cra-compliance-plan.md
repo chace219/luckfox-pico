@@ -48,7 +48,7 @@ was found by executing, not by reading. Per-product detail lives in each tree's
 | 1 Secure by default | **met** — HTTPS on 443 by default, per-unit cert, factory credential buys only a password change | **met** — `signencrypt` + `web.tls` by default, same credential gate | ✅ 08-09/08-12 | first-use trust is a self-signed fingerprint; **anonymous OPC UA closed 2026-08-19** — factory `allow_anonymous: false`, no shipped OPC UA credential, not yet on a unit |
 | 2 No known CVEs at shipment | **met at the gate** — `./build.sh cve` **0 blocking**, OpenSSL 3.5.7 LTS | same (shared rootfs) | ✅ 08-12 | kernel (5155) + U-Boot (41) are report-only. the GNU wget accepted-risk was **resolved 08-16 by dropping the package**, leaving **python3 ×5** as the only accepted-risk. **dhcpcd was reclassified `not-affected` 2026-08-19** — it had been mis-filed `fixed-pending-release` for a mitigation that was ours and had already shipped, so it would have expired 2026-11-12 into a blocking finding for an unreachable code path; the config it rests on is now guarded by a test. **python3 removal was staged the same day and then reversed** — the interpreter is **kept** and the fix is a version bump, 3.11.6 → **3.11.16** (12 Aug 2026), carried as a tracked package replacement. **CVE-2020-29396 was reclassified `not-affected` 2026-08-19** — it is an Odoo sandbox escape with python listed only as the running-with platform, so it was never a CPython defect and no bump could ever have retired it. **BUILT AND GATED 2026-08-19**: the image carries 3.11.16 (read out of `rootfs.img`), `./build.sh cve` **0 blocking**. The bump retired **two** of the four — CVE-2024-6232 and CVE-2024-7592 now match nothing and their triage rows were deleted — and did **not** retire **CVE-2026-15308 and CVE-2026-4519**, which still match 3.11.16 and remain accepted-risk on the unchanged reachability argument. So: python3 ×2, not ×0 |
 | 3 Confidentiality / integrity | **met** for the console path | **met** — secrets in a 0600 sidecar, **encrypted at rest and bound to the board since 08-16**, never served to the browser; MQTT TLS verification proven enforced | ✅ 08-12/13, **sealing confirmed on a unit 2026-08-22** (`mode=encrypted`, `binding=soc-otp+emmc-cid`) | the sealing protects the stored file, **not** a running unit against root (no secure element); MQTT mutual TLS unexercised; **`/oem` still carries build-user ownership on every fielded unit and no update can fix it — only a reflash** (item 14). Nothing loads from it any more: the daemon since 2026.08.5 (`ldd`-confirmed on a unit), interactive root shells since 2026.08.6 (`RkEnv.sh` removed) |
-| 4 Minimise attack surface | **met** — BSP daemons and 118 packages gone, default-deny IPv4+IPv6 firewall, **`wifi_app` userspace dropped 2026-08-22 (claimed 08-12, never true until now — see the correction below)**, image inodes root-owned, and since **2026-08-21** the `oem` partition ships **empty** (198 files / 21 MB of Rockchip demo suite, a Wi-Fi driver for a removed radio, and a divergent copy of the console — none of it in the SBOM or the CVE gate, both of which read the rootfs) | same (shared rootfs) | ✅ 08-12/08-16, **oem strip and board hardening confirmed on a unit 08-21** | ~~httpd + CGIs run as root~~ — **console dropped to `www-data` 2026-08-22** (setuid `privop` dispatcher for the few root verbs); root password is off the **published** vendor default since 08-16 (`$6$`, undocumented to customers) but is still one short shared value — unreachable over the network, serial-console login withdrawn with the getty. **All 16 board profiles are hardened since 08-21** (14 were not; two served an unauthenticated root shell) — but 15 of them have never been booted here |
+| 4 Minimise attack surface | **met** — BSP daemons and 118 packages gone, default-deny IPv4+IPv6 firewall, **`wifi_app` userspace dropped 2026-08-22 (claimed 08-12, never true until now — see the correction below)**, image inodes root-owned, and since **2026-08-21** the `oem` partition ships **empty** (198 files / 21 MB of Rockchip demo suite, a Wi-Fi driver for a removed radio, and a divergent copy of the console — none of it in the SBOM or the CVE gate, both of which read the rootfs) | same (shared rootfs) | ✅ 08-12/08-16, **oem strip and board hardening confirmed on a unit 08-21** | ~~httpd + CGIs run as root~~ — **console confirmed running as `www-data` on a unit 2026-08-22** (setuid `privop` dispatcher for the few root verbs). The same check found **stunnel still root** because its `setuid` was emitted inside `[web]` where `drop_privileges()` never reads it — **fixed in 2026.08.17, not yet re-checked on hardware**; root password is off the **published** vendor default since 08-16 (`$6$`, undocumented to customers) but is still one short shared value — unreachable over the network, serial-console login withdrawn with the getty. **All 16 board profiles are hardened since 08-21** (14 were not; two served an unauthenticated root shell) — but 15 of them have never been booted here |
 | 5 Access control | **met** for the console | **met** for the console and, since 2026-08-19, the OPC UA endpoint | ✅ 08-09, OPC UA identity ⚠️ not on a unit | CAN :8001 unauthenticated by protocol design |
 | 6 Security-event logging | **met** — console trail complete, and CAN peer identity is recorded on **both** transports since the 08-18 recovery (`50ec9b9`) | **met** | ✅ 08-12 (IE) | the UDP peer record has not been exercised on a unit (`grep can_udp_peer_seen /var/log/messages` after sending from two hosts); no off-device forwarding on either |
 | 7 Update mechanism | **met** — signed A/B SWUpdate, ordered releases, downgrade gate | same | ⚠️ partial | DEV signing key only; downgrade **refusal** never run on hardware. Partition layout **frozen 2026-08-19** (gated by `./build.sh partitions`) |
@@ -69,6 +69,56 @@ what remains is a Workspace group and a web upload, in that order.
 ## Closed since the audit
 
 *Appended as items land. The table above stays a snapshot of the 2026-07-26 audit.*
+
+- **2026-08-22 — both products, Annex I #4/#5: the console is confirmed
+  unprivileged on a unit, and the same check found the TLS terminator was
+  not.**
+
+  *The half that closed.* `ps -eo pid,user,args` on a flashed unit:
+
+  ```
+  518 www-data busybox httpd -f -p 127.0.0.1:18081 -h /var/www/media-gateway
+  850 www-data /usr/sbin/httpd  -f -p 127.0.0.1:18080 -h /usr/share/intelligence-edge/www
+  ```
+
+  Both consoles unprivileged, both bound to loopback behind stunnel. The
+  "httpd + CGIs run as root" residual is closed **on hardware**, not in the
+  tree.
+
+  *The half that opened.* The same listing showed both `stunnel` processes as
+  root, and `/proc/<pid>/status` confirmed it — `Uid: 0 0 0 0` — while the
+  generated config plainly contained `setuid = www-data`.
+
+  `setuid`/`setgid` are **global** stunnel options. `drop_privileges()`
+  (`stunnel.c:209`) reads `service_options.uid`, the **defaults** struct,
+  which is filled only from options parsed *before* the first `[section]`
+  header (`options.c:532`, guarded on `!new_service_options.next`). Emitted
+  after `[web]` they parse, are stored on that section, and are never
+  consulted for the drop. stunnel keeps root and logs nothing.
+
+  So the privilege separation shipped **half-done**: the CGIs dropped, and the
+  network-facing process that terminates TLS and holds the private key in
+  memory did not. The key was never written anywhere new — still root 0600 on
+  disk — so this is a process-privilege defect, not a key disclosure.
+
+  *Why the tests agreed with the document.* Both products' suites asserted the
+  **string** `setuid = ...` was present, under test names that claimed the
+  **effect** ("S60 makes stunnel drop to www-data after it binds"). The config
+  had the option and the process had root, and both were true at once. The
+  assertions now compare **position** — `setuid`/`setgid` must precede
+  `[web]` — and each was verified to FAIL against the pre-fix ordering before
+  being accepted.
+
+  This is the second instance of the same shape in one day, after the
+  `wifi_app` gate that tested `RK_ENABLE_WIFI` and asserted something about
+  binaries. **A check that infers from a proxy agrees with the document
+  rather than with the system**, and it is worth treating as a standing
+  review question rather than two coincidences.
+
+  Fixed in t1s-media-gateway#45 and satisense-edge#70, released as
+  **2026.08.17**, verified in the packed `rootfs.img`. **Still owed: the
+  hardware re-check** — `grep ^Uid /proc/<stunnel>/status` should read
+  `33 33 33 33`. Nothing here is closed on the stunnel half until it does.
 
 - **2026-08-22 — Platform, Annex I #4: the `wifi_app` userspace is dropped from
   the image, and the claim that it already had been is withdrawn.**
