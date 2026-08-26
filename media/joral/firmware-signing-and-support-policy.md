@@ -47,6 +47,10 @@ computer at Joral.
 
 ### A.2 Generation ceremony (~1 hour, once)
 
+*Step-by-step execution, the media to buy, the post-ceremony build switch and
+how to prove it took: [`key-ceremony-runbook.md`](key-ceremony-runbook.md)
+(2026-08-25). The decision below stays the decision; the runbook is only how.*
+
 Present: **Carl + one named engineer** (the two passphrase holders).
 
 1. Boot a laptop from a **fresh Linux live-USB, network hardware disabled**

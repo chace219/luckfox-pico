@@ -9,12 +9,24 @@ in a plan.
 
 ## The deadline
 
-**11 September 2026.** From that date Regulation (EU) 2024/2847 obliges us to
-receive and act on vulnerability reports, and the obligation applies to units
-already in the field — not only to what we ship next. This is the only
-deadline-bound row in the whole compliance programme
-([`../cra-compliance-plan.md`](../cra-compliance-plan.md), remaining-work item 1);
-everything else on that list is ours to schedule.
+**11 September 2026.** From that date **Art. 14** of Regulation (EU) 2024/2847
+obliges us to report an actively exploited vulnerability, or a severe incident, to
+ENISA and the coordinating national CSIRT — 24 h early warning, 72 h notification,
+14 d final report — and to tell affected users. It applies to units already in the
+field, not only to what we ship next.
+
+*Corrected 2026-08-25: this file previously said the September date obliged us to
+**receive** reports. It does not — the duty to publish a channel is Annex I Part II
+§5/§6 and applies from 11 Dec 2027. See the dated entry in
+[`../cra-compliance-plan.md`](../cra-compliance-plan.md).*
+
+**Publishing this directory does not discharge Art. 14. It is the tripwire that
+makes Art. 14 performable** — the realistic way we first learn a fielded unit is
+being exploited is that somebody writes in, and a 24-hour clock we cannot hear start
+is a 24-hour clock we miss. The rest of Art. 14 — a named duty officer, counsel's
+answer on which CSIRT, platform access, two draft notices, one drill — is
+remaining-work item 1 in [`../cra-remaining-work.md`](../cra-remaining-work.md) §1,
+and none of it is engineering's either.
 
 Nothing here takes an engineering day. What it takes is a decision and an hour.
 

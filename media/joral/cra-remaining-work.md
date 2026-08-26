@@ -1,8 +1,10 @@
 # CRA: what is left, and who owns it
 
-*Written 2026-08-23 for product management and legal. The engineering detail
-lives in [`cra-compliance-plan.md`](cra-compliance-plan.md), which is 4,300
-lines and assumes you know the codebase. This page is the same position in
+*Written 2026-08-23 for product management and legal; **revised 2026-08-25**, when
+§1 turned out to name the wrong obligation — see the note in that section.*
+
+*The engineering detail lives in [`cra-compliance-plan.md`](cra-compliance-plan.md),
+which is 4,300 lines and assumes you know the codebase. This page is the same position in
 plain language: what is still open, who has to move it, and what happens if
 nobody does.*
 
@@ -10,9 +12,12 @@ nobody does.*
 
 ## Where we stand
 
-The Cyber Resilience Act asks for two things. **Annex I Part I** is eight
+The Cyber Resilience Act asks for three things. **Annex I Part I** is eight
 security properties the product itself must have. **Annex I Part II** is a
-process for handling vulnerabilities after it ships.
+process for handling vulnerabilities after it ships. Both of those are due
+**11 December 2027**. **Article 14** is a duty to report actively exploited
+vulnerabilities and severe incidents to the authorities on a 24-hour clock, and
+it is due **11 September 2026** — that is the one date on this page.
 
 **All eight product properties are met.** Secure defaults, no known
 unaddressed vulnerabilities at shipment, protected data, a minimised attack
@@ -23,7 +28,8 @@ hardware rather than only in a test suite.
 **The process side is four-fifths there.** We can produce a bill of materials
 for every release, we check every release against public vulnerability
 databases, and we have a written disclosure policy. What is missing is a
-working mailbox, a signing-key ceremony, and a lawyer's sign-off.
+working mailbox, a named person to answer it on a clock, a signing-key
+ceremony, and a lawyer's sign-off.
 
 None of what remains is a coding problem. That is the headline.
 
@@ -31,14 +37,57 @@ None of what remains is a coding problem. That is the headline.
 
 ## 1. The one hard deadline: 11 September 2026
 
-**Nineteen days from today**, EU vulnerability-reporting obligations begin —
-and they apply to units already in the field, not only to new ones. From that
-date, a security researcher who finds a problem in our product must have a
-published way to tell us, and we must be able to receive it.
+**Seventeen days from today**, our reporting obligations begin — and they apply
+to units already in the field, not only to new ones.
+
+> **Corrected 2026-08-25.** This section previously said the September date was
+> when *"a researcher must have a published way to tell us"*. That duty exists, but
+> it is part of the Annex I requirements and lands on **11 December 2027**. What
+> lands on **11 September 2026** is the opposite direction: **we** must report to
+> the authorities.
+
+From 11 September, if a vulnerability in our product is being **actively exploited**,
+or a **severe security incident** occurs, we must tell the EU agency ENISA and a
+national cyber-incident team, through an EU reporting platform, on a fixed clock:
+
+| | |
+|---|---|
+| **Within 24 hours** | An early warning — from the moment we *become aware*, not from the moment we understand it, reproduce it, or have a fix. A short notice that something is being exploited is enough, and is required |
+| **Within 72 hours** | A fuller notification: the product, the nature of the exploit, and any mitigation available or advised |
+| **Within 14 days** | The final report, once a corrective measure exists (one month for an incident) |
+
+There is a fourth duty in the same hours that is easy to miss: **we must also tell
+affected customers**, and if we do not do it in reasonable time, the authorities may
+tell them for us.
+
+### Why this one is not negotiable
+
+- **It is a regulation, not a directive** — directly binding in every member state,
+  with no national implementation to wait for and no grace period after the date.
+- **It reaches backwards.** Units we have already sold into the EU are inside it.
+  Contract status and warranty state make no difference.
+- **We do not control the trigger.** We do not choose when someone exploits a
+  vulnerability, or when they tell us they have. The 24-hour clock starts at whatever
+  hour we find out.
+- **Enforcement runs to withdrawal from the market**, and breaches of these
+  obligations sit in the regulation's top fine band. The figure is one for counsel to
+  confirm rather than take from a memo; the order of magnitude is existential for a
+  company our size.
+- **The failure is visible in the worst setting.** A missing CE mark is found in an
+  audit. A missed 24-hour report is found in the middle of a live exploitation event,
+  in front of the customer it affects.
+
+### The mailbox: necessary, and not sufficient
 
 Everything engineering owes here is finished. The address is printed in both
 product manuals, in the on-device help and in the customer PDFs. The files that
 go on the website are written and validated and waiting.
+
+The mailbox is not itself the September obligation. It is the **tripwire that makes
+the obligation performable**: the realistic way a manufacturer our size first learns
+that a vulnerability in its fielded units is being exploited is that somebody writes
+in and says so. A 24-hour clock we cannot hear start is a 24-hour clock we miss. So
+it stays the first thing to do — but it closes the channel and nothing else.
 
 **What is left is three steps, and the order matters:**
 
@@ -51,9 +100,47 @@ go on the website are written and validated and waiting.
 **Do not do step 2 before step 1.** A researcher who writes to a published
 address and hears nothing concludes we do not answer — and what they typically
 do next is publish the vulnerability instead of reporting it. An advertised
-dead mailbox is worse than no mailbox.
+dead mailbox is worse than no mailbox — and after 11 September it converts a
+private report into a public zero-day with a 24-hour clock already running.
 
 **Owner: product management.** Effort: under an hour, plus a web upload.
+
+### Five more things, before the same date
+
+Each is a decision or an errand. None needs engineering time.
+
+1. **Name a duty officer and a deputy.** *Product management.* A 24-hour clock needs
+   a person, not a group: who reads the mailbox each working day, who covers holidays
+   and weekends, and who may file the early warning **without waiting for Carl**. The
+   early warning commits us to no finding — it says we are aware and looking — so
+   gating it on one person's availability is the single most likely way we miss it.
+2. **Establish which national team we report to.** *Legal.* Reports go to ENISA *and*
+   to the cyber-incident team of the country where the manufacturer is established in
+   the EU — or where its EU authorised representative is, for a manufacturer based
+   outside it. We are a US company, so counsel needs to tell us which one that is and
+   whether an authorised representative is required or advisable. **This is the only
+   item whose duration we do not control. Start it first.**
+3. **Get access to the reporting platform before we need it.** *Product management.*
+   Whatever registration it requires, do it in a quiet week. Nobody should be creating
+   a login for the first time inside a 24-hour window.
+4. **Draft the two notices now.** *Product management.* A fill-in-the-blanks early
+   warning, and a customer notice for the duty to inform affected users. Twenty
+   minutes of writing now, an hour we will not have later. The customer notice needs a
+   distribution list — who we email when a fielded unit is affected — which we should
+   confirm exists.
+5. **Run one 30-minute drill before 11 September.** *Product management and one
+   engineer.* Send a fabricated report to the new mailbox and walk it end to end: who
+   saw it, how fast, which builds are affected, what the early warning would say, who
+   signs it, who tells the customer. Every serious defect this programme has found
+   came from running something rather than reading it; this is that principle applied
+   to the process instead of the product.
+
+**What makes this cheap for us**, and it was deliberate: every release carries a bill
+of materials tied to its build identifier and cross-checked against the vulnerability
+report, so *"which builds are affected?"* has an answer in the first hour rather than
+after an investigation; and the signed update path is proven on hardware, so *"a
+corrective measure is available"* is reachable inside the 14 days — once the key
+ceremony in §2a has happened.
 
 ---
 
@@ -164,11 +251,21 @@ documents rest on is true and demonstrable, which is what
 
 ## The shortest path from here
 
-1. **This week:** create the security mailbox, publish the two files, confirm
-   from outside. *That is the deadline; nothing else is.*
-2. **Same meeting:** sign the signing policy, confirm the five-year support
+1. **Today:** mail counsel the reporting-routing question (§1, item 2). It is the
+   only piece whose duration we do not control, so it goes first even though it is
+   the least visible.
+2. **This week:** create the security mailbox, publish the two files, confirm from
+   outside — and name the duty officer and deputy in the same message.
+3. **Same meeting:** sign the signing policy, confirm the five-year support
    period, start the legal review, answer the two product questions.
-3. **Before first shipment:** hold the key ceremony.
+4. **By 4 September:** platform access obtained, both notices drafted, customer
+   distribution list confirmed.
+5. **By 9 September:** run the drill. Fix what it exposes — it will expose
+   something, and two days of margin is the point.
+6. **Before first shipment:** hold the key ceremony.
 
-One conversation covers items 2 and 3 of that list. Only the first is bound to
-a date.
+Steps 1, 2, 4 and 5 are bound to 11 September. Step 3 and the key ceremony are not
+— they block first customer shipment, which is a different constraint, and they are
+one conversation rather than three.
+
+Nothing should happen on 11 September. That is the objective.

@@ -1,8 +1,11 @@
 #!/bin/bash
 # Guard the public disclosure channel (CRA Annex I Part II §5 and §6).
 #
-# From 11 Sep 2026 a reporter must be able to reach us, and the route they will
-# try is /.well-known/security.txt. Three ways that route breaks quietly:
+# The published-channel duty itself lands 11 Dec 2027 with the rest of Annex I.
+# What makes this urgent earlier is Art. 14: from 11 Sep 2026 we owe ENISA and a
+# CSIRT a report within 24 h of *becoming aware* that a vulnerability is being
+# exploited, and the way we become aware is that a reporter reaches us. The route
+# they will try is /.well-known/security.txt. Three ways that route breaks quietly:
 #
 #   1. EXPIRY. RFC 9116 makes `Expires` mandatory and a lapsed file INVALID.
 #      Nothing announces it. A file published once and forgotten stops being a

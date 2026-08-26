@@ -21,8 +21,8 @@ cheap before first customer delivery and expensive after. It shares that door
 with the **partition-layout freeze** (`cra-compliance-plan.md` item 11) and the
 **signing-key ceremony** — three one-way doors that all shut on the same day.
 
-There is no CRA deadline here. The 11 Sep 2026 obligation is the reporting
-mailbox, not this.
+There is no CRA deadline here. The 11 Sep 2026 obligation is Art. 14 reporting
+(and the mailbox that makes it performable), not this.
 
 ## Open items
 

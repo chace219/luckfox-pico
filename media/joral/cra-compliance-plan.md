@@ -10,8 +10,22 @@ product management and legal. Everything below assumes the codebase.*
 
 ## Key dates
 
-- **11 September 2026** — vulnerability/incident reporting obligations begin (applies to already-shipped units).
-- **11 December 2027** — full CRA compliance (CE marking, technical file, labeling) for products newly placed on the EU market.
+- **11 September 2026** — **Art. 14 reporting obligations begin.** An *actively exploited* vulnerability, or a *severe incident* affecting the security of the product, must be reported to **ENISA and the coordinating national CSIRT** through the EU single reporting platform: **early warning within 24 h of becoming aware**, **notification within 72 h**, **final report within 14 days** of a corrective measure being available (one month for a severe incident). Art. 14(8) also requires telling **affected users** — if we do not, the CSIRT may do it for us. Applies to units **already placed on the EU market**, not only to what ships next.
+- **11 December 2027** — everything else: CE marking, technical file, labelling, and the Annex I essential requirements themselves — **including** the Part II §5/§6 duty to run a coordinated-disclosure policy and publish a contact address.
+
+**Why the September date is not ours to move.** The CRA is a *regulation*: directly
+applicable in every member state, no national transposition to wait for, no
+implementation grace period after the date. The trigger is an event we do not control
+— someone exploiting a vulnerability, or telling us they have — and the clock runs
+**24 hours from awareness**, not from understanding, reproduction or fix. It reaches
+*backwards*, to units already sold, irrespective of contract or warranty state.
+Enforcement is by market surveillance authorities whose powers extend to ordering a
+product withdrawn from the market, and breaches of the Art. 13/14 obligations sit in
+the **top fine band** (figure for counsel to confirm, not for this document). And the
+failure is visible in the worst possible setting: a missing CE mark surfaces in an
+audit; a missed 24-hour report surfaces mid-exploitation, in front of the affected
+customer. **Nothing on the engineering list is required by it. Being able to *hear*
+that the clock has started is** — which is what the mailbox is for.
 
 ## Kernel of the requirements doc
 
@@ -63,16 +77,70 @@ was found by executing, not by reading. Per-product detail lives in each tree's
 | §1 SBOM per release | **met 2026-08-22, and it was not before.** `./build.sh sbom` is Buildroot legal-info + a hand-declared app layer + `platform-extra.csv`. That third source is new: until 08-22 the SBOM listed **neither the kernel, U-Boot, the bootloader blobs, the Rockchip media SDK nor the C library**, while the CVE report checked them all from its own `cpe-extra.csv`. The two are now cross-checked and disagreeing fails the build. `sbom` also joined the release gate line, which is why the tree held a CVE report two releases newer than its SBOM |
 | §2 Address vulnerabilities without delay | **met at the gate** — triage rows carry an owner and a `REVIEW_BY` date; first expiries 2026-11 |
 | §3 Periodic security testing | **partial** — **CI and parser fuzzing landed 2026-08-23** (`make test` on every push in both repos; a deterministic fuzz replay inside `make test`, coverage-guided libFuzzer nightly; one defect found and fixed — see the dated entry). Owed on that half: the coverage-guided run has never executed, only ~24M/~32M random rounds. The hardware bench is the loop that finds the real defects; **two** legs outstanding (item 8 b, which needs a broker whose authentication we control, and g, which gates nothing). a, c–f closed 08-19/20; h–k opened and closed 2026-08-21, and that session found three defects no reading of the tree could have shown: a renamed init script shipping twice, a purge whose silence was unreadable, and a command both customer manuals told operators to run that this image has never had |
-| §4–6 Coordinated disclosure | **partial — the only deadline-bound row, and nothing on it is engineering's.** Policy, address and the publishable `security.txt` + policy page are all done (08-09, 08-18, `disclosure/`); the **mailbox does not exist yet**, and until mail is received the row is not met |
+| §4–6 Coordinated disclosure | **partial — and nothing on it is engineering's.** Policy, address and the publishable `security.txt` + policy page are all done (08-09, 08-18, `disclosure/`); the **mailbox does not exist yet**, and until mail is received the row is not met. *Annex I applies from 11 Dec 2027, so this row is **not itself** the September deadline — corrected 2026-08-25, see the dated entry. It is the tripwire that makes the September deadline performable, which is why it is still the first thing to close* |
+| **Art. 14 reporting** *(not Annex I — the 11 Sep 2026 row)* | **not started, and none of it is engineering's either.** 24 h / 72 h / 14 d reporting to ENISA + the coordinating CSIRT via the single reporting platform, plus Art. 14(8) notice to affected users. Owed: a **named duty officer and deputy** with standing authority to file an early warning without escalation; **counsel's answer on which CSIRT** (it follows the main EU establishment, or an authorised representative's — and we are US-based); **platform access obtained in advance**; drafted early-warning and customer notices with a confirmed distribution list; and **one drill**. What engineering owes is already in place: the build-ID→SBOM mapping and the CVE gate answer *which builds are affected* in the first hour, and the signed A/B path makes *"a corrective measure is available"* reachable inside 14 days once the key ceremony has happened |
 
-**The one date that binds: 11 Sep 2026**, ~3.5 weeks out. Nothing on the
-engineering list is required by it; the mailbox is — and as of 2026-08-18 the
-files that go with it are written, validated and waiting in `disclosure/`, so
-what remains is a Workspace group and a web upload, in that order.
+**The one date that binds: 11 Sep 2026**, 17 days out. What binds on it is
+**Art. 14 reporting**, not the Annex I disclosure row — see the 2026-08-25 entry
+below, which corrects that. Nothing on the engineering list is required by it. The
+mailbox is, because a 24-hour clock we cannot hear start is a 24-hour clock we miss;
+and as of 2026-08-18 the files that go with it are written, validated and waiting in
+`disclosure/`, so what remains there is a Workspace group and a web upload, in that
+order. The rest of Art. 14 — a duty officer, the CSIRT routing question, platform
+access, two draft notices, one drill — is product management's and counsel's, and is
+listed in the Part II table above and in
+[`cra-remaining-work.md`](cra-remaining-work.md).
 
 ## Closed since the audit
 
 *Appended as items land. The table above stays a snapshot of the 2026-07-26 audit.*
+
+- **2026-08-25 — the September deadline was attributed to the wrong obligation, in
+  every document that mentions it.** This document, `cra-remaining-work.md` and
+  `disclosure/README.md` all described 11 Sep 2026 as the date from which *"a
+  researcher must have a published way to tell us"*. That is Annex I Part II §5/§6,
+  and **Annex I applies from 11 December 2027**. What starts on **11 September 2026**
+  is **Art. 14**: *our* obligation to report an actively exploited vulnerability or a
+  severe incident to ENISA and the coordinating national CSIRT through the single
+  reporting platform — 24 h early warning, 72 h notification, 14 d final report (one
+  month for an incident) — plus Art. 14(8) notice to affected users. Outbound, not
+  inbound.
+
+  **The error was not conservative, which is why it is written up.** Every previous
+  correction in this file was an *undercount* — work recorded as owed that was
+  already done. This one is the other kind: it made the deadline look *smaller* than
+  it is. Read literally, the whole September obligation was "create a mailbox and
+  upload two files", roughly an hour of work, and the plan said so in three places.
+  The actual obligation is a 24-hour response capability with a named human on it,
+  a routing question only counsel can answer, and a platform login nobody has. An
+  undercount of scope costs a wasted bench session; this one would have been
+  discovered at the only moment it cannot be fixed — with a clock already running.
+
+  **The mailbox stays the first action, and the reasoning for it gets stronger, not
+  weaker.** It is not the obligation; it is the tripwire that makes the obligation
+  performable. The realistic way a manufacturer this size first learns that a
+  vulnerability in its fielded units is being exploited is that somebody writes and
+  says so. What changed is the *sufficiency* claim: the three-step runbook in
+  `disclosure/README.md` closes the channel and closes nothing else.
+
+  **How it survived.** The source was the internal requirements translation
+  (`CRA_Gateway_Requirements_1.docx`), which lists Annex I and Annex II and folds the
+  reporting duty into the disclosure section — reasonable for a document about
+  firmware requirements, wrong as a schedule. The audit inherited the framing and
+  every later document inherited it from the audit, so the claim was repeated four
+  times and never re-derived from the regulation. Same shape as the 08-23 entry: the
+  roll-up and its source drifted while each was locally consistent. The difference
+  is that no dated entry contradicted this one, so no gate of the kind proposed on
+  08-23 would have caught it. **What catches this class is checking a claim against
+  the instrument rather than against our own restatement of it** — which is worth
+  doing once for every date, requirement number and article this file cites, and is
+  now the standing rule for citations of the regulation itself.
+
+  Corrected in: Key dates, the Annex I Part II table (§4–6 reworded, an Art. 14 row
+  added), "The one date that binds", remaining-work item 1,
+  `cra-remaining-work.md` §1 and its shortest-path list, and
+  `disclosure/README.md`. Owner-facing memo for Carl:
+  `cra-article-14-readiness.html` / `.pdf`.
 
 - **2026-08-23 — reconciliation: two places where this document disagreed with
   itself.** Both were *undercounts* — work recorded as owed that the same
@@ -3396,8 +3464,11 @@ U-Boot or the C library until 2026-08-22, and was not regenerated per release
 until the same day — see the two dated entries. 'Closed' now means a gate fails
 when it stops being true.)* What is actually left, deadline item first:
 
-1. **Disclosure channel** — *deadline-bound: reporting obligations start 11 Sep 2026,
-   **~3.5 weeks out**, and apply to already-shipped units.* **Engineering half done
+1. **Disclosure channel** — *the tripwire for the 11 Sep 2026 deadline. Art. 14
+   reporting starts that day, **17 days out**, and applies to units already placed
+   on the market. The published-channel duty itself is Annex I Part II §5/§6 and is
+   a **Dec 2027** duty — this row is how we find out that a 24-hour clock has
+   started, which is why it is still first.* **Engineering half done
    2026-08-09** (see the dated entry above): `security@joralllc.com` is documented
    in both manuals, the on-device Help, the customer PDFs and each tree's
    `SECURITY.md`.
@@ -3429,6 +3500,21 @@ when it stops being true.)* What is actually left, deadline item first:
    **partial** until mail to the address is actually received; a row that read
    "met" on the strength of a written policy would be the same failure this
    programme keeps finding. The docs must not ship to customers before then.
+
+   **And the mailbox is necessary, not sufficient — this is new on 2026-08-25.**
+   The three steps above build the tripwire; they do not build the response. Art. 14
+   needs five more things before 11 Sep, none of them engineering and none longer
+   than the meeting they are decided in: a **named duty officer and deputy** with
+   authority to file the 24-hour early warning *without* waiting for Carl (the early
+   warning commits us to no finding, so gating it on one person's availability is the
+   likeliest way we miss it); **counsel's answer on which CSIRT we report to**, which
+   for a US-based manufacturer turns on main establishment / authorised
+   representative and is the only item whose duration we do not control; **single
+   reporting platform access obtained in a quiet week**; **a fill-in early warning
+   and an Art. 14(8) customer notice drafted in advance**, with a confirmed customer
+   distribution list; and **one 30-minute drill** walking a fabricated report end to
+   end. Owner-facing version with dates in
+   [`cra-remaining-work.md`](cra-remaining-work.md) §1.
 
    The two firmware-update decisions (4b) — **signing-key custody** and the
    **declared support period** — are a ready-to-sign memo:
