@@ -1,0 +1,98 @@
+#!/bin/sh
+
+# Auto-configure and bring up can1 at boot, from /etc/media-gateway/can1.conf,
+# via the shared /usr/bin/can0-apply.sh (which takes the interface and the
+# config file from the environment).
+#
+# can1 is the second MCP251863 on spi0.2. Unlike can0 this channel is NOT
+# touched by the web UI: the configuration page's CGI rewrites gateway.conf
+# wholesale on save, so can1's settings live in their own file and are only
+# changed over SSH.
+#
+# The media-gateway daemon does not use can1 (CAN_IFACE is compile-time "can0"),
+# so this script only brings the link up for candump/cansend and local tooling.
+#
+# Set CAN1_AUTOCONFIG=0 (env or here) to skip automatic bring-up.
+CAN1_AUTOCONFIG="${CAN1_AUTOCONFIG:-1}"
+CAN_IFACE="${CAN_IFACE:-can1}"
+CAN1_CONF="${CAN1_CONF:-/etc/media-gateway/can1.conf}"
+CAN_APPLY="/usr/bin/can0-apply.sh"
+MAX_WAIT_SECS=10
+
+# read an INI value: strip inline "# comment" and whitespace
+ini() {
+	grep -E "^[[:space:]]*$1=" "$CAN1_CONF" 2>/dev/null | head -1 \
+		| cut -d= -f2- | sed 's/#.*//' | tr -d ' \r'
+}
+
+wait_for_iface() {
+	count=0
+	while [ ! -d "/sys/class/net/${CAN_IFACE}" ] && [ "$count" -lt "$MAX_WAIT_SECS" ]; do
+		sleep 1
+		count=$((count + 1))
+	done
+
+	[ -d "/sys/class/net/${CAN_IFACE}" ]
+}
+
+start() {
+	if [ "$CAN1_AUTOCONFIG" != "1" ]; then
+		echo "CAN boot config skipped: auto bring-up of ${CAN_IFACE} disabled (set CAN1_AUTOCONFIG=1 to enable)"
+		return 0
+	fi
+
+	if [ ! -f "$CAN1_CONF" ]; then
+		echo "CAN boot config skipped: ${CAN1_CONF} not found"
+		return 0
+	fi
+
+	# Per-channel kill switch, so a unit with only one transceiver populated
+	# does not spend MAX_WAIT_SECS at every boot waiting for an absent can1.
+	case "$(ini can1_enabled)" in
+		false|0|no)
+			echo "CAN boot config skipped: ${CAN_IFACE} disabled in ${CAN1_CONF}"
+			return 0
+			;;
+	esac
+
+	if [ ! -x "$CAN_APPLY" ]; then
+		echo "CAN boot config skipped: ${CAN_APPLY} not found"
+		return 0
+	fi
+
+	if ! wait_for_iface; then
+		echo "CAN boot config skipped: ${CAN_IFACE} did not appear"
+		return 0
+	fi
+
+	CAN_IFACE="$CAN_IFACE" GATEWAY_CONF="$CAN1_CONF" "$CAN_APPLY"
+	return $?
+}
+
+stop() {
+	[ -d "/sys/class/net/${CAN_IFACE}" ] && ip link set "${CAN_IFACE}" down >/dev/null 2>&1
+	return 0
+}
+
+restart() {
+	stop
+	start
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart|reload)
+		restart
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+	esac
+
+exit $?

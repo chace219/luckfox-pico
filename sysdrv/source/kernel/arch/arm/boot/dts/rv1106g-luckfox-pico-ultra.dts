@@ -13,6 +13,20 @@
 	model = "Luckfox Pico Ultra";
 	compatible = "rockchip,rv1103g-38x38-ipc-v10", "rockchip,rv1106g3";
 
+	/*
+	 * Shared oscillator for both MCP251863 modules (can@0 and can@2).
+	 * Must match the actual X1 crystal on the modules: the driver takes
+	 * this as SYSCLK directly (it never enables the MCP's PLL), so a
+	 * mismatch silently scales every bit rate - the link reports the
+	 * requested bitrate while the wire runs at another.
+	 *
+	 * 40 MHz is bench-verified, NOT a guess: at 20 MHz the driver computed
+	 * tq 50ns and both channels went silent (cansend produced nothing on
+	 * the USB CAN FD analyser); at 40 MHz it computes tq 25ns / brp 1,
+	 * which divides to exactly 500 kbit/s and passes traffic both ways.
+	 * Schematic 89-S&C-R0 shows a 20 MHz X1 - that symbol does not match
+	 * the modules actually fitted. Do not "correct" this to 20 MHz.
+	 */
 	mcp251xfd_osc: mcp251xfd-osc {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
@@ -66,6 +80,25 @@
 
 		mcp251xfd_int_pin: mcp251xfd-int-pin {
 			rockchip,pins = <2 RK_PA7 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+
+	mcp251xfd2 {
+		/*
+		 * Second MCP251863 on the same SPI0 bus, GPIO chip-select for the
+		 * same reason as CS0/CS1 above. GPIO2_A4/A5 are otherwise idle on
+		 * this board: their alternate mux is UART1_M1, and the Ultra's
+		 * Bluetooth uses uart1m0 (GPIO1_A3/A4), not uart1m1.
+		 * NOTE: the pad default bias for this pair is pull-down (cf.
+		 * sdmmc1m0_idle_pins), so CS needs an external 10k pull-up to keep
+		 * it deasserted in the window before pinctrl runs at boot.
+		 */
+		mcp251xfd2_cs_pin: mcp251xfd2-cs-pin {
+			rockchip,pins = <2 RK_PA4 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
+		mcp251xfd2_int_pin: mcp251xfd2-int-pin {
+			rockchip,pins = <2 RK_PA5 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 	};
 };
@@ -214,12 +247,18 @@
 /**********SPI**********/
 &spi0 {
 	status = "okay";
-	num-cs = <2>;
-	/* CS0 = MCP251xFD (GPIO1_C0), CS1 = LAN8651 (GPIO1_B2); both GPIO, no native CS */
-	cs-gpios = <&gpio1 RK_PC0 GPIO_ACTIVE_LOW>, <&gpio1 RK_PB2 GPIO_ACTIVE_LOW>;
+	num-cs = <3>;
+	/*
+	 * CS0 = MCP251xFD #1 (GPIO1_C0), CS1 = LAN8651 (GPIO1_B2),
+	 * CS2 = MCP251xFD #2 (GPIO2_A4); all GPIO, no native CS.
+	 */
+	cs-gpios = <&gpio1 RK_PC0 GPIO_ACTIVE_LOW>,
+		   <&gpio1 RK_PB2 GPIO_ACTIVE_LOW>,
+		   <&gpio2 RK_PA4 GPIO_ACTIVE_LOW>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0m0_clk &spi0m0_miso &spi0m0_mosi &mcp251xfd_cs_pin
-				     &lan8651_cs_pin &lan8651_int_pin &mcp251xfd_int_pin>;
+				     &lan8651_cs_pin &lan8651_int_pin &mcp251xfd_int_pin
+				     &mcp251xfd2_cs_pin &mcp251xfd2_int_pin>;
 	/delete-node/ spidev@0;
 
 	mcp251xfd: can@0 {
@@ -253,6 +292,17 @@
 		microchip,plca-enable;
 		microchip,plca-node-id = <0>;	/* 0 = PLCA coordinator (generates the BEACON) */
 		microchip,plca-node-count = <8>;
+		status = "okay";
+	};
+
+	mcp251xfd2: can@2 {
+		compatible = "microchip,mcp251xfd";
+		reg = <2>;
+		/* Same derate as can@0 - see the comment there. */
+		spi-max-frequency = <8000000>;
+		clocks = <&mcp251xfd_osc>;
+		interrupt-parent = <&gpio2>;
+		interrupts = <RK_PA5 IRQ_TYPE_LEVEL_LOW>;
 		status = "okay";
 	};
 };
