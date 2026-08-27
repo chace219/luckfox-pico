@@ -1,9 +1,15 @@
 #!/bin/sh
-# can0-apply.sh — bring up can0 from the [can_bus] settings in gateway.conf.
+# can0-apply.sh — bring up a CAN link from the [can_bus] settings in an INI file.
 #
-# Single source of truth for the CAN link config, invoked by BOTH:
-#   - the boot init script (S98can0config)
-#   - the web UI CGI (config.sh) on "Save & Apply"
+# Despite the name this now drives EITHER channel, selected by $CAN_IFACE and
+# $GATEWAY_CONF (kept as-is because the web UI privop and existing docs call it
+# by this path):
+#   can0 -> /etc/media-gateway/gateway.conf   (default; written by the web UI)
+#   can1 -> /etc/media-gateway/can1.conf      (S98can1config)
+#
+# Single source of truth for the CAN link config, invoked by:
+#   - the boot init scripts (S98can0config, S98can1config)
+#   - the web UI CGI (config.sh) on "Save & Apply"  [can0 only]
 # so boot-time and runtime use the same path. This is what makes a runtime
 # CAN 2.0B <-> CAN FD transition from the configuration page take effect on the
 # bus (the media-gateway daemon itself only opens an already-up can0 — ADR-016).
@@ -13,11 +19,15 @@
 #   can_arb_sample_point, can_data_sample_point   (sample points are percent)
 # Falls back to classic 500 kbit/s if the file/keys are absent.
 
+# Interface and config file are both overridable so this one script serves
+# BOTH channels: can0 from gateway.conf (owned by the web UI), can1 from
+# can1.conf (owned by the operator over SSH — the config page's CGI rewrites
+# gateway.conf wholesale, so can1 must not live there).
 IFACE="${CAN_IFACE:-can0}"
 CONF="${GATEWAY_CONF:-/etc/media-gateway/gateway.conf}"
 RESTART_MS="${CAN_RESTART_MS:-100}"
 
-log() { echo "can0-apply: $*"; }
+log() { echo "${IFACE}-apply: $*"; }
 
 # read an INI value: strip inline "# comment" and whitespace
 ini() {
