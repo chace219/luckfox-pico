@@ -1,0 +1,68 @@
+#!/bin/sh
+
+# Install the kernel CAN gateway routes at boot, from
+# /etc/media-gateway/can-routes.conf via /usr/bin/can-routes-apply.sh.
+#
+# Ordered S99 — after S98can0config and S98can1config, because cangw rules
+# reference interfaces that must already exist and be up.
+#
+# Routing is a kernel data path: once these rules are installed, frames are
+# forwarded whether or not the media-gateway daemon is running.
+#
+# Set CAN_ROUTES_AUTOCONFIG=0 (env or here) to skip installing routes at boot.
+CAN_ROUTES_AUTOCONFIG="${CAN_ROUTES_AUTOCONFIG:-1}"
+CAN_ROUTES_CONF="${CAN_ROUTES_CONF:-/etc/media-gateway/can-routes.conf}"
+ROUTES_APPLY="/usr/bin/can-routes-apply.sh"
+
+start() {
+	if [ "$CAN_ROUTES_AUTOCONFIG" != "1" ]; then
+		echo "CAN routes skipped: disabled (set CAN_ROUTES_AUTOCONFIG=1 to enable)"
+		return 0
+	fi
+
+	if [ ! -x "$ROUTES_APPLY" ]; then
+		echo "CAN routes skipped: ${ROUTES_APPLY} not found"
+		return 0
+	fi
+
+	if [ ! -f "$CAN_ROUTES_CONF" ]; then
+		echo "CAN routes skipped: ${CAN_ROUTES_CONF} not found"
+		return 0
+	fi
+
+	CAN_ROUTES_CONF="$CAN_ROUTES_CONF" "$ROUTES_APPLY"
+	return $?
+}
+
+stop() {
+	# Remove every rule. Routing is kernel state that outlives this script, so
+	# stopping the service must actually tear the data path down.
+	command -v cangw >/dev/null 2>&1 && cangw -F >/dev/null 2>&1
+	return 0
+}
+
+restart() {
+	stop
+	start
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart|reload)
+		restart
+		;;
+	status)
+		command -v cangw >/dev/null 2>&1 && cangw -L
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart|status}"
+		exit 1
+		;;
+	esac
+
+exit $?

@@ -1,0 +1,176 @@
+# J1939 PGN dictionary — <PGN decimal>\t<acronym>\t<name>
+#
+# Used by can-routes-apply.sh to accept names in place of numbers, and by the
+# configuration page to label PGNs. Any PGN may still be given as a decimal or
+# 0x-hex number whether or not it appears here — this file is a convenience,
+# never a whitelist of what is routable.
+#
+# Sourced from SAE J1939-71 / J1939-DA parameter group assignments. Entries
+# marked (TP) are normally multi-packet: a frame-level filter cannot match them
+# by PGN, because they travel as TP.CM/TP.DT frames whose identifiers carry the
+# transport PGN (60416/60160), not the payload PGN. can-routes-apply.sh warns
+# when one is used in a route.
+#
+# Keep sorted by PGN. Tab-separated; '#' begins a comment.
+
+0	TSC1	Torque/Speed Control 1
+256	TSC1_DE	Torque/Speed Control 1 (destination specific)
+1024	ERC1_DE	Electronic Retarder Controller 1 (dest specific)
+1280	EBC1_DE	Electronic Brake Controller 1 (dest specific)
+2048	CM1	Cab Message 1
+2560	TCFG	Transmission Configuration
+51456	RQST2	Request 2
+51712	TF	Transfer
+53248	TPDT	Transport Protocol Data Transfer (TP)
+55552	AC	Address Claimed / Cannot Claim
+56320	TPCM	Transport Protocol Connection Mgmt (TP)
+57344	CM	Cab Message
+57600	EBC2	Electronic Brake Controller 2
+58112	VDC1	Vehicle Dynamic Stability Control 1
+58368	TCO1	Tachograph
+58624	VDC2	Vehicle Dynamic Stability Control 2
+59392	ACKM	Acknowledgment Message
+59904	RQST	Request
+60160	TP_DT	Transport Protocol Data Transfer (TP)
+60416	TP_CM	Transport Protocol Connection Mgmt (TP)
+60671	ETC7	Electronic Transmission Controller 7
+60928	AC_CA	Address Claimed
+61184	PropA	Proprietary A
+61440	ERC1	Electronic Retarder Controller 1
+61441	EBC1	Electronic Brake Controller 1
+61442	ETC1	Electronic Transmission Controller 1
+61443	EEC2	Electronic Engine Controller 2
+61444	EEC1	Electronic Engine Controller 1
+61445	ETC2	Electronic Transmission Controller 2
+61446	HRW	Hydraulic Retarder Wear
+61447	ABL	Air Brake Load
+61448	AIR1	Air Supply Pressure 1
+61449	VDS	Vehicle Distance Setting
+61450	EGF1	Engine Gas Flow Rate
+61451	CVW	Cargo Weight
+61452	EOI	Engine Operating Info
+61453	AT1IG1	Aftertreatment 1 Intake Gas 1
+61454	AT1OG1	Aftertreatment 1 Outlet Gas 1
+61455	AT2IG1	Aftertreatment 2 Intake Gas 1
+61456	AT2OG1	Aftertreatment 2 Outlet Gas 1
+61457	VEP2	Vehicle Electrical Power 2
+61458	SHUTDN	Shutdown
+61459	TRF1	Transmission Fluids 1
+61460	ETC5	Electronic Transmission Controller 5
+61461	ETC6	Electronic Transmission Controller 6
+61462	EEC5	Electronic Engine Controller 5
+61463	EEC4	Electronic Engine Controller 4
+61464	EEC3	Electronic Engine Controller 3
+61465	VF	Vehicle Fluids
+61466	TC1	Transmission Control 1
+61467	ETC3	Electronic Transmission Controller 3
+61468	ETC4	Electronic Transmission Controller 4
+64777	HOURS2	Engine Hours Alternate
+64891	AT1S	Aftertreatment 1 Service
+64892	AT1T1I	Aftertreatment 1 Trip 1 Info
+64914	EI	Engine Information
+64932	ETC8	Electronic Transmission Controller 8
+64965	ET3	Engine Temperature 3
+64976	CCSS	Cruise Control Set Speed
+64977	EBC5	Electronic Brake Controller 5
+64981	EEC6	Electronic Engine Controller 6
+64984	VDC3	Vehicle Dynamic Stability Control 3
+65098	TPRS	Tire Pressure Reference Setting
+65128	VEP3	Vehicle Electrical Power 3
+65129	EFL_P4	Engine Fluid Level/Pressure 4
+65131	DD1	Driver Identification
+65132	TCO1_A	Tachograph Alternate
+65136	AWPP	Auxiliary Water Pump Pressure
+65137	AT1IMG	Aftertreatment 1 Intermediate Gas
+65138	BJM	Battery Jump Monitor
+65139	RF2	Retarder Fluids 2
+65140	MVS	Multiplexed Vehicle Signals
+65142	SERV	Service Information
+65143	VDPD	Vehicle Distance/Position Data
+65150	EBC3	Electronic Brake Controller 3
+65151	EBC4	Electronic Brake Controller 4
+65152	FLI2	Fuel Leakage Information 2
+65153	AT1IMG2	Aftertreatment 1 Intermediate Gas 2
+65154	AT2IMG	Aftertreatment 2 Intermediate Gas
+65161	CCVS2	Cruise Control/Vehicle Speed 2
+65163	EEC7	Electronic Engine Controller 7
+65165	VEP4	Vehicle Electrical Power 4
+65166	VEP5	Vehicle Electrical Power 5
+65168	ET4	Engine Temperature 4
+65170	EOAC	Engine Oil Aeration Control
+65176	AT1HI1	Aftertreatment 1 Historical Info 1
+65177	AT1HI2	Aftertreatment 1 Historical Info 2
+65198	EFL_P3	Engine Fluid Level/Pressure 3
+65199	FLI1	Fuel Leakage Information 1
+65200	TRF2	Transmission Fluids 2
+65201	ERC2	Electronic Retarder Controller 2
+65202	TPRP	Tire Pressure Reference Point
+65203	FL	Fuel Leakage
+65204	TI	Trip Information
+65205	VDHR2	High Resolution Vehicle Distance 2
+65206	IMT	Intake Manifold Temperature
+65207	ES	Engine Speed
+65208	TWI	Total Weight Information
+65209	AWI	Axle Weight Information
+65210	AVI	Axle Vertical Information
+65211	TRPD	Trip Distance
+65212	TRPF	Trip Fuel
+65213	FD	Fan Drive
+65214	EBC6	Electronic Brake Controller 6
+65215	EBC7	Wheel Speed Information
+65216	SERV2	Service Information 2
+65217	VDHR	High Resolution Vehicle Distance
+65218	TPMS	Tire Pressure Monitoring
+65219	TIRE1	Tire Condition
+65226	DM1	Active Diagnostic Trouble Codes (TP)
+65227	DM2	Previously Active Diagnostic Codes (TP)
+65228	DM3	Diagnostic Data Clear
+65229	DM4	Freeze Frame Parameters (TP)
+65230	DM5	Diagnostic Readiness 1
+65231	DM6	Continuously Monitored Systems (TP)
+65232	DM7	Command Non-Continuously Monitored Test
+65233	DM8	Test Results Non-Continuous Monitored
+65234	DM9	OBD Monitor Test Results
+65235	DM10	Non-Continuously Monitored Systems
+65236	DM11	Diagnostic Data Clear Active DTCs
+65237	DM12	Emissions Related Active DTCs (TP)
+65240	AC_CA2	Address Claimed 2
+65242	SOFT	Software Identification (TP)
+65243	EFL_P2	Engine Fluid Level/Pressure 2
+65244	IC2	Inlet/Exhaust Conditions 2
+65245	TCI	Turbocharger Information
+65246	ABS	Air Brake System
+65247	ERC1_2	Electronic Retarder Controller 1 (2)
+65248	VD	Vehicle Distance
+65249	RC	Retarder Configuration (TP)
+65250	TC	Transmission Configuration (TP)
+65251	EC	Engine Configuration (TP)
+65252	SHUTDN2	Shutdown 2
+65253	HOURS	Engine Hours, Revolutions
+65254	TD	Time/Date
+65255	VH	Vehicle Hours
+65256	VDIR	Vehicle Direction/Speed
+65257	LFC	Fuel Consumption (Liquid)
+65258	VW	Vehicle Weight
+65259	CI	Component Identification (TP)
+65260	VI	Vehicle Identification (TP)
+65261	CCSS2	Cruise Control/Vehicle Speed Setup
+65262	ET1	Engine Temperature 1
+65263	EFL_P1	Engine Fluid Level/Pressure 1
+65264	PTO	Power Takeoff Information
+65265	CCVS	Cruise Control/Vehicle Speed
+65266	LFE	Fuel Economy (Liquid)
+65267	VP	Vehicle Position
+65268	TCFG2	Transmission Configuration 2
+65269	AMB	Ambient Conditions
+65270	IC1	Inlet/Exhaust Conditions 1
+65271	VEP1	Vehicle Electrical Power 1
+65272	TF1	Transmission Fluids 1
+65273	AI	Axle Information
+65274	B	Brakes
+65275	RF	Retarder Fluids
+65276	DD	Dash Display
+65277	AIR	Air Supply Pressure
+65278	AWP	Auxiliary Water Pump
+65279	WFI	Water In Fuel Indicator
+65280	PropB	Proprietary B
