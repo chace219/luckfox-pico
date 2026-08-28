@@ -1,7 +1,8 @@
 #!/bin/sh
 
 # Auto-configure and bring up can0 at boot, from the [can_bus] settings in
-# /etc/media-gateway/gateway.conf, via the shared /usr/bin/can0-apply.sh.
+# /userdata/media-gateway/state/gateway.conf (seeded from the factory copy by
+# S39/S50), via the shared /usr/bin/can0-apply.sh.
 # The same script is invoked by the web UI on "Save & Apply", so boot-time and
 # runtime CAN 2.0B <-> CAN FD switching use one code path.
 #

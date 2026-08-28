@@ -16,7 +16,7 @@
 # any ECU at any priority. That is what makes this a PGN filter rather than a
 # CAN-ID filter.
 
-CONF="${CAN_ROUTES_CONF:-/etc/media-gateway/can-routes.conf}"
+CONF="${CAN_ROUTES_CONF:-/userdata/media-gateway/state/can-routes.conf}"
 PGNDB="${J1939_PGN_DB:-/usr/share/media-gateway/j1939-pgns.tsv}"
 
 log() { echo "can-routes: $*"; }
