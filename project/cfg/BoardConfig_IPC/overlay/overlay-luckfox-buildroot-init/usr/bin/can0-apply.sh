@@ -4,8 +4,8 @@
 # Despite the name this now drives EITHER channel, selected by $CAN_IFACE and
 # $GATEWAY_CONF (kept as-is because the web UI privop and existing docs call it
 # by this path):
-#   can0 -> /etc/media-gateway/gateway.conf   (default; written by the web UI)
-#   can1 -> /etc/media-gateway/can1.conf      (S98can1config)
+#   can0 -> /userdata/media-gateway/state/gateway.conf  (default; web UI copy)
+#   can1 -> /userdata/media-gateway/state/can1.conf     (S98can1config)
 #
 # Single source of truth for the CAN link config, invoked by:
 #   - the boot init scripts (S98can0config, S98can1config)
@@ -14,7 +14,7 @@
 # CAN 2.0B <-> CAN FD transition from the configuration page take effect on the
 # bus (the media-gateway daemon itself only opens an already-up can0 — ADR-016).
 #
-# Reads /etc/media-gateway/gateway.conf [can_bus]:
+# Reads the [can_bus] section of $GATEWAY_CONF:
 #   can_fd, can_arb_bitrate, can_data_bitrate,
 #   can_arb_sample_point, can_data_sample_point   (sample points are percent)
 # Falls back to classic 500 kbit/s if the file/keys are absent.
@@ -24,7 +24,14 @@
 # can1.conf (owned by the operator over SSH — the config page's CGI rewrites
 # gateway.conf wholesale, so can1 must not live there).
 IFACE="${CAN_IFACE:-can0}"
-CONF="${GATEWAY_CONF:-/etc/media-gateway/gateway.conf}"
+# The STATE copy on /userdata, not /etc: the config moved there in Phase 0 of
+# the swupdate plan (operator settings must survive an A/B rootfs update), but
+# this default kept pointing at the abandoned /etc location — so the [can_bus]
+# settings the console saved were never applied to the link at boot or on
+# Save & Apply; the script silently fell back to classic 500 kbit/s defaults.
+# Observed on the bench 2026-08-28 as can0 up with sample-point 0.875 (the
+# kernel default) while gateway.conf said 80.
+CONF="${GATEWAY_CONF:-/userdata/media-gateway/state/gateway.conf}"
 RESTART_MS="${CAN_RESTART_MS:-100}"
 
 log() { echo "${IFACE}-apply: $*"; }
