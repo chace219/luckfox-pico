@@ -12,6 +12,91 @@
 / {
 	model = "Luckfox Pico Pro Max";
 	compatible = "rockchip,rv1103g-38x38-ipc-v10", "rockchip,rv1106g3";
+
+	/*
+	 * Shared oscillator for both MCP251863 modules (can@0 and can@2).
+	 * Must match the actual X1 crystal on the modules: the driver takes
+	 * this as SYSCLK directly (it never enables the MCP's PLL), so a
+	 * mismatch silently scales every bit rate - the link reports the
+	 * requested bitrate while the wire runs at another.
+	 *
+	 * 40 MHz is bench-verified on the Ultra, NOT a guess: at 20 MHz the
+	 * driver computes tq 50ns and both channels go silent; at 40 MHz it
+	 * computes tq 25ns / brp 1, which divides to exactly 500 kbit/s and
+	 * passes traffic both ways. Schematic 89-S&C-R0 shows a 20 MHz X1 -
+	 * that symbol does not match the modules fitted. Do not "correct"
+	 * this to 20 MHz.
+	 */
+	mcp251xfd_osc: mcp251xfd-osc {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <40000000>;
+	};
+};
+
+/*
+ * Expansion board (LAN8651 10BASE-T1S + two MCP251863 CAN FD controllers).
+ *
+ * The Pro/Max header is smaller than the Ultra's and does not break out
+ * GPIO1_A0/A1/B0, while GPIO1_B2/B3 are the default UART2 console. Five nets
+ * are therefore on different pins than the Ultra - see Table 2 in
+ * README_EXPANSION_BOARD_PINOUT.md, which is the authority for the wiring:
+ *
+ *   LAN_CSN  GPIO1_B2 -> GPIO2_A2      LAN_RST  GPIO1_B0 -> GPIO1_C6
+ *   LAN_IRQ  GPIO1_B3 -> GPIO2_A3      I2C SCL  GPIO1_A0 -> GPIO2_A1
+ *                                      I2C SDA  GPIO1_A1 -> GPIO2_A0
+ *
+ * The SPI bus itself (GPIO1_C1/C2/C3), CAN1's CS (GPIO1_C0) and INT
+ * (GPIO2_A7), and CAN2's CS/INT (GPIO2_A4/A5) are the same pins on both
+ * boards, so only the adapter wiring differs - not this device tree's shape.
+ */
+&pinctrl {
+	lan8651 {
+		lan8651_cs_pin: lan8651-cs-pin {
+			rockchip,pins = <2 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		lan8651_int_pin: lan8651-int-pin {
+			rockchip,pins = <2 RK_PA3 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+
+	mcp251xfd {
+		/*
+		 * SPI0 CS0 pin (GPIO1_C0) driven as a plain GPIO chip-select.
+		 * The Rockchip SPI controller (SPI_MASTER_GPIO_SS) also asserts
+		 * native SER[0] on every GPIO-CS transfer, so the MCP must NOT
+		 * sit on native CS0 while the other devices use a GPIO CS -
+		 * otherwise their traffic re-selects the CAN controller and
+		 * corrupts it. Making every device GPIO-CS keeps them isolated.
+		 */
+		mcp251xfd_cs_pin: mcp251xfd-cs-pin {
+			rockchip,pins = <1 RK_PC0 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
+		mcp251xfd_int_pin: mcp251xfd-int-pin {
+			rockchip,pins = <2 RK_PA7 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+
+	mcp251xfd2 {
+		/*
+		 * Second MCP251863 on the same SPI0 bus, GPIO chip-select for
+		 * the same reason as above. GPIO2_A4/A5 are otherwise idle on
+		 * this board and, like the Ultra, their alternate mux is
+		 * UART1_M1 - which nothing here uses.
+		 * NOTE: the pad default bias for this pair is pull-down (cf.
+		 * sdmmc1m0_idle_pins), so CS needs an external 10k pull-up to
+		 * keep it deasserted before pinctrl runs at boot.
+		 */
+		mcp251xfd2_cs_pin: mcp251xfd2-cs-pin {
+			rockchip,pins = <2 RK_PA4 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
+		mcp251xfd2_int_pin: mcp251xfd2-int-pin {
+			rockchip,pins = <2 RK_PA5 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
 };
 
 /**********CRU**********/
@@ -95,12 +180,61 @@
 
 /**********SPI**********/
 &spi0 {
-	status = "disabled";
-	spidev@0 {
-		spi-max-frequency = <50000000>;
+	status = "okay";
+	num-cs = <3>;
+	/*
+	 * CS0 = MCP251xFD #1 (GPIO1_C0), CS1 = LAN8651 (GPIO2_A2),
+	 * CS2 = MCP251xFD #2 (GPIO2_A4); all GPIO, no native CS.
+	 */
+	cs-gpios = <&gpio1 RK_PC0 GPIO_ACTIVE_LOW>,
+		   <&gpio2 RK_PA2 GPIO_ACTIVE_LOW>,
+		   <&gpio2 RK_PA4 GPIO_ACTIVE_LOW>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi0m0_clk &spi0m0_miso &spi0m0_mosi &mcp251xfd_cs_pin
+			     &lan8651_cs_pin &lan8651_int_pin &mcp251xfd_int_pin
+			     &mcp251xfd2_cs_pin &mcp251xfd2_int_pin>;
+	/delete-node/ spidev@0;
+	/delete-node/ fbtft@0;
+
+	mcp251xfd: can@0 {
+		compatible = "microchip,mcp251xfd";
+		reg = <0>;
+		/* 8 MHz: derated from 10 MHz (ADR-013; chip max is 17 MHz = 85% of
+		 * SYSCLK/2 at 40 MHz) after CRC read errors on the shared SPI0 bus.
+		 * Keeps ~1.6x headroom over worst-case CAN FD 500k/2M SPI traffic;
+		 * do not lower further - transfers would occupy the shared bus even
+		 * longer, delaying LAN8651 OA-TC6 data-path servicing. */
+		spi-max-frequency = <8000000>;
+		clocks = <&mcp251xfd_osc>;
+		interrupt-parent = <&gpio2>;
+		interrupts = <RK_PA7 IRQ_TYPE_LEVEL_LOW>;
+		status = "okay";
 	};
-	fbtft@0 {
-		spi-max-frequency = <50000000>;
+
+	lan8651: ethernet@1 {
+		compatible = "microchip,lan8651";
+		reg = <1>;
+		/* 15 MHz: 25 MHz caused OA-TC6 'ctrl write echo mismatch' on the
+		 * shared SPI0 bus (cf. MCP251863 at 10 MHz, ADR-013). See the Ultra
+		 * DTS for the full derating history. */
+		spi-max-frequency = <15000000>;
+		interrupt-parent = <&gpio2>;
+		interrupts = <RK_PA3 IRQ_TYPE_EDGE_FALLING>;
+		microchip,plca-enable;
+		microchip,plca-node-id = <0>;	/* 0 = PLCA coordinator (generates the BEACON) */
+		microchip,plca-node-count = <8>;
+		status = "okay";
+	};
+
+	mcp251xfd2: can@2 {
+		compatible = "microchip,mcp251xfd";
+		reg = <2>;
+		/* Same derate as can@0 - see the comment there. */
+		spi-max-frequency = <8000000>;
+		clocks = <&mcp251xfd_osc>;
+		interrupt-parent = <&gpio2>;
+		interrupts = <RK_PA5 IRQ_TYPE_LEVEL_LOW>;
+		status = "okay";
 	};
 };
 
