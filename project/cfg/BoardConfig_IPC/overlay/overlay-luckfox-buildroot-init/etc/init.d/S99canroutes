@@ -11,7 +11,8 @@
 #
 # Set CAN_ROUTES_AUTOCONFIG=0 (env or here) to skip installing routes at boot.
 CAN_ROUTES_AUTOCONFIG="${CAN_ROUTES_AUTOCONFIG:-1}"
-CAN_ROUTES_CONF="${CAN_ROUTES_CONF:-/etc/media-gateway/can-routes.conf}"
+CAN_ROUTES_CONF="${CAN_ROUTES_CONF:-/userdata/media-gateway/state/can-routes.conf}"
+CAN_ROUTES_FACTORY="/usr/share/media-gateway/factory/can-routes.conf"
 ROUTES_APPLY="/usr/bin/can-routes-apply.sh"
 
 start() {
@@ -25,6 +26,10 @@ start() {
 		return 0
 	fi
 
+	if [ ! -f "$CAN_ROUTES_CONF" ] && [ -f "$CAN_ROUTES_FACTORY" ]; then
+		mkdir -p "$(dirname "$CAN_ROUTES_CONF")"
+		cp "$CAN_ROUTES_FACTORY" "$CAN_ROUTES_CONF"
+	fi
 	if [ ! -f "$CAN_ROUTES_CONF" ]; then
 		echo "CAN routes skipped: ${CAN_ROUTES_CONF} not found"
 		return 0

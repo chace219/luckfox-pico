@@ -15,7 +15,11 @@
 # Set CAN1_AUTOCONFIG=0 (env or here) to skip automatic bring-up.
 CAN1_AUTOCONFIG="${CAN1_AUTOCONFIG:-1}"
 CAN_IFACE="${CAN_IFACE:-can1}"
-CAN1_CONF="${CAN1_CONF:-/etc/media-gateway/can1.conf}"
+# State copy on /userdata (survives A/B updates), seeded from the factory copy
+# below if S39/S50 have not already done it — S98 runs after both, so this is
+# a belt-and-braces for a unit where the media-gateway init is disabled.
+CAN1_CONF="${CAN1_CONF:-/userdata/media-gateway/state/can1.conf}"
+CAN1_FACTORY="/usr/share/media-gateway/factory/can1.conf"
 CAN_APPLY="/usr/bin/can0-apply.sh"
 MAX_WAIT_SECS=10
 
@@ -41,6 +45,10 @@ start() {
 		return 0
 	fi
 
+	if [ ! -f "$CAN1_CONF" ] && [ -f "$CAN1_FACTORY" ]; then
+		mkdir -p "$(dirname "$CAN1_CONF")"
+		cp "$CAN1_FACTORY" "$CAN1_CONF"
+	fi
 	if [ ! -f "$CAN1_CONF" ]; then
 		echo "CAN boot config skipped: ${CAN1_CONF} not found"
 		return 0
