@@ -148,7 +148,8 @@ Then the thing that ownership was blocking:
 
 ```sh
 # from the bench PC — a FRESH connection, not an existing session
-ssh -i <joral-service-key> -o StrictHostKeyChecking=accept-new root@<unit>
+# port 2200, not the default 22, since 2026-08-29
+ssh -p 2200 -i <joral-service-key> -o StrictHostKeyChecking=accept-new root@<unit>
 ```
 
 Expected: it succeeds. If it fails with *"Server refused our key"*, that is a
