@@ -291,26 +291,52 @@ Two refinements to plan for:
    blast radius, at the cost of tracking which key opens which units. Worth
    settling before volume shipping.
 
+### Decision — 2026-08-29
+
+**Vendor-only, confirmed.** No customer today needs SSH; the console is their
+only interface and stays that way. Joral engineering uses the one baked-in
+service key for diagnostics and audit access. This resolves the first open
+question below and means neither of the two customer-facing models
+(customer's-own-key, console-provisioned) needs building — the acceptance
+criteria that follow are for the vendor-only model as it exists.
+
+**SSH also moved off the default port 22 to 2200 the same day**, across both
+products (`overlay-luckfox-buildroot-shadow/etc/ssh/sshd_config`,
+`overlay-luckfox-buildroot-init/etc/iptables.conf`, both `cra-annex2-facts.md`
+sheets, `bench-backlog-runbook.md`). This is a log-noise reduction, not an
+access control — key-only auth with no password fallback
+(`PermitRootLogin prohibit-password`) is what actually gates access, and a
+targeted scan of this host finds :2200 in seconds. Recorded here rather than
+invented a new document because it is the same access surface this plan
+already covers. Verified: `debugfs` against the packed `rootfs.img` shows
+`Port 2200` and the matching firewall `ACCEPT` rule; all seven release gates
+pass (`oem`, `partitions`, `hardening`, `doccmds`, `cited`, `cve`, `sbom`).
+IPv6 needed no change — `ip6tables.conf` already offers no service at all,
+SSH included.
+
 ### Open questions for product
 
-- Do any customers contractually require shell access, or is console-only
-  acceptable?
+- ~~Do any customers contractually require shell access, or is console-only
+  acceptable?~~ **Answered above, 2026-08-29: console-only, vendor-only SSH.**
 - If console-provisioned keys are built: where do they persist? `/userdata`
   survives reboot, but confirm behaviour across reflash and factory reset —
   a key that silently disappears on update is worse than no feature.
-- Who holds the service private key, and what is the rotation and revocation
-  procedure? This needs an answer for the CRA technical file regardless of which
-  model is chosen.
+  *(Moot unless the vendor-only decision above is revisited.)*
+- **Who holds the service private key, and what is the rotation and revocation
+  procedure?** Still open — this needs an answer for the CRA technical file
+  regardless of the access model, and the access-model decision above does not
+  answer it.
 
 ### Acceptance criteria
 
-1. A written access-model statement suitable for the CRA technical file, along
-   the lines of: *SSH is a vendor service interface; each unit accepts only
-   Joral's service key; no private key material is distributed to customers.*
-2. Documented custody and rotation procedure for the service private key.
-3. If per-customer or console-provisioned access is adopted: a documented flow
-   in which the customer generates their own keypair and sends only the public
-   half.
+1. ~~A written access-model statement suitable for the CRA technical file~~ —
+   **written 2026-08-29**: *SSH is a vendor-only diagnostics/audit interface,
+   not offered to customers; each unit accepts only Joral's service key on
+   port 2200; no private key material is distributed to customers.*
+2. **Still open** — documented custody and rotation procedure for the service
+   private key. This is the one item left in Part 2.
+3. ~~If per-customer or console-provisioned access is adopted~~ — **moot**,
+   vendor-only was chosen.
 
 ---
 

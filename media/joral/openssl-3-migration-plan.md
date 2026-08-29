@@ -179,3 +179,51 @@ Checklist for closing — **verified 2026-08-12 against the rebuilt image**
 - stunnel/openssh/curl/etc. stay at their 2023.02 versions — this migration
   changes the crypto provider underneath them, nothing else. Their own currency
   is covered by the CVE gate per release.
+
+## 2026-08-29 — patch bump to 3.5.8, and QUIC turned off
+
+The CVE gate had been red since 2026-08-25 with nobody watching it (last run
+2026-08-22): three blocking findings, all `libopenssl 3.5.7`, CVSS 7.5 each —
+CVE-2026-14456 (QUIC server unbounded incoming-channel queue), CVE-2026-14457
+(RFC 7250 raw-public-key NULL dereference on a key-only config), CVE-2026-18798
+(QUIC server double free on a malformed INITIAL packet). None reachable on this
+image — no source in either product tree opens a QUIC listener or configures
+raw public keys, and every TLS endpoint here (stunnel, open62541, the MQTT
+client) is certificate-configured — but OpenSSL 3.5.8 (released 2026-08-25)
+fixes all three plus seven more NVD had not yet attached to 3.5.7, so the bump
+beats triaging ten rows one at a time as they land.
+
+Mechanism, following the whole-package-replacement precedent exactly:
+`LIBOPENSSL_VERSION` 3.5.7 → 3.5.8 in the tracked
+`sysdrv/tools/board/buildroot/libopenssl/libopenssl.mk`, `.hash` sha256
+`a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2` (matches
+upstream's published `.sha256`; `LICENSE.txt`'s hash is unchanged — byte-
+identical between the two releases). Same soname (`libssl.so.3` /
+`libcrypto.so.3`), so — unlike the 1.1.1 → 3.x migration — this did **not**
+need a wipe of `output/`: `make libopenssl-dirclean` plus the ordinary
+`./build.sh rootfs && ./build.sh media && ./build.sh firmware` chain was
+sufficient, and the four stock portability patches applied clean.
+
+**Also disabled QUIC** (`# BR2_PACKAGE_LIBOPENSSL_ENABLE_QUIC is not set` in
+`luckfox_pico_w_defconfig` — `Config.in` defaults it to `y`, so absence of
+the finding was never going to argue not-built on its own). Confirmed on the
+built library, not assumed from the Configure flag: `readelf --dyn-syms` on
+the packed `libssl.so.3` exports no `SSL_new_listener*`/`OSSL_QUIC*` symbol,
+and `configuration.h` in the build tree defines `OPENSSL_NO_QUIC`. (`strings`
+still shows the literal `SSL_new_listener` twice — dead text in an unused
+error-string table, not a callable symbol; checked so the record does not
+repeat the "read from strings, not from the linker" mistake this document
+already warns about elsewhere.) The effect: every future QUIC/RPK finding in
+this library is *not built*, a compile-time fact, rather than a reachability
+argument to re-litigate per finding.
+
+**Verified 2026-08-29** — full chain, no `output/` wipe: `libssl.so.3`
+reports `OpenSSL 3.5.8 25 Aug 2026`; `verify-openssl3-migration.sh` 5/5;
+`./build.sh sbom` → `libopenssl 3.5.8`; `./build.sh cve` → **0 blocking**
+(back from 3); `make test` clean in both product trees; all seven release
+gates (`oem`, `partitions`, `hardening`, `doccmds`, `cited`, `cve`, `sbom`)
+pass. **Not yet done:** the TLS bench legs (console HTTPS, OPC UA
+Sign&Encrypt, MQTT TLS) that sit under this library — none is 3.5.8-specific,
+but the patch-release precedent set by the original migration is to re-touch
+them on a flashed unit before calling a libssl change closed, not only the
+build-time checks.

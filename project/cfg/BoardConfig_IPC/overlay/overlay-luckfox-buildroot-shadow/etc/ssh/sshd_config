@@ -10,7 +10,17 @@
 # possible, but leave them commented.  Uncommented options override the
 # default value.
 
-#Port 22
+# Off the default port 22 (2026-08-29, vendor-only diagnostics access, not a
+# customer-facing service): cuts the constant background noise from
+# opportunistic internet-wide :22 scanners out of the auth log, which matters
+# because that log is also the CRA security-event audit trail read for
+# incident review. This is NOT the access control — key-only auth with no
+# password fallback (PermitRootLogin prohibit-password, below) is the actual
+# protection, and a targeted scan of this host finds :2200 in seconds. Update
+# every touchpoint together if this ever changes again: the firewall rule
+# (`overlay-luckfox-buildroot-init/etc/iptables.conf`), both products'
+# `cra-annex2-facts.md`, and `test-root-credential.sh`.
+Port 2200
 #AddressFamily any
 #ListenAddress 0.0.0.0
 #ListenAddress ::

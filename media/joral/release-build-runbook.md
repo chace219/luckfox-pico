@@ -302,3 +302,47 @@ nothing was exercised. Configure a secret first, then re-read.
 Why this cannot be inferred from the host suite: it fakes the binding
 providers, so it passes either way.
 
+## Standing bench and review cadence — not tied to a release
+
+Everything above runs *when something changes*. This section is the other
+kind: checks that go stale from the calendar alone, whether or not any code
+moves. It exists because the 2026-08-29 OpenSSL patch sat unnoticed for four
+days — `./build.sh cve` is release-gated, not continuously run, so nothing
+between builds would have caught a new finding on a component nobody touched.
+None of the dates below are enforced by a build gate; they only work if
+someone actually looks.
+
+**Monthly, any working day** — no fixed date, just do it once a month:
+
+```sh
+./build.sh cve                              # catches a patch release nobody triggered a build for
+scripts/compliance/test-security-txt.sh     # catches Expires drifting into its 60-day margin early
+```
+
+Also the standing hardware session — the backlog runbook
+(`bench-backlog-runbook.md`) is the agenda; whatever legs are open at the time
+go in it. Put this on an actual calendar (team calendar, recurring meeting,
+whatever the team already uses) — a paragraph in a runbook does not fire a
+reminder by itself, and no repo gate covers a component nobody touched
+requesting no build.
+
+**Dated reviews — accepted-risk rows with a `REVIEW_BY` the CVE gate
+enforces** (`scripts/compliance/cve-triage.csv`, `cpe-extra.csv`):
+
+| Review by | Row(s) | What REVIEW means |
+|---|---|---|
+| **2026-11-09** | `CVE-2026-4519` / python3 | Re-run `./build.sh cve`; if the row still matches, either it still holds (interpreter still unreachable at runtime — recheck no init script/CGI/daemon invokes python from the **packed** rootfs, not the tree) or bump python3 again |
+| **2026-11-09** | `rockchip-media-sdk` | Re-read Rockchip's release notes; re-confirm only `librknnmrt` is loaded (the rest of the vendor blob stays present but unreferenced) |
+| **2026-11-09** | `rockchip-rkbin` | Check Rockchip's rkbin repository for a newer RV1106 loader; decide whether a reflash (not an update — this ships in `idblock.img`/`download.bin`) is worth it |
+| 2026-12-11 | Eight `expat` rows (avahi-daemon platform-only) | Re-confirm avahi's own record parser still handles all mDNS wire input — no code change if so |
+| 2027-02-12 to -19 | Remaining `not-affected` rows (openssl/busybox/libzlib/libcurl/dhcpcd false-CPE-matches) | Same shape — re-confirm the reasoning still holds against whatever versions are current then |
+
+Past any `REVIEW_BY` date, `./build.sh cve` fails the build on its own — the
+gate is the backstop. This table exists so the review happens *before* that,
+as a decision rather than a build failure someone has to diagnose cold.
+
+**Fuzzing** — already continuous, nothing to schedule: `.github/workflows/ci.yml`
+runs coverage-guided libFuzzer nightly at 03:00 UTC in both product repos.
+Confirm it is still green occasionally (`gh run list --workflow ci.yml -R
+Joral-LLC/satisense-edge` / `-R Joral-LLC/t1s-media-gateway`) — a silently
+broken nightly job is the same failure shape as the four-day CVE gap above.
