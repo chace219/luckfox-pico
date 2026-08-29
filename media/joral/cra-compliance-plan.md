@@ -64,7 +64,7 @@ was found by executing, not by reading. Per-product detail lives in each tree's
 | Annex I | Media Gateway | SatiSense Edge | Bench | Residual |
 |---|---|---|---|---|
 | 1 Secure by default | **met** — HTTPS on 443 by default, per-unit cert, factory credential buys only a password change | **met** — `signencrypt` + `web.tls` by default, same credential gate | ✅ 08-09/08-12 | first-use trust is a self-signed fingerprint; **anonymous OPC UA closed 2026-08-19 and confirmed on a board the same day** — factory `allow_anonymous: false`, no shipped OPC UA credential, UaExpert refused in both directions (item 8 leg f). *(This cell read "not yet on a unit" until 2026-08-22, contradicting leg f four screens below it.)* |
-| 2 No known CVEs at shipment | **met at the gate** — `./build.sh cve` **0 blocking**, OpenSSL 3.5.7 LTS | same (shared rootfs) | ✅ 08-12 | kernel (5155) + U-Boot (41) are report-only. the GNU wget accepted-risk was **resolved 08-16 by dropping the package**, leaving **python3 ×5** as the only accepted-risk. **dhcpcd was reclassified `not-affected` 2026-08-19** — it had been mis-filed `fixed-pending-release` for a mitigation that was ours and had already shipped, so it would have expired 2026-11-12 into a blocking finding for an unreachable code path; the config it rests on is now guarded by a test. **python3 removal was staged the same day and then reversed** — the interpreter is **kept** and the fix is a version bump, 3.11.6 → **3.11.16** (12 Aug 2026), carried as a tracked package replacement. **CVE-2020-29396 was reclassified `not-affected` 2026-08-19** — it is an Odoo sandbox escape with python listed only as the running-with platform, so it was never a CPython defect and no bump could ever have retired it. **BUILT AND GATED 2026-08-19**: the image carries 3.11.16 (read out of `rootfs.img`), `./build.sh cve` **0 blocking**. The bump retired **two** of the four — CVE-2024-6232 and CVE-2024-7592 now match nothing and their triage rows were deleted — and did **not** retire **CVE-2026-15308 and CVE-2026-4519**, which still match 3.11.16 and remain accepted-risk on the unchanged reachability argument. So: python3 ×2, not ×0. **Two accepted risks of a different kind were recorded 2026-08-23** — `rockchip-rkbin` and `rockchip-media-sdk`, closed-source blobs that cannot be queried at all; they were silent `CPE=NONE` rows until then and now carry an owner and a `REVIEW_BY` the gate enforces (see the dated entry) |
+| 2 No known CVEs at shipment | **met at the gate again, 2026-08-29** — `./build.sh cve` **0 blocking**, OpenSSL **3.5.8** LTS (bumped the same day the red gate was found; QUIC also turned off at the defconfig, see the dated entry). ~~Was NOT MET 2026-08-25 → 08-29: 3 blocking, all libopenssl 3.5.7 QUIC/RPK findings, none reachable, gate unrun for 4 days~~ | same (shared rootfs) | ✅ 08-12 | kernel (5155) + U-Boot (41) are report-only. the GNU wget accepted-risk was **resolved 08-16 by dropping the package**, leaving **python3 ×5** as the only accepted-risk. **dhcpcd was reclassified `not-affected` 2026-08-19** — it had been mis-filed `fixed-pending-release` for a mitigation that was ours and had already shipped, so it would have expired 2026-11-12 into a blocking finding for an unreachable code path; the config it rests on is now guarded by a test. **python3 removal was staged the same day and then reversed** — the interpreter is **kept** and the fix is a version bump, 3.11.6 → **3.11.16** (12 Aug 2026), carried as a tracked package replacement. **CVE-2020-29396 was reclassified `not-affected` 2026-08-19** — it is an Odoo sandbox escape with python listed only as the running-with platform, so it was never a CPython defect and no bump could ever have retired it. **BUILT AND GATED 2026-08-19**: the image carries 3.11.16 (read out of `rootfs.img`), `./build.sh cve` **0 blocking**. The bump retired **two** of the four — CVE-2024-6232 and CVE-2024-7592 now match nothing and their triage rows were deleted — and did **not** retire **CVE-2026-15308 and CVE-2026-4519**, which still match 3.11.16 and remain accepted-risk on the unchanged reachability argument. So: python3 ×2, not ×0. *(→ **×1** on 2026-08-29: NVD analysed CVE-2026-15308 on 08-20 with the affected range ending before 3.11.16, so the bump retired it after all; row deleted, CVE-2026-4519 remains.)* **Two accepted risks of a different kind were recorded 2026-08-23** — `rockchip-rkbin` and `rockchip-media-sdk`, closed-source blobs that cannot be queried at all; they were silent `CPE=NONE` rows until then and now carry an owner and a `REVIEW_BY` the gate enforces (see the dated entry) |
 | 3 Confidentiality / integrity | **met** for the console path | **met** — secrets in a 0600 sidecar, **encrypted at rest and bound to the board since 08-16**, never served to the browser; MQTT TLS verification proven enforced | ✅ 08-12/13, **sealing confirmed on a unit 2026-08-22** (`mode=encrypted`, `binding=soc-otp+emmc-cid`) | the sealing protects the stored file, **not** a running unit against root (no secure element); MQTT mutual TLS unexercised. ~~`/oem` carries build-user ownership on every fielded unit and no update can fix it — only a reflash~~ — **retired 2026-08-21 by bench leg h**: `S22oemclean` empties `/oem` and re-owns the mountpoint `1000:1000` → `0:0` on the first boot after an update, observed on a unit reconstructed into the fielded-unit condition. So the next update fixes it, not only a reflash. *(This cell asserted the reflash-only claim until 2026-08-23, two days after the same document recorded leg h retiring it, and after both Annex II fact sheets had been corrected — see the reconciliation entry.)* Nothing loads from `/oem` any more either: the daemon since 2026.08.5 (`ldd`-confirmed on a unit), interactive root shells since 2026.08.6 (`RkEnv.sh` removed) |
 | 4 Minimise attack surface | **met** — BSP daemons and 118 packages gone, default-deny IPv4+IPv6 firewall, **`wifi_app` userspace dropped 2026-08-22 (claimed 08-12, never true until now — see the correction below)**, image inodes root-owned, and since **2026-08-21** the `oem` partition ships **empty** (198 files / 21 MB of Rockchip demo suite, a Wi-Fi driver for a removed radio, and a divergent copy of the console — none of it in the SBOM or the CVE gate, both of which read the rootfs) | same (shared rootfs) | ✅ 08-12/08-16, **oem strip and board hardening confirmed on a unit 08-21** | ~~httpd + CGIs run as root~~ — **console confirmed running as `www-data` on a unit 2026-08-22** (setuid `privop` dispatcher for the few root verbs). The same check found **stunnel still root** because its `setuid` was emitted inside `[web]` where `drop_privileges()` never reads it — **fixed and confirmed on a unit 2026-08-22**, both terminators now `www-data`; root password is off the **published** vendor default since 08-16 (`$6$`, undocumented to customers) but is still one short shared value — unreachable over the network, serial-console login withdrawn with the getty. **All 16 board profiles are hardened since 08-21** (14 were not; two served an unauthenticated root shell) — but 15 of them have never been booted here |
 | 5 Access control | **met** for the console | **met** for the console and, since 2026-08-19, the OPC UA endpoint | ✅ 08-09; **OPC UA identity ✅ 08-19** — UaExpert against a board, refusals and admission with the channel and identity layers separated | CAN :8001 unauthenticated by protocol design |
@@ -75,8 +75,8 @@ was found by executing, not by reading. Per-product detail lives in each tree's
 | Annex I Part II | Status |
 |---|---|
 | §1 SBOM per release | **met 2026-08-22, and it was not before.** `./build.sh sbom` is Buildroot legal-info + a hand-declared app layer + `platform-extra.csv`. That third source is new: until 08-22 the SBOM listed **neither the kernel, U-Boot, the bootloader blobs, the Rockchip media SDK nor the C library**, while the CVE report checked them all from its own `cpe-extra.csv`. The two are now cross-checked and disagreeing fails the build. `sbom` also joined the release gate line, which is why the tree held a CVE report two releases newer than its SBOM |
-| §2 Address vulnerabilities without delay | **met at the gate** — triage rows carry an owner and a `REVIEW_BY` date; first expiries 2026-11 |
-| §3 Periodic security testing | **partial** — **CI and parser fuzzing landed 2026-08-23** (`make test` on every push in both repos; a deterministic fuzz replay inside `make test`, coverage-guided libFuzzer nightly; one defect found and fixed — see the dated entry). Owed on that half: the coverage-guided run has never executed, only ~24M/~32M random rounds. The hardware bench is the loop that finds the real defects; **two** legs outstanding (item 8 b, which needs a broker whose authentication we control, and g, which gates nothing). a, c–f closed 08-19/20; h–k opened and closed 2026-08-21, and that session found three defects no reading of the tree could have shown: a renamed init script shipping twice, a purge whose silence was unreadable, and a command both customer manuals told operators to run that this image has never had |
+| §2 Address vulnerabilities without delay | **met at the gate** — triage rows carry an owner and a `REVIEW_BY` date; first expiries 2026-11. **Closed the same day it was found, 2026-08-29:** the OpenSSL 3.5.8 bump landed within hours of the gate being re-run — but it sat red for 4 days first because nothing runs this gate between releases. That gap is the residual: `cve` and `sbom` are release-gated, not continuously run, so a patch release can go unnoticed until the next build |
+| §3 Periodic security testing | **partial** — **CI and parser fuzzing landed 2026-08-23** (`make test` on every push in both repos; a deterministic fuzz replay inside `make test`, coverage-guided libFuzzer nightly; one defect found and fixed — see the dated entry). ~~Owed on that half: the coverage-guided run has never executed, only ~24M/~32M random rounds.~~ **It has — six nights on each repository since 2026-08-23, recorded 2026-08-29 (see the dated entry): 150–230 M executions a night, no crash artifact from any run, and the grown corpus (107 / 73 inputs) is checked in so the replay gate covers it.** The hardware bench is the loop that finds the real defects; **two** legs outstanding (item 8 b, which needs a broker whose authentication we control, and g, which gates nothing). a, c–f closed 08-19/20; h–k opened and closed 2026-08-21, and that session found three defects no reading of the tree could have shown: a renamed init script shipping twice, a purge whose silence was unreadable, and a command both customer manuals told operators to run that this image has never had |
 | §4–6 Coordinated disclosure | **partial — and nothing on it is engineering's.** Policy, address and the publishable `security.txt` + policy page are all done (08-09, 08-18, `disclosure/`); the **mailbox does not exist yet**, and until mail is received the row is not met. *Annex I applies from 11 Dec 2027, so this row is **not itself** the September deadline — corrected 2026-08-25, see the dated entry. It is the tripwire that makes the September deadline performable, which is why it is still the first thing to close* |
 | **Art. 14 reporting** *(not Annex I — the 11 Sep 2026 row)* | **not started, and none of it is engineering's either.** 24 h / 72 h / 14 d reporting to ENISA + the coordinating CSIRT via the single reporting platform, plus Art. 14(8) notice to affected users. Owed: a **named duty officer and deputy** with standing authority to file an early warning without escalation; **counsel's answer on which CSIRT** (it follows the main EU establishment, or an authorised representative's — and we are US-based); **platform access obtained in advance**; drafted early-warning and customer notices with a confirmed distribution list; and **one drill**. What engineering owes is already in place: the build-ID→SBOM mapping and the CVE gate answer *which builds are affected* in the first hour, and the signed A/B path makes *"a corrective measure is available"* reachable inside 14 days once the key ceremony has happened |
 
@@ -94,6 +94,157 @@ listed in the Part II table above and in
 ## Closed since the audit
 
 *Appended as items land. The table above stays a snapshot of the 2026-07-26 audit.*
+
+- **2026-08-29 (later still) — `image-ownership-and-ssh-key-plan.md` Part 2,
+  access model decided.** No customer needs SSH; console stays their only
+  interface. Joral engineering keeps the one vendor service key for
+  diagnostics/audit access — vendor-only, the option the plan already
+  recommended, now confirmed rather than assumed. Resolves the first of the
+  three open questions in that document; the second (console-provisioned key
+  persistence) is moot under this decision. **Still open in Part 2:** custody
+  and rotation procedure for the service private key — the CRA technical file
+  needs an answer regardless of which model was chosen, and choosing
+  vendor-only did not supply one.
+
+  **Same day, SSH also moved off the default port 22 to 2200** on both
+  products — a log-noise reduction (fewer opportunistic-scanner lines in the
+  audit trail), explicitly not the access control: key-only auth with no
+  password fallback remains what actually gates access, and a targeted scan
+  finds the new port in seconds. Touchpoints updated together:
+  `overlay-luckfox-buildroot-shadow/etc/ssh/sshd_config`,
+  `overlay-luckfox-buildroot-init/etc/iptables.conf`, both products'
+  `cra-annex2-facts.md` (the `:22` row and every prose mention), and
+  `bench-backlog-runbook.md`'s SSH bench command. IPv6 needed nothing — its
+  filter already offers zero services, SSH included. Verified against the
+  **packed** image, not staging: `debugfs -R "cat /etc/ssh/sshd_config"
+  rootfs.img` and the same for `iptables.conf` both show the new port; all
+  seven release gates pass (`oem`, `partitions`, `hardening`, `doccmds`,
+  `cited`, `cve`, `sbom`).
+
+- **2026-08-29 (later still) — the scheduled-bench-testing item written down.**
+  `release-build-runbook.md` gained a "Standing bench and review cadence"
+  section: the monthly `cve`/`security.txt` pair, a table of every accepted-risk
+  `REVIEW_BY` date with what the review actually means (not just "re-check"),
+  and a nightly-fuzz health check. Consolidates what was scattered across this
+  document, `cve-triage.csv`/`cpe-extra.csv`, and `test-security-txt.sh`'s
+  60-day margin. **Not a gate** — nothing in the build enforces any of it
+  running on schedule, which is stated in the section itself rather than
+  implied: the OpenSSL gate sitting red for four days unnoticed (two entries
+  below) is exactly the failure mode this exists to prevent, and a markdown
+  section does not prevent it by itself. What is still owed is a real calendar
+  entry, which is product management's, not engineering's.
+
+- **2026-08-29 (later the same day) — the OpenSSL bump landed, gate green
+  again.** `LIBOPENSSL_VERSION` 3.5.7 → 3.5.8 in the tracked package master
+  (hash verified against upstream's `.sha256`), same soname so no `output/`
+  wipe needed (`make libopenssl-dirclean` + the ordinary `rootfs`/`media`/
+  `firmware` chain). **QUIC also turned off** in `luckfox_pico_w_defconfig`
+  (`Config.in` defaults it `y`) — confirmed on the built library with
+  `readelf --dyn-syms`, not assumed from the Configure flag: no
+  `SSL_new_listener*` in the packed `libssl.so.3`'s dynamic symbol table, and
+  `OPENSSL_NO_QUIC` defined in the build's `configuration.h`. Full verification:
+  `libssl.so.3` reports `OpenSSL 3.5.8 25 Aug 2026`;
+  `verify-openssl3-migration.sh` 5/5; `./build.sh sbom` → `libopenssl 3.5.8`;
+  `./build.sh cve` → **0 blocking**; `make test` clean in both product trees;
+  all seven release gates pass (`oem`, `partitions`, `hardening`, `doccmds`,
+  `cited`, `cve`, `sbom`). Detail in `openssl-3-migration-plan.md`'s new
+  2026-08-29 section. **Not yet done:** the TLS bench legs (console HTTPS, OPC
+  UA Sign&Encrypt, MQTT TLS) — none is 3.5.8-specific, but the precedent from
+  the original 1.1.1→3.x migration is to re-touch them on a flashed unit
+  before calling a libssl change closed, not only the build-time checks. The
+  four-day gap between the patch shipping and anyone noticing is the residual
+  worth keeping: `cve`/`sbom` are release-gated, not continuously run, so nothing
+  currently notices a patch release land between builds.
+
+- **2026-08-29 — Annex I #2 / Part II §2: the CVE gate is red, and had been
+  since 2026-08-25.** `./build.sh cve` was re-run today for the triage-text
+  correction below, not for a finding, and returned **3 blocking** — all
+  `libopenssl 3.5.7`, all CVSS 7.5, none in KEV, none yet analysed by NVD
+  (`Received`): CVE-2026-14456 (QUIC server unbounded incoming-channel queue,
+  published 08-13), CVE-2026-14457 (RFC 7250 raw-public-key NULL dereference
+  with a key-only configuration, 08-25), CVE-2026-18798 (QUIC server QRX double
+  free on a malformed INITIAL packet, 08-25). The last recorded run was 08-22, so
+  the gate was red for at least four days with nobody looking — which is the
+  gap Part II §2 exists to name: this gate is release-time, not standing.
+
+  **Reachability, checked against the tree rather than assumed.** QUIC **is
+  compiled into the shipped libssl**: `BR2_PACKAGE_LIBOPENSSL_ENABLE_QUIC` is
+  `default y` in the package `Config.in`, neither defconfig touches it,
+  `output/compliance/buildroot.config` carries `=y`, and `libssl.so.3` exports
+  `SSL_new_listener`. Nothing calls it — no source in either product tree
+  references a QUIC listener or raw public keys, and stunnel 5.65, open62541
+  1.3.15, the MQTT client and busybox httpd have no QUIC path. Both QUIC
+  defects need a *server* listener the application creates; the RPK defect
+  needs an RPK-enabled peer *and* a key-only local configuration, and every
+  TLS endpoint here is configured with a certificate. So all three are
+  **not reachable on this image today** — a valid triage, and not the right
+  one.
+
+  **The right one is the patch release.** OpenSSL 3.5.8 shipped on 2026-08-25
+  and fixes **ten** CVEs, seven of which NVD has not yet attached to 3.5.7 and
+  which will arrive in this report one at a time over the coming weeks:
+  CVE-2026-63072 (heap overflow in CMS key unwrapping — CMS is the `.swu`
+  signature path, though key-unwrap is enveloped-data, not the signed-data
+  verification we perform), CVE-2026-63076 (CMP server), CVE-2026-54874,
+  -63073, -63074, -63075 (QUIC ACK-only retention) and -75803. Triaging three
+  today and seven more as they land would be busywork with a worse posture
+  than one tracked bump: `sysdrv/tools/board/buildroot/libopenssl/libopenssl.mk`
+  `LIBOPENSSL_VERSION` 3.5.7 → 3.5.8, `libopenssl.hash` sha256
+  `a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2` (read
+  from the upstream `.sha256` beside the tarball), rebuild,
+  `scripts/compliance/verify-openssl3-migration.sh`, `./build.sh cve` back to
+  0 blocking, then the TLS bench legs (console HTTPS, OPC UA Sign&Encrypt, MQTT
+  TLS) since libssl sits under all of them. **A second change should ride with
+  it:** `# BR2_PACKAGE_LIBOPENSSL_ENABLE_QUIC is not set` in the defconfig — an
+  Annex I #4 attack-surface reduction that turns every future QUIC finding
+  into *not built* rather than *not reachable*. Neither is done in this entry;
+  **the gate stays red until the bump lands**, and the status table says so.
+
+  **One row retired on the way.** cve-check warned that
+  `CVE-2026-15308/python3 matches nothing in this image`. NVD analysed it on
+  2026-08-20: affected 3.11.0 → *excluding* 3.11.16. So the 08-19 bump
+  retired it after all — that entry counted it as still matching because NVD
+  had not yet drawn the range. Row deleted, as the two on 08-19 were;
+  **python3 ×1** (CVE-2026-4519, `Modified`, still matches 3.11.16). The
+  triage wording corrected earlier today said "retired two of the four … not
+  this one" — corrected again the same day, to three of four.
+
+- **2026-08-29 — both products, Annex I Part II §3: the coverage-guided half
+  has run, and the documents saying it had not were six nights stale.** The
+  2026-08-23 entry and both matrices' row 3 recorded that libFuzzer "has not
+  run anywhere" and that "the first nightly CI run is the evidence for that
+  half". It had been running since the morning after: `ci.yml`'s 03:00 UTC
+  schedule fired on 08-23, 24, 25, 26, 27 and 28 in both repositories, every
+  run green. Read from the run logs rather than the tick — the 2026-08-28 runs
+  (satisense-edge 33182364144, t1s-media-gateway 33182175166): satisense
+  **151.7 M executions** of the J1939 decode core at 168 k/s, cov 349 / ft 559,
+  164 new corpus units; media-gateway **229.9 M executions** of `gw_decode()`
+  at 255 k/s, cov 301 / ft 654, 235 new units. **No `fuzz-crashes` artifact
+  exists on any of the twelve runs** — `upload-artifact` creates none for an
+  empty `crashes/` directory, so the *absence* of that artifact is the
+  no-crash evidence, and that is how the row should be read from now on.
+
+  Two things done rather than only noted. The grown corpora were pulled from
+  the latest artifacts and **checked in**: satisense 24 → 107 inputs,
+  media-gateway 17 → 73, every pre-existing seed byte-identical to the
+  artifact's copy. `make test` in both trees replays the enlarged corpus clean
+  (`replayed 107 corpus`, `replayed 73 corpus`). Artifacts expire; a corpus
+  that lives only in one is coverage the gate cannot see. And the fact-sheet
+  defect this pass found on the way: media-gateway's `cra-annex2-facts.md`
+  still read "UDP — the factory default — is not logged at all" in its
+  security-event-logging row, and "on the UDP default, unlogged" in item 7 of
+  its deployment conditions — both false since the UDP attribution shipped on
+  2026-08-18 (`50ec9b9`), both in the document the technical file copies
+  verbatim, both overstating exposure. Corrected. The two python3 rows in
+  `cve-triage.csv` also still carried "Resolution is to drop python3 from the
+  shipped image" — the resolution reversed on 2026-08-19 — and whoever
+  performs the 2026-11-09 review would have acted on it. Rewritten to say what
+  REVIEW actually means for those rows.
+
+  **What row §3 still owes** is now the two hardware legs (item 8 b and g) and
+  a calendar for the bench. The class, again: a document conceding a gap the
+  product had already closed — the direction nothing audits, found only by
+  running `gh run list` against the row.
 
 - **2026-08-25 — the September deadline was attributed to the wrong obligation, in
   every document that mentions it.** This document, `cra-remaining-work.md` and
@@ -269,7 +420,9 @@ listed in the Part II table above and in
   (satisense) deterministic random rounds under ASan/UBSan with no finding.
   Random mutation is weaker than libFuzzer and must not be quoted as if it were
   the same thing — the first nightly CI run is the evidence for that half. The
-  hardware bench is also still scheduled by hand.
+  hardware bench is also still scheduled by hand. *(Superseded 2026-08-29: the
+  nightly run had by then executed six times on each repository with no
+  finding, and this paragraph had been stale for all six — see that entry.)*
 
   **One observation filed, not a defect.** `j1939_spn_validate()` accepts any
   non-zero `scale`, including NaN and infinity, and `j1939_profile_validate()`
@@ -2338,6 +2491,529 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   — no manual in either tree has a legal section today, so adding one means a
   documentation pass and PDF/on-device-Help regeneration.
 
+- **2026-08-19 — media-gateway, Annex I Part II §3: a stale row corrected, in the
+  direction nobody audits.** The matrix still read "`make test` now exists and runs
+  all three suites" and "**no coverage of the auth layer, the config writer or the
+  listeners**". That had been untrue since the 2026-08-15 coverage pass (item 7):
+  `make test` runs **eleven** suites — three host C suites and eight shell suites
+  carrying **352 checks**, including `test_webauth.sh` (80), `test_auth_endpoints.sh`
+  (58), `test_config_writer.sh` (73) and `test_listeners.sh` (19), which are precisely
+  the three gaps the row named. Corrected against a run of the suite, not against this
+  document.
+
+  Worth recording as a *class*. Every stale-citation defect this programme has caught
+  — the `:565` → `:658` shift, the three fact-sheet citations, the "no LICENSE file"
+  and "TCP path only" claims on 08-19 — was a document **overstating** the product,
+  which is what an assessor and a reviewer both go looking for. This one understated
+  it: the row conceded a gap that had been closed four days earlier, and no test,
+  gate or review would ever have flagged it, because nothing is harmed by a product
+  being better than its paperwork claims. It was found only by reading the row against
+  `ls tests/`. The cited-commit gate does not cover prose of this kind and cannot;
+  the practical guard is that **a row's status must be re-derived from the tree in
+  the same pass that touches the tree** — which is what action-plan item 1 already
+  says, and what did not happen on 08-15.
+
+  Also fixed in the same pass: `docs/project-context.md` pointed at a
+  `tests/results/` directory of "integration tests documented as Markdown
+  checklists" that has never existed — the one true half of the old row. It now
+  describes the shell suites that do exist. `make test` green after both edits,
+  including `test_listeners.sh`'s citation checks.
+
+- **2026-08-19 — SatiSense Edge, Annex I #1 and #5: anonymous OPC UA sessions
+  closed, and the residual turned out to be describing the wrong risk.**
+  ADR-151. The question that started it was whether anonymous could even be
+  disabled. It could — the config keys, the console checkbox and the daemon
+  support have all been there since ADR-128, and TC-S3 refused an anonymous
+  session on hardware on 2026-07-31. What was left was only the shipped default,
+  and that is now `allow_anonymous: false`, in `scripts/default/gateway.json`
+  **and** in `config_set_defaults()` so an omitted key fails secure. **No factory
+  OPC UA credential ships** — that would have rebuilt the default-credential
+  problem 4g closed on 08-09 — so a factory unit accepts no OPC UA session until
+  an operator sets a username and password, which is what the trust folder
+  already did to client certificates.
+
+  **Three things this pass found that were more important than the change
+  itself.**
+
+  *The residual was mis-stated.* "Anonymous sessions permitted" was being read
+  across these documents as "unauthenticated", and it never was. OPC UA
+  authenticates the **channel** by client certificate and the **session** by user
+  token; `trust_path` has shipped set since 2026-08-04 (`25b3d6c`), and an absent
+  or empty trust folder rejects **every** client. So the default posture was
+  already closed, in a way none of our compliance documents said. The Annex II
+  fact sheet claimed "client certificates are accept-all — `trust_path` is empty
+  by default" from its creation on 08-06, and told the reader that "any host on
+  that network can open an encrypted session, read all points and write any tag
+  marked writable". Both corrected. That is a fact sheet stating the product is
+  **more exposed** than it is, in the document the plan's own action-plan item 3
+  warns "gets copied verbatim" — a second instance, in the opposite direction, of
+  the class recorded for media-gateway earlier the same day.
+
+  *A control that reported one thing and did another.* `apply_access_control()`
+  carried `if (!allow_anon && nlogin == 0) allow_anon = true;` — "never lock
+  everyone out". A unit configured `allow_anonymous: false` with no username
+  therefore **served anonymous sessions**, while `gateway.json`, the console and
+  Diagnostics all said anonymous was off. Diagnostics made it worse by reporting
+  the configured value four lines below its own comment explaining why the
+  negotiated value must be reported instead — the exact defect that comment was
+  written to prevent, in the same JSON object. Had the default simply been
+  flipped without reading that function, the change would have shipped as a
+  no-op that every surface reported as a success. It is the strongest argument
+  yet for the bench: nothing here was visible in the configuration.
+
+  *A fail-open that does not exist.* ADR-131 traded security for availability on
+  a trust-folder load error, and the code comment, `epic-09`, and the TC-S3
+  runbook all repeated it. In open62541 1.3.15
+  `UA_CertificateVerification_CertFolders` only allocates the three path strings
+  and **always returns GOOD**; it never touches the filesystem. The branch is
+  unreachable, and a missing folder fails **closed**. Corrected in all three
+  places, because the two claims send an operator in opposite directions when a
+  client will not connect.
+
+  Shipped: `core/opcua_identity.c` — the policy, deliberately free of open62541
+  headers so the decision itself is host-testable (18 checks; three mutations —
+  restoring the silent re-enable, dropping the accept-all guard, over-reaching
+  into `security: none` — each confirmed to fail it). Anonymous is now refused
+  outright, whatever the config says, when client certificates are accept-all on
+  a secure channel, since that pair is the only configuration in which nothing
+  identifies the caller; `security: none` is left alone, being honestly named and
+  reported. Diagnostics gains `sessions_possible`, `client_certs_pinned`,
+  `user_login` and an `identity_reason`, and now reports **effective** anonymity
+  with the configured value alongside it. Console warnings rewritten — there was
+  one for the harmless combination and none for the open one. Manual §3.2 gains
+  the two-layer table and the commissioning step; Help and the Annex I/II
+  documents regenerated. `make test` + `make test-config` green, both changed
+  sources cross-compile clean against the real open62541 with
+  `UA_ENABLE_ENCRYPTION` set.
+
+  **Owed: the bench leg (item 8f).** Everything above is a host claim. The
+  assertion that matters — a real OPC UA client turned away from a
+  factory-configured unit — has been made only by a test harness.
+
+- **2026-08-19 — Annex I #2, the two dated triage rows: one closed outright, one
+  staged.** The gate has passed at 0 blocking since 08-12, but two rows were
+  carrying that pass on a timer — dhcpcd expiring 2026-11-12 and five python3
+  rows expiring 2026-11-09. Both were examined against the build rather than
+  against their own justifications, and both turned out to be cheaper to resolve
+  than to re-review.
+
+  **dhcpcd CVE-2026-56116 — reclassified `not-affected`, `REVIEW_BY` 2027-02-19.**
+  The row said `fixed-pending-release`, which this file defines as "the fix is
+  merged and this is the window before it ships". No upstream release was
+  pending: the mitigation is our own `ipv4only` line and it shipped on 08-12. The
+  row would therefore have expired into a blocking finding for a code path that
+  cannot execute. Verified in dhcpcd-9.4.1's own source rather than taken on
+  trust — `ipv4only` maps to case `'4'` (`src/if-options.c:120`) which clears
+  `DHCPCD_IPV6` (`src/dhcpcd.c:1250`), and the ICMPv6 ND socket is opened only
+  inside `if (ctx->options & DHCPCD_IPV6)` (`src/privsep-inet.c:159`). Nothing
+  reaches the RA route-information parser. Replacing dhcpcd with busybox
+  `udhcpc` was considered and rejected: media-gateway's `S39` writes a managed
+  block into `dhcpcd.conf`, `S50` drives `dhcpcd -k`/`-n` for the bridge, and
+  the factory reset knows about the block — a product change for no security
+  gain.
+
+  **The reclassification came with a guard, and would not have been correct
+  without one.** `not-affected` divides into two kinds that do not age alike: a
+  decision resting on a compiled-out feature or a version fact stays true by
+  itself, while a decision resting on a **configuration line** can be undone by
+  an edit, an overlay that fails to apply, or a runtime script that rewrites the
+  file — and when that happens `./build.sh cve` keeps passing, because the gate
+  reads the triage row, not the config the row is talking about. So the file
+  `scripts/compliance/test-cve-mitigations.sh` now proves the sentences the row
+  makes: `ipv4only` and `denyinterfaces can*` active in the overlay, IPv6 INPUT
+  policy DROP with no rule admitting RA/RS, and — by **running S39's own
+  marker-strip awk over the file** rather than reading it — that the
+  media-gateway managed block cannot eat the mitigation at boot. Given a packed
+  rootfs it also checks the image, discriminating post-overlay trees by the
+  presence of `/etc/ip6tables.conf` so buildroot's pre-overlay staging does not
+  raise a false alarm nobody would keep listening to. Seven checks, each
+  confirmed to fail against a mutation of the thing it guards. The general rule
+  is now in the compliance README: **a config-level `not-affected` needs a check
+  before it is written, and the justification must name it** — otherwise you
+  have traded a dated review for a silent regression, which is the worse of the
+  two. As a side effect the triage file now carries **no
+  `fixed-pending-release` rows at all**.
+
+  **python3 ×5 — the premise of the row was wrong, and the fix is smaller than
+  it claimed.** The row, and the defconfig comment beside it, said the
+  interpreter had to stay because the on-device bench tooling needed it, and
+  that shipping without it would mean validating an image we do not test on.
+  Reading all six bench scripts showed **five of them never run on the device**:
+  `gate5-copilot.py` says so in its own docstring, `gate2-commission.py`,
+  `mvad-capture.py` and `enable-llm.py` are `--host` network clients, and
+  `modbus-slave.py` runs on-device only as a convenience ("no second machine").
+  Only `encoder-sim.py` genuinely needed AF_CAN on the unit. So an 18 MB
+  interpreter was in every shipped image for one CAN frame generator — and
+  can-utils, which is already in the image, can replay one.
+
+  `encoder-sim.py` gained `--emit-log` and `--segment DUR:RPM[,DRIVE]`: the
+  trajectory is generated on the bench PC as a candump log and replayed on the
+  unit with `canplayer`. The live sender and the log emitter now share one
+  `Shaft` integrator and one `build_payload()`, because the claim is that the
+  replay is a *substitute* for the live simulator and that is only cheap to keep
+  true with one copy of the arithmetic. `tests/test_encoder_sim.sh` (14 checks)
+  is that claim: it drives the **real** live loop with a fake socket and a
+  virtual clock and proves 900 frames **byte-identical** to the emitted log;
+  it holds the log to the format `canplayer` actually parses; and it decodes the
+  log through the **daemon's own `j1939_spn_decode()`** against the seven
+  phase-C `encoder` SPNs — a second decoder written for the test would only
+  prove the test agrees with itself. The walk decodes to 90/54/30 rpm on the
+  minute with the count reaching 174, and the gate-4 `corr_break` fault reports
+  30 rpm while the shaft advances 180 revolutions in 120 s. Five mutations, all
+  caught.
+
+  Two format traps were found by compiling against **can-utils 2021.08.0's own
+  `lib.c`**, the copy built for this image, rather than by reading its
+  documentation. Both fail silently: `canplayer.c:411` scans the timestamp with
+  `"(%lu.%lu)"`, so microseconds must be zero-padded to six digits or the replay
+  runs at the wrong speed with no error; and `lib.c:181` treats an identifier as
+  extended only at exactly 8 hex digits, so a short id parses as 11-bit, the
+  profile's source address never matches, and the console simply shows a silent
+  bus. The `gate4-gate5` runbook now carries both paths — replay for images
+  without python, the live simulator for older ones — and the caveat that
+  `canplayer -l i` restarts the revolution **count** on every wrap while
+  position and rpm stay continuous, which is a trajectory no encoder can produce
+  and which the anomaly detector is entitled to fire on.
+
+  **Staged for removal, then reversed the same day — the fix is a version bump.**
+  `BR2_PACKAGE_PYTHON3` was turned off with the evidence and preconditions written
+  beside it, and then turned back on. The reachability findings above all stand and
+  are why the `canplayer` replay path exists; what changed is the conclusion drawn
+  from them. Keeping a working interpreter on the device was judged worth more than
+  the ~18 MB, and — decisively — **the CVE case for removal was weaker than it
+  looked**. Of the five rows, `CVE-2020-29396` is not a CPython defect at all: it is
+  an Odoo 11.0–13.0 sandbox escape that NVD matches against us only because python is
+  listed as Odoo's running-with platform, the same false-match shape as
+  `CVE-2019-0190` (openssl as the platform of Apache httpd `mod_ssl`) and
+  `CVE-2022-48174` (a busybox CPE with no version bound), both already `not-affected`
+  in the file. It is now reclassified `not-affected`, and it is worth being blunt
+  about why it mattered: carrying it as accepted-risk implied a removal or a bump
+  would eventually clear it, and **neither ever would have**.
+
+  The remaining four are closed by moving off buildroot 2023.02.6's stock **3.11.6**
+  to **3.11.16** (12 Aug 2026; the 3.11 branch is security-only until Oct 2027).
+  `CVE-2024-6232` (tarfile ReDoS) and `CVE-2024-7592` (http.cookies quadratic) are
+  fixed in 3.11.10. `CVE-2026-4519` and `CVE-2026-15308` both postdate 3.11.15
+  (03 Mar 2026) and predate 3.11.16, so 3.11.16 is expected to carry them — expected,
+  not asserted: only the `./build.sh cve` re-run at the new version settles it, and
+  the four rows stay accepted-risk until it does.
+
+  The bump is a whole-package replacement at
+  `sysdrv/tools/board/buildroot/python3/`, copied in by `sysdrv/Makefile` exactly as
+  `libopenssl` (3.5.7) and `open62541` (1.3.15) are, because `sysdrv/.gitignore`
+  treats `sysdrv/source/buildroot/**` as throwaway. All **31 stock patches were
+  verified to apply against 3.11.16 sequentially, as buildroot applies them — 0
+  failures**, 3 with fuzz within tolerance. Checking them independently against a
+  pristine tree instead reports 14 failures, which is an artefact: most insert into
+  the same `configure.ac` region and depend on their predecessors. The tarball's
+  sha256 was confirmed against the `messageDigest` in the CPython release's
+  `.sigstore` bundle, i.e. the digest committed to the Rekor transparency log.
+
+  **3.12+ was considered and rejected as out of reach for this tree**, not merely
+  expensive. Eleven of the 31 patches target files CPython has since deleted or
+  moved: `setup.py` (7 patches; deleted in 3.12, module building moved to
+  `configure.ac` + `Modules/Setup.stdlib.in`), `Lib/distutils` (2; deleted in 3.12
+  per PEP 632), `Lib/crypt.py` (1; deleted in 3.13 per PEP 594) and `Tools/scripts`
+  (1; moved in 3.12). One of the `setup.py` casualties is patch 0003, the
+  infrastructure every `BR2_PACKAGE_PYTHON3_*` toggle rests on — it would need
+  reimplementing, not porting. The external Rockchip toolchain is **gcc 8.3.0**
+  (crosstool-NG 1.24.0) targeting uclibc-ng and is not ours to move. The one point in
+  favour was that no third-party python module packages are enabled here (verified:
+  zero `BR2_PACKAGE_PYTHON_*` set), so the distutils removal in `pkg-python.mk` would
+  not have bitten — but that does not touch the eleven dead patches.
+
+  Still owed: the rebuild, then `./build.sh cve` to retire the four rows; buildroot
+  never uninstalls, so this needs a clean rootfs rebuild, the trap that kept mpv,
+  iperf and the `wifi_app` binaries alive after the 08-10 trim. Bench leg **8g** (one
+  `canplayer` replay on a unit) is no longer a shipping precondition now that the
+  interpreter stays, but the replay path is validated and worth keeping. Two loose
+  ends were cleanup rather than blockers, and one of them turned out to be a real
+  defect. `/usr/bin/smtpd.py.11` — CPython's stdlib demo SMTP **server**, 31 KB and
+  executable — has shipped on the device's PATH in **every** image, because stock
+  `python3.mk` removes `smtpd.py.3` while CPython installs it as
+  `smtpd.py.<minor>`, so buildroot's own cleanup `rm` has always been a silent
+  no-op. Globbed in the package replacement — **but as of 2026-08-19 it has not
+  taken effect, and the reason is worth more than the file.** 3.11.16 installed
+  at 05:01 and stamped `.stamp_target_installed`; the corrected `python3.mk`
+  reached the live buildroot tree at 08:33, *after* that stamp. Buildroot never
+  re-runs an install it has already stamped, so the hook has never fired and
+  `smtpd.py.11` is still in the packed `rootfs.img` — verified with `debugfs`.
+  A fix that lives in a **post-install hook** is inert against an
+  already-installed package: it needs `python3-reinstall` (or `-dirclean`), the
+  same family as the busybox-config trap. The interpreter bump itself DID land —
+  `libpython3.11.so.1.0` in the image reports 3.11.16.
+
+  **Resolved the same day.** `python3-reinstall` cleared it, and the rebuilt
+  `rootfs.img` (release 2026.08.5) reads back 3.11.16 with **no
+  `smtpd.py.*`**. `./build.sh cve` after a fresh SBOM: **0 blocking, 68
+  monitor, 32 suppressed**. Two of the four accepted-risk rows are genuinely
+  gone — **CVE-2024-6232** and **CVE-2024-7592** no longer match the image at
+  all, and the gate said so itself, warning that both triage entries had
+  become stale. Their rows are deleted: the triage vocabulary has no "fixed"
+  state on purpose, because an upgraded component simply stops matching, and
+  **a suppression that outlives its finding is the same evidence problem as a
+  stale fact sheet** — it silently covers a future re-introduction.
+  **CVE-2026-15308 and CVE-2026-4519 still match 3.11.16** and stay
+  accepted-risk on the unchanged reachability argument; the bump was never
+  going to retire them. The honest count is python3 ×2, and the row that said
+  "×4 pending the rebuild" now says so.
+
+  `/usr/bin/event_rpcgen.py` remains, but it comes from libevent rather than
+  python3 — a **build** tool carrying `#!/usr/bin/env python`,
+  already broken since there is no python2. `/sbin/routel` keeps working, since
+  python3 stays. Only the Pico Ultra profile is changed; the
+  other board profiles remain untouched and unexercised (item 13).
+
+- **2026-08-19 — platform (shared SDK tooling), Annex I #3/#5: the other board
+  configs (item 13). The ext4 packer is clean on all eleven boards that use it.
+  Asking the question found two defects in the packer, one in every image this
+  product has ever shipped, and an entire packing path where the 2026-08-15
+  ownership fix was never in force at all.**
+
+  **What the SDK actually contains.** Sixteen board configs, and the useful
+  question was never "do all sixteen build" but "where does the shared packer
+  run". Eleven use ext4 and therefore `mkfs_ext4.sh` — **26 partitions**: the
+  five EMMC Buildroot boards (86Panel, Pi, Ultra, Ultra-AB, Zero) at
+  rootfs+oem+userdata, the EMMC Busybox FASTBOOT board at `userdata` only, and
+  the five SD_CARD boards (RV1103 Pico/Mini/Plus/WebBee, RV1106 Pro Max) at
+  rootfs+userdata. The remaining five are SPI_NAND profiles whose partitions are
+  ubifs and erofs; `mkfs_ext4.sh` never runs for them, which turned out to be
+  the important half of the answer (below).
+
+  **All 26 pack clean.** Each was packed with the tracked packer at *that
+  board's own geometry* — including the `-(rootfs)` growup partition the SD_CARD
+  boards use and the Ultra profile never takes, where the size is derived from
+  the tree rather than read from the partition table — against the real
+  assembled staging trees, and then verified by reading every inode's uid and
+  gid back out of the image: 2551/2551 in rootfs, 217/217 in oem, `e2fsck -fn`
+  clean on all 26. Geometry ranges from 268 MB to 6 GB with no behaviour change.
+  What this does **not** cover is stated below: the nine non-Ultra buildroot
+  boards assemble their tree from `luckfox_pico_defconfig`, which has never been
+  built here.
+
+  **One real build, and a control.** `./build.sh firmware` was run end to end
+  against the **single-slot Pico Ultra** config (6144 MB `rootfs`, 256 MB
+  `userdata`) and then again against the A/B config we ship (1536 MB `rootfs_a`,
+  512 MB `userdata`). Both packed all three partitions root-owned; both then
+  failed at exactly the same later step, `update.img`, for a missing
+  `download.bin` — a u-boot artifact absent from a pruned `output/image`, not
+  anything board-specific. Running the shipping board as the control is what
+  makes that claim worth anything.
+
+  **Defect 1 — the packer's guard did not check what its comment claimed.**
+  `debugfs` addresses inodes by quoted path, so a name containing a double quote
+  or a newline cannot be expressed. The code refused the first and silently
+  accepted the second, while the comment above it said both. Measured on a tree
+  containing `/etc/shadow\nevil`: **packer exit 0, its own verification
+  reporting zero bad inodes, and the file still 1000:1000 in the packed image.**
+  Precisely the shape of the `fakeroot` approach this pass exists to replace — a
+  check that could not fail.
+
+  **Defect 2 — the verification could not see past the list that caused the
+  problem.** It was derived from the applied command file by `sed`, so it could
+  only ever catch `debugfs` refusing a line, never a tree the list had failed to
+  describe: the same defect wrote both files. It also grepped `User:` only, so a
+  root uid with a **non-root gid** passed. Replaced with a walk of the image's
+  own directory tree, breadth first, addressing every directory by **inode
+  number** (`ls -l <n>`) so that no filename is ever quoted and nothing a
+  filename can do will break it; uid and gid are both read back, and inodes the
+  path list could not name are caught anyway. One `debugfs` run per tree level —
+  about ten for a full rootfs, no measurable cost. The build now prints
+  `walked 2551 inode(s) ... all uid/gid 0`.
+
+  Guarded by `scripts/compliance/test-image-ownership.sh`, seven checks, added
+  to the source-level gates in the release procedure. It needs no build — it
+  packs its own throwaway trees with the tracked SDK e2fsprogs — and it asserts
+  the packer **fails** when it should: a hostile path is refused; with the
+  guard disabled the walk still finds the unowned inode; and a gid-only
+  regression is rejected. A test that only proves the happy path
+  would have passed against both defects above.
+
+  **Defect 3 — `/etc/shadow` has shipped world-readable in every image.** Found
+  while reading modes out of the packed rootfs: `0755`, root-owned since 08-15
+  but readable and executable by everyone, carrying the hash. Inert for exactly
+  the reason the uid-1000 bug was inert — nothing runs unprivileged yet — and it
+  goes live the moment CRA hardening unprivileges a daemon, which is the
+  direction all of this work points. The interesting part is why it survived:
+  **three mechanisms each look like the place to fix it and none of them can.**
+  Git stores only the executable bit, so a 0600 file in the tree checks out 0644
+  for the next person. `RK_POST_BUILD_SCRIPT` runs *before* `post_overlay`, so
+  the overlay overwrites whatever it sets — already recorded as a gotcha, now
+  with a consequence. And `post_overlay` installs with
+  `rsync --chmod=u=rwX,go=rX`, which **cannot express a mode narrower than
+  0644**: every overlay file is world-readable by construction. So the fix is a
+  hook in `build_firmware` immediately after `post_overlay`
+  (`__HARDEN_SECRET_FILE_MODES`), and the mode is verified by reading it back
+  out of the packed image: `100600`, uid 0, gid 0. Two checks in
+  `test-root-credential.sh` now assert both the mode in a packed tree and that
+  the hook still runs *after* `post_overlay` — both were negative-tested.
+
+  **The half of the SDK the 08-15 fix never reached.** `mkfs_ext4.sh` was fixed;
+  the ubifs and erofs packers were not, and `mkfs_ubi.sh` "handles" ownership
+  with **the exact `fakeroot` approach that 2026-08-15 proved does nothing**: it
+  writes `chown -h -R 0:0` and the packer invocation into one script and runs it
+  under `fakeroot`. `mkfs.ubifs` and `mkfs.erofs` are both statically linked, so
+  neither consults `LD_PRELOAD`; `mksquashfs` is dynamic, so fakeroot works for
+  squashfs and silently fails for the other two. Measured rather than reasoned:
+  a static SDK packer run *inside* that fakeroot session, after that chown,
+  still wrote `1000:1000`; `mkfs.erofs` on the real staging tree reported
+  `/etc/shadow` as `Uid: 1000 Gid: 1000` via `dump.erofs`.
+
+  **erofs is fixed and measured**: `mkfs.erofs --all-root`, verified by reading
+  `/`, `/etc`, `/etc/shadow` and `/etc/ssh/authorized_keys` back out with
+  `dump.erofs` (all 0:0) and `fsck.erofs` clean. **ubifs is deliberately NOT
+  fixed**, because the bundled mtd-utils 2.0.1 cannot express the fix
+  completely and shipping a half-fix that looks whole is the failure mode this
+  entry is about. Parsing the inode nodes out of the raw ubifs image directly:
+  `--squash-uids` moves three of four inodes to 0:0 and **leaves the root inode
+  at 1000:1000**, and a device table cannot cover it either — `mkfs.ubifs`
+  rejects `/` with "device table entries require absolute paths". A `/` owned by
+  the build uid is not cosmetic; it is create and unlink at the filesystem root.
+  Left as a precondition on ever shipping a SPI_NAND profile rather than as a
+  fix nobody verified.
+
+  **What item 13 asked for that this is not.** No boot pass: fifteen of the
+  sixteen configs are for boards we do not have, and the ext4 evidence above is
+  image-level, not a running unit. The nine non-Ultra buildroot boards build
+  their rootfs from `luckfox_pico_defconfig`, which has never been packed here,
+  so the *geometry* half of those boards is verified and the *tree-content* half
+  is not. And the finding that makes the rest of it moot for now: **14 of the 16
+  configs are stock BSP profiles.** Only the two Pico Ultra configs carry
+  `RK_POST_BUILD_SCRIPT=luckfox-hardening-post.sh`; four still set
+  `RK_ENABLE_WIFI=y` (which reinstalls hostapd 2.6 / wpa_supplicant 2.6 and the
+  prebuilt `wifi_app` binaries, outside the SBOM and the CVE gate), and
+  `luckfox_pico_defconfig` still carries `BR2_PACKAGE_WGET=y` — the package
+  dropped from the `_w` defconfig on 2026-08-16 to retire the one expiring
+  accepted-risk CVE. **An image built for any board other than the Pico Ultra
+  today is not a compliant artifact**, whatever the packer does, and that is a
+  larger statement than "the build passes".
+
+  **CONFIRMED ON HARDWARE 2026-08-19 — the ext4 half of item 13 is closed on a
+  unit.** A SatiSense Edge bench unit was updated to **2026.08.4 through the
+  A/B updater** (not reflashed, so the change travelled the way a customer's
+  would) and reports: `/etc/shadow` at `-rw------- 0 0` — the world-readable
+  mode is gone from a running unit, not just from a build log; `/`, `/etc`,
+  `/etc/ssh` and `/etc/ssh/authorized_keys` all `0 0`; and
+  `find / -xdev \( ! -user 0 -o ! -group 0 \)` **empty** — no inode on the root
+  filesystem is owned by anything but root. Key-authenticated SSH succeeds with
+  `StrictModes` at its default, which is the acceptance test the ownership pass
+  exists to satisfy. `misc_ab` shows both slots bootable and
+  `successful_boot=1` with the previous release intact on the other slot, and
+  the daemon came up on the new slot (OPC UA on :4840 in
+  `/var/log/intelligence-edge.log`). The same run surfaced the `oem` gap
+  recorded in the next entry.
+
+  *Worth recording:* every one of the three packer defects was a check that
+  could not fail, and each was found by asking a different question than the one
+  the check answered. The guard was found by asking what the comment claimed
+  rather than what the code did; the verification by asking where its input came
+  from; the erofs and ubifs paths by asking which boards the fixed tool does not
+  run on. The 08-15 entry drew the lesson "verify the image, not the tooling".
+  The sharper version after this pass is **verify the image independently of
+  whatever produced it** — a verification that shares an input with the thing it
+  verifies is part of the same mechanism, not a check on it.
+
+
+- **2026-08-19 — SatiSense Edge, Annex I #1/#3/#5: the root daemon loads a
+  library from a partition the updater cannot reach, and that partition is
+  owned by the build user on every unit in the field.** Found by running the
+  ownership sweep on hardware rather than on a build.
+
+  Three facts that are individually dull and together are not:
+
+  - **`/oem` is not in the update.**
+    [`sw-description.in`](ab-boot/swupdate/sw-description.in) carries exactly
+    one payload, `rootfs.img`, to `p9` or `p10`. The `oem` partition (p7) is
+    single-copy — there is no `oem_b` — so it is never written by an update and
+    could not be written safely by one: a power cut mid-write would leave a
+    corrupt `oem` with nothing to roll back to. The payload is rootfs-only for
+    a good reason.
+  - **So the 2026-08-15 ownership fix never reaches it.** Measured on the bench
+    unit after updating to 2026.08.4: `/oem/usr` is `drwxrwxr-x 1000 1000` —
+    owned by the build user *and* group-writable by it. The freshly built
+    `oem.img` is correct (218/218 root-owned), so a **reflash** fixes this and
+    **no update ever will**. Every unit flashed before 2026-08-15 is in this
+    state permanently.
+  - **The daemon's library search path points there.**
+    `S60intelligence-edge` exports
+    `LD_LIBRARY_PATH=/oem/usr/lib:/oem/lib` for the daemon *and* for every
+    console CGI that re-execs it, because `intelligence_edge_opcua` carries a
+    hard `NEEDED` entry for `librknnmrt.so` (190 KB) which ships **only** in
+    `oem`. Every one of its other ten `NEEDED` libraries resolves inside the
+    rootfs; this is the single exception.
+
+  Put together: a uid-1000 or gid-1000 process can replace a shared object that
+  a **root** daemon loads at its next start. That is a privilege escalation
+  with a concrete path, not the latent kind — it is inert today only because no
+  uid-1000 account exists in `/etc/passwd`, the same thread that has now run
+  through the rootfs ownership bug, the `/etc/shadow` mode and this. The
+  difference is that the first two were fixed by shipping a new image and this
+  one cannot be.
+
+  media-gateway does not link `librknnmrt.so` and does not export the path, so
+  this is SatiSense-only.
+
+  **The remedy is to move the 190 KB library into the rootfs** and drop the
+  `/oem` search path, which puts every library a root daemon loads on the
+  partition the updater actually writes, verifies and owns. Not done here: it
+  changes what ships and wants its own bench pass. Filed as remaining-work item
+  14. Fielded units still need a reflash regardless — that is what "no update
+  can fix it" means, and it should be stated in the Annex II fact sheet next to
+  the existing flash-date caveats rather than discovered by a customer.
+
+  **REMEDY SHIPPED AND BENCH-CONFIRMED 2026-08-19, release 2026.08.5.** The
+  library now installs into the rootfs from satisense-edge's own `make install`,
+  guarded by the *same* `wildcard` test that adds `-lrknnmrt` to the link — so
+  the daemon can never carry a `NEEDED` entry for a library this package does
+  not ship — and the `/oem` export is gone from `S60intelligence-edge`. On the
+  unit after updating: the daemon is up (pid 726, OPC UA on :4840) and `ldd`
+  resolves **every one of its thirteen libraries inside the rootfs**, with
+  `librknnmrt.so => /usr/lib/librknnmrt.so` and **no path under `/oem` at all**.
+  `ldd` is the right evidence here rather than "it started": it enumerates what
+  the loader actually bound, so it distinguishes a fixed search path from a
+  lucky one.
+
+  **Not closed, and the same sweep found why.** `/etc/profile.d/RkEnv.sh` — BSP
+  boilerplate for the Rockchip IPC app, which this image does not run — still
+  exports `HOME=/oem`, puts `/oem/{,usr/}{bin,sbin}` on `PATH` and **prepends
+  `/oem/usr/lib:/oem/lib` to `LD_LIBRARY_PATH`**. `profile.d` is sourced by
+  interactive login shells only, so it never touched the daemon (which is why
+  the `ldd` above is clean), but it means **an administrator's own root SSH or
+  serial session still searches a uid-1000-writable partition for libraries
+  first** — prepended, so ahead of `/usr/lib`. The daemon was the loud half of
+  this exposure; this is the quiet half, and it survived because the fix was
+  aimed at the service rather than at the partition. Nothing in either product
+  needs the file (rkipc is deliberately not started, `S21appinit`), so the
+  remedy is to delete it in `luckfox-hardening-post.sh`, which runs after the
+  rootfs is assembled and before the overlay — the one hook that can reach it.
+  **Done in release 2026.08.6**, verified absent from the packed image and then
+  measured on the unit — in an **interactive login session**, which is the only
+  shell that sources `profile.d` and therefore the only place the claim can be
+  tested: `LD_LIBRARY_PATH=[]`, `/etc/profile.d` holding only
+  `enable_coredump.sh` and `umask.sh`, and `ldd` on the daemon reporting **0**
+  paths under `/oem`. A non-login `ssh host "echo $LD_LIBRARY_PATH"` prints
+  empty on *every* release, including ones that still ship the file, so that
+  form would have been another check that could not fail. Corroborated
+  incidentally by the shell prompt itself, which reverted from showing a
+  directory name to `~` once `HOME=/oem` stopped being set. Removing it was safe to establish rather than assume:
+  its only consumer is `S60micinit`, which guards everything behind
+  `command -v amixer`, and `amixer` is in neither the rootfs nor `oem` — so
+  that script has been a no-op on every boot this image has ever had, and the
+  `[ -f ... ] &&` around its `source` makes the deletion inert for it.
+
+  `/oem` ownership is unchanged on the unit, exactly as predicted:
+  `/oem/usr` still reads `drwxrwxr-x 1000 1000` after the update. This release
+  removes the daemon's *reachability*, not the ownership. Only a reflash clears
+  the ownership.
+
+  *Worth recording:* the sweep that found this is the one the build already
+  runs — every inode root-owned — and the build had been passing it for four
+  days. It passed because the build can only ever check the image it just
+  packed, and `oem.img` was correct. The device is the only place where "the
+  partition we do not rewrite" and "the partition on the daemon's library path"
+  are the same sentence. **Verify the image, then verify the unit** — they are
+  different claims, and this one was only ever visible on the unit.
+
 
 - **2026-08-19 — platform, Annex I #7 / item 11: the partition layout is
   FROZEN, and freezing it turned up a document describing a product we do not
@@ -3512,7 +4188,11 @@ when it stops being true.)* What is actually left, deadline item first:
    representative and is the only item whose duration we do not control; **single
    reporting platform access obtained in a quiet week**; **a fill-in early warning
    and an Art. 14(8) customer notice drafted in advance**, with a confirmed customer
-   distribution list; and **one 30-minute drill** walking a fabricated report end to
+   distribution list *(drafted 2026-08-28 — [`disclosure/art14/`](disclosure/art14/):
+   the report grows §A→§B→§C in one file, the customer notice's mitigation text is
+   pinned to §B, and the distribution-list page is a checklist whose last step is a
+   test mail to every address — a list nobody has mailed is not confirmed)*; and
+   **one 30-minute drill** walking a fabricated report end to
    end. Owner-facing version with dates in
    [`cra-remaining-work.md`](cra-remaining-work.md) §1.
 

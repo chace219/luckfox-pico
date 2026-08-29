@@ -19,7 +19,9 @@ process for handling vulnerabilities after it ships. Both of those are due
 vulnerabilities and severe incidents to the authorities on a 24-hour clock, and
 it is due **11 September 2026** — that is the one date on this page.
 
-**All eight product properties are met.** Secure defaults, no known
+**All eight product properties are met.** *(One of them briefly was not: an
+OpenSSL patch release on 25 August exposed three findings, caught and fixed
+the same day it was checked, 29 August — see §3.)* Secure defaults, no known
 unaddressed vulnerabilities at shipment, protected data, a minimised attack
 surface, access control, security logging, a signed update mechanism and
 factory reset — each is implemented and each has been demonstrated on real
@@ -127,7 +129,14 @@ Each is a decision or an errand. None needs engineering time.
    warning, and a customer notice for the duty to inform affected users. Twenty
    minutes of writing now, an hour we will not have later. The customer notice needs a
    distribution list — who we email when a fielded unit is affected — which we should
-   confirm exists.
+   confirm exists. **Drafted 2026-08-28:** both notices and the distribution-list
+   checklist are in [`disclosure/art14/`](disclosure/art14/). What is left is filling
+   the two counsel fields, and the test mail to every address on the list.
+   **Position on 2026-08-28: no unit has been placed on the EU market and no
+   incident has occurred** — so the clock has nothing to attach to on 11 September
+   and attaches at first shipment instead. The binding date for every item in this
+   section is therefore *before unit one*; 11 September is only the day after which
+   unit one carries the duty with it.
 5. **Run one 30-minute drill before 11 September.** *Product management and one
    engineer.* Send a fabricated report to the new mailbox and walk it end to end: who
    saw it, how fast, which builds are affected, what the early warning would say, who
@@ -207,12 +216,13 @@ team. Listed so the picture is complete rather than flattering.
 
 | | What it is |
 |---|---|
+| ~~**OpenSSL security patch**~~ | **Closed 29 Aug**, same day it was found. A patch release (3.5.8, 25 August) fixed three findings in the cryptography library under every encrypted connection — none reachable on our units, but worth taking rather than triaging. Rebuilt, verified, all release checks pass. What is still open is a short hardware session to re-touch the TLS surfaces, folded into the MQTT bench work below |
 | **Broker-authenticated MQTT test** | The only outstanding test that needs equipment we do not have set up — a message broker whose credentials we control |
 | **Two small bench checks** | One replay test and one log check, each about ten minutes on a unit; neither gates anything |
-| **First automated fuzzing run** | Automated attack-input testing now runs nightly, but the first full run has not happened yet. The weaker version of it has, with nothing found |
-| **Scheduled hardware testing** | Bench sessions are still arranged by hand rather than on a calendar. Every serious defect this programme has found came from running the product, not from reading it, so this is worth formalising |
+| ~~**First automated fuzzing run**~~ | **Done — confirmed 2026-08-29.** Automated attack-input testing has run every night since 23 August on both products, roughly 150–230 million inputs a night, with nothing found. The inputs it discovered are now kept with the code, so every later test run covers them |
+| ~~**Scheduled hardware testing**~~ | **Written down 2026-08-29** — `release-build-runbook.md`'s new "Standing bench and review cadence" section: a monthly CVE-gate + security.txt check, the dated `REVIEW_BY` table for every accepted-risk row (next: 9 November), and a nightly-fuzz health check. Still needs an actual calendar entry from product management — a paragraph in a runbook does not fire a reminder by itself |
 | **Fifteen unbooted board variants** | The build offers sixteen hardware profiles; all are hardened and checked automatically, but only one has ever been switched on here. We do not have the other boards |
-| **Two component reviews due 9 November** | Two known issues in a scripting language we ship are accepted risks with a documented reason and a review date the build enforces. Two closed-source vendor components carry the same treatment |
+| **Two component reviews due 9 November** | One known issue in a scripting language we ship is an accepted risk *(two until 29 August, when the vulnerability database confirmed our version fixed the other)* with a documented reason and a review date the build enforces. Two closed-source vendor components carry the same treatment |
 
 ---
 
