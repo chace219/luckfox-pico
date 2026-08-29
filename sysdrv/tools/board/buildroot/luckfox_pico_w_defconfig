@@ -182,6 +182,13 @@ BR2_PACKAGE_OPEN62541_UA_NAMESPACE_ZERO_REDUCED=y
 BR2_PACKAGE_OPEN62541_ENCRYPTION_OPENSSL=y
 # Web-console TLS (ADR-129): stunnel terminates HTTPS in front of busybox httpd.
 BR2_PACKAGE_STUNNEL=y
+# QUIC off (CRA item 4, 2026-08-29): Config.in defaults this to y, and nothing
+# in either product tree opens a QUIC listener or configures raw public keys —
+# stunnel, open62541 and the MQTT client are all classic TLS. Off turns every
+# future QUIC/RPK finding in this library into "not built" instead of a
+# reachability argument to re-litigate each time (CVE-2026-14456/-14457/-18798
+# were the first three; not-built is a compile-time fact, not a triage row).
+# BR2_PACKAGE_LIBOPENSSL_ENABLE_QUIC is not set
 
 BR2_PACKAGE_AVAHI=y
 # BR2_PACKAGE_AVAHI_AUTOIPD is not set
