@@ -434,31 +434,92 @@ Fallback if (a) fails (unlikely — the templates are vendor-provided): the
 `CONFIG_ANDROID_AB` or `CONFIG_SPL_KERNEL_BOOT` bootloader routes surveyed
 earlier remain available; the partition layout below already reserves for them.
 
-## Partition layout — **FROZEN 2026-08-19** (one-way door #1)
+## Partition layout — **RE-CUT AND RE-FROZEN 2026-09-01** (one-way door #1)
 
-**This is the shipped table.** It is the value of `RK_PARTITION_CMD_IN_ENV` in
-`project/cfg/BoardConfig_IPC/BoardConfig-EMMC-Buildroot-RV1106_Luckfox_Pico_Ultra-IPC-AB.mk`,
-and it is the layout every release since 2026.08.2 has been delivered onto:
+**These are the shipped tables — one per board.** Each is the value of
+`RK_PARTITION_CMD_IN_ENV` in its A/B board profile.
+
+**Pico Ultra — 8 GB eMMC, ext4** (`BoardConfig-EMMC-Buildroot-RV1106_Luckfox_Pico_Ultra-IPC-AB.mk`):
 
 ```
-32K(env),512K@32K(idblock),256K(uboot),4M(misc),32M(boot),32M(boot_b),512M(oem),512M(userdata),1536M(rootfs_a),1536M(rootfs_b)
+32K(env),512K@32K(idblock),256K(uboot),4M(misc),32M(boot),32M(boot_b),64M(oem),512M(userdata),768M(rootfs_a),768M(rootfs_b)
 ```
 
 | # | Partition | Offset | Size | Written by an update? |
 |---|---|---|---|---|
-| p1 | `env` | `0x00000000` | 32 K | no |
-| p2 | `idblock` | `0x00008000` | 512 K | no |
-| p3 | `uboot` | `0x00088000` | 256 K | no |
-| p4 | `misc` | `0x000C8000` | 4 M | slot record only (`misc_ab`) |
-| p5 | `boot` | `0x004C8000` | 32 M | no — kernel + selector initramfs, single copy in v1 |
-| p6 | `boot_b` | `0x024C8000` | 32 M | no — **reserved, empty in v1** |
-| p7 | `oem` | `0x044C8000` | 512 M | **no — reflash only** |
-| p8 | `userdata` | `0x244C8000` | 512 M | no — survives updates *and* factory reset |
-| p9 | `rootfs_a` | `0x444C8000` | 1536 M | yes — slot A |
-| p10 | `rootfs_b` | `0xA44C8000` | 1536 M | yes — slot B |
+| p1 | `env` | `0x00000000` | 256 K | no |
+| p2 | `idblock` | `0x00040000` | 256 K | no |
+| p3 | `uboot` | `0x00080000` | 512 K | no |
+| p4 | `misc` | `0x00100000` | 4 M | slot record only (`misc_ab`) |
+| p5 | `boot` | `0x00500000` | 8 M | no — kernel + selector initramfs, single copy in v1 |
+| p6 | `boot_b` | `0x00D00000` | 8 M | no — **reserved, empty in v1** |
+| p7 | `oem` | `0x01500000` | 16 M | **no — reflash only** |
+| p8 | `userdata` | `0x02500000` | 128 M | no — survives updates *and* factory reset |
+| p9 | `rootfs_a` | `0x0A500000` | 192 M | yes — slot A |
+| p10 | `rootfs_b` | `0x16500000` | 192 M | yes — slot B |
 
-4165 MiB of the nominal 8 G eMMC. Notes:
+549 MiB, down from 4165 MiB — an **87% reduction** with every feature intact
+and the rootfs still read-write. The remaining ~6.6 GB of eMMC is unallocated.
 
+**Pico Max — 256 MB SPI NAND, ubifs** (`BoardConfig-SPI_NAND-Buildroot-RV1106_Luckfox_Pico_Max-IPC-AB.mk`):
+
+```
+256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),16M(oem),60416K(userdata),80M(rootfs_a),80M(rootfs_b)
+```
+
+Identical in structure — same partitions, same order, **same indices** — and
+differing only in the sizes of `userdata` (59 M) and the two rootfs slots
+(80 M each, at `0x06000000` and `0x0B000000`). Exactly 256 MiB, no tail.
+
+Notes:
+
+- **Why two tables and not one.** A single shared table was tried first and
+  abandoned, for a reason that is not about sizes but about **filesystems**.
+  The Max's rootfs is ubifs, which *compresses*: the 80 M staged tree packs to
+  48 M. The Ultra's is ext4 on a block device, which does not compress and
+  needs 116 M for the same tree — and two 116 M slots do not fit 256 MB.
+  Running ubifs on the eMMC instead is not available: `build.sh` packs `ubifs`
+  as a UBI image unconditionally, and UBI is an MTD layer, not a block-device
+  one. So each board gets a table native to its medium, and the gate freezes
+  both.
+- **The rootfs is READ-WRITE on both boards.** A read-only squashfs rootfs
+  (33 M, which would have allowed 64 M slots on both) was staged and reversed:
+  `S50sshd` persists the SSH host identity by writing symlinks into `/etc/ssh`
+  and running `ssh-keygen -A`, both of which fail read-only — producing exactly
+  the changed-host-identity failure that script exists to prevent — and
+  `luckfox-config` writes under `/etc` too. Those are fixable, but not as a
+  side effect of a partition change.
+
+- **Why it was re-cut.** The product is migrating from the Pico Ultra to the
+  Pico Max, which carries 256 MB of SPI NAND rather than 8 GB of eMMC. Sizing
+  the new board revealed that the old one had never been sized at all: its
+  slots were ~13× the image and `oem`/`userdata` were 512 M each while
+  `oem.img` holds an **empty** tree. The 8 GB table was inherited, not chosen,
+  so both boards were re-cut rather than only the new one.
+- **Re-opening the freeze was legitimate exactly once.** The 2026-08-19 freeze
+  binds at *first customer shipment*, not at the date of the freeze, and no
+  customer unit has shipped (see `ship-blockers-one-way-doors.html`). That
+  argument is now spent: the next re-cut is a truck roll.
+- **Nothing was removed to make it fit.** Both profiles build the same
+  `luckfox_pico_w_defconfig`, with both products, the J1939 tools, python3 and
+  the bundled help docs present. Measured 2026-09-01 (build 2026.08.17): the
+  80 M staged tree packs to **116 M as ext4** (already `resize2fs -M`, the
+  minimum for the content) and **48 M as ubifs-zlib** — 60% and ~63%
+  occupancy of their respective slots.
+- **Partition indices did not move.** p9/p10 are still `rootfs_a`/`rootfs_b`
+  on **both** tables, so `sw-description.in`'s `/dev/mmcblk0p9` and `p10` are
+  unchanged and one sw-description covers both boards. Only offsets and sizes
+  moved — which is what the SocToolKit maps encode, and they were regenerated
+  from the eMMC table.
+- **Every offset and size is 256 KiB-aligned on both tables**, the erase-block
+  size of the 4K-page SPI NAND class the Max uses; a UBI partition that starts
+  or ends mid-erase-block will not attach. This is why `env`/`idblock`/`uboot`
+  moved from the eMMC-native 32K/512K/256K to 256K/256K/512K. The eMMC does
+  not require it, but the gate checks it there too: keeping the two tables
+  structurally identical is what makes one sw-description correct for both.
+- **The Ultra keeps ~6.6 GB unallocated**; that tail is the append-only escape
+  hatch (a partition appended there shifts no index). **The Max has no tail** —
+  the table consumes its chip exactly.
 - **The draft in this section until 2026-08-19 was wrong** and had been for the
   whole implementation: it wrote `uboot_a`/`uboot_b` and `boot_a`, which the
   board profile never carried and no unit was ever flashed with. Nothing was

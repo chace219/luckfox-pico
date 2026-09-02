@@ -34,16 +34,73 @@
 set -u
 cd "$(dirname "$0")/../.." || exit 2
 
-# ── THE FROZEN TABLE ────────────────────────────────────────────────────────
-# Do not edit this line to make the gate pass. Editing it IS the layout change.
-FROZEN="32K(env),512K@32K(idblock),256K(uboot),4M(misc),32M(boot),32M(boot_b),512M(oem),512M(userdata),1536M(rootfs_a),1536M(rootfs_b)"
+# Reader for the packed rootfs — no longer always ext4. See its header.
+. "$(dirname "$0")/rootfs-image-lib.sh"
 
-# Nominal 8 GB eMMC on the Pico Ultra. 7.2 GiB is a conservative usable floor
-# for a "8 GB" part; the real capacity has not been measured on a unit from
-# this build host, so this bounds the table rather than sizing it.
+# ── THE FROZEN TABLES ───────────────────────────────────────────────────────
+# Do not edit these lines to make the gate pass. Editing one IS a layout change.
+#
+# RE-CUT 2026-09-01. The Ultra's table went from 4165 MiB to 549 MiB, and a
+# second table was added for the Pico Max's 256 MB SPI NAND. Re-opening the
+# freeze was legitimate only because no customer unit had shipped. That is now
+# the last time it is legitimate.
+#
+# WHY TWO TABLES AND NOT ONE. A single shared table was tried first and does
+# not work, for a reason that is not about sizes: the two boards cannot run
+# the same filesystem. The Max's rootfs is ubifs, which COMPRESSES the 80 M
+# staged tree to 48 M. The Ultra's is ext4 on a block device, which does not
+# compress and needs 116 M for the same tree — and two 116 M slots do not fit
+# 256 MB. Running ubifs on the eMMC instead is not available: build.sh packs
+# ubifs as a UBI image unconditionally, and UBI is an MTD layer.
+#
+# What the two tables DO share is structure: same partition names, same order,
+# same INDICES (p9/p10 are the rootfs slots on both), same 256 KiB alignment
+# discipline. That is what lets one sw-description and one gate cover both.
+# Only the sizes differ. The per-board checks below enforce the structure on
+# each table rather than trusting that they were edited together.
+FROZEN_EMMC="32K(env),512K@32K(idblock),256K(uboot),4M(misc),32M(boot),32M(boot_b),64M(oem),512M(userdata),768M(rootfs_a),768M(rootfs_b)"
+FROZEN_NAND="256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),16M(oem),60416K(userdata),80M(rootfs_a),80M(rootfs_b)"
+
+# A "256 MB" NAND is a true 256 MiB of usable pages (unlike a "8 GB" eMMC,
+# whose usable capacity needs a conservative floor), so the NAND table has an
+# exact budget: it must total this, with no tail.
+#
+# THIS IS AN ASSUMPTION ABOUT THE PART FITTED, AND IT IS NOT GUARANTEED.
+# Luckfox does not fit one SPI NAND size across the range, and this SDK proves
+# it: the RV1103 profiles (Pico Mini/Plus/WebBee) carry a 126 MiB table — a
+# 128 MB part — while the Pro Max profile carries a 255 MiB one. A board
+# revision, a second-source part, or simply a different SKU can therefore be
+# HALF the size this table assumes, and the failure mode is not subtle: the
+# NAND table consumes 256 MiB exactly, so on a 128 MB part the last partition
+# (rootfs_b, and most of rootfs_a) has no chip behind it.
+#
+# There is no way to check that from the build host — the part is only visible
+# on a unit. What CAN be done is to state the assumption where it will be read
+# and to make the check fail loudly if the constant is edited without the
+# table being resized, which is what the exact-total assertion below does.
+#
+# BEFORE THE FIRST MAX BUILD IS FLASHED, confirm the fitted part from the
+# kernel log on a real unit:
+#     dmesg | grep -i 'spi-nand\|mtd'      -> reports the chip and its size
+#     cat /proc/mtd                        -> reports the partitions created
+# A 128 MB part needs its own table (and its own frozen constant here), not a
+# smaller rootfs slot: 2x80 M slots alone exceed such a chip.
+NAND_TOTAL=$((256 * 1024 * 1024))
+
+# Erase-block size of the 4K-page SPI NAND class the Max uses. Every partition
+# offset AND size must be a multiple of it or the UBI volume will not attach.
+# Checked on BOTH tables: the eMMC does not require it, but keeping the two
+# structurally identical is the property that makes one sw-description and one
+# set of flashing-map semantics correct for both boards.
+NAND_ERASE_BLOCK=$((256 * 1024))
+
+# Nominal 8 GB eMMC on the Pico Ultra. The eMMC table leaves ~6.6 GB
+# unallocated; that tail is the post-freeze escape hatch (a partition APPENDED
+# there shifts no existing index).
 EMMC_USABLE_FLOOR=$((7200 * 1024 * 1024))
 
 BOARDCFG=project/cfg/BoardConfig_IPC/BoardConfig-EMMC-Buildroot-RV1106_Luckfox_Pico_Ultra-IPC-AB.mk
+BOARDCFG_NAND=project/cfg/BoardConfig_IPC/BoardConfig-SPI_NAND-Buildroot-RV1106_Luckfox_Pico_Max-IPC-AB.mk
 IPC_JSONS="tools/linux/SocToolKit/ipc.json tools/windows/SocToolKit/ipc.json"
 SWDESC=media/joral/ab-boot/swupdate/sw-description.in
 # Both compliance documents that state the layout. Kept verbatim rather than
@@ -115,86 +172,190 @@ human() {  # bytes -> MiB with one decimal, or KiB below 1 MiB
 	else echo "$(( (b * 10 / 1024 / 1024 + 5) / 10 )) MiB"; fi
 }
 
+# ── 1 & 2. Each board's profile carries its frozen table, and each table
+#          satisfies the structural invariants ─────────────────────────────
+# Both tables are checked in full. The structure is what the two boards SHARE
+# — names, order, indices, alignment — so an edit that breaks it on one board
+# is caught on that board rather than inferred from the other.
+for BOARD in emmc nand; do
+	case $BOARD in
+	emmc)
+		FROZEN=$FROZEN_EMMC; BC=$BOARDCFG
+		LABEL="Ultra / eMMC"
+		;;
+	nand)
+		FROZEN=$FROZEN_NAND; BC=$BOARDCFG_NAND
+		LABEL="Max / SPI NAND"
+		;;
+	esac
+
+	parse_table "$FROZEN"
+	[ ${#NAMES[@]} -gt 0 ] || { echo "the frozen $BOARD table did not parse — this is a bug in this script"; exit 2; }
+
+	echo
+	echo "== Frozen A/B partition layout — $LABEL =="
+	for i in "${!NAMES[@]}"; do
+		note "$(printf 'p%-2d %-10s @ 0x%08X  %s' $((i + 1)) "${NAMES[$i]}" "${OFFSETS[$i]}" "$(human "${SIZES[$i]}")")"
+	done
+
+	if [ ! -f "$BC" ]; then
+		bad "$BC missing — the A/B board profile is the thing being frozen"
+	else
+		actual=$(sed -n 's/^export RK_PARTITION_CMD_IN_ENV="\(.*\)"$/\1/p' "$BC")
+		if [ "$actual" = "$FROZEN" ]; then
+			ok "board profile matches its frozen table ($LABEL)"
+		else
+			bad "board profile does NOT match its frozen table ($LABEL)"
+			echo "         frozen: $FROZEN"
+			echo "         config: ${actual:-<not found>}"
+		fi
+	fi
+
+	# `misc` must not carry a slot suffix: spl_ab_append_part_slot()
+	# special-cases the literal name, and a `misc_a` would be invisible to the
+	# bootloader.
+	if [ "$(count_of misc)" = "1" ]; then
+		ok "'misc' present exactly once and unsuffixed ($LABEL)"
+	else
+		bad "'misc' must appear exactly once, unsuffixed ($LABEL)"
+	fi
+
+	# Slots must be the same size — the updater writes one image to either.
+	sa=$(size_of rootfs_a) || sa=""
+	sb=$(size_of rootfs_b) || sb=""
+	if [ -n "$sa" ] && [ "$sa" = "$sb" ]; then
+		ok "rootfs_a and rootfs_b are the same size ($(human "$sa") each, $LABEL)"
+	else
+		bad "rootfs_a/rootfs_b missing or unequal ($LABEL: a=${sa:-none} b=${sb:-none})"
+	fi
+
+	# oem and userdata must survive a slot switch, so they must be single-copy.
+	for p in oem userdata; do
+		if [ "$(count_of "$p")" = "1" ] && ! idx_of "${p}_a" >/dev/null 2>&1; then
+			ok "'$p' is single-copy ($LABEL)"
+		else
+			bad "'$p' must be single-copy, with no slot suffix ($LABEL)"
+		fi
+	done
+
+	# boot_b is reserved and empty in v1; it exists so kernel-slot A/B can ship
+	# later THROUGH the updater instead of needing a repartition.
+	if idx_of boot_b >/dev/null; then
+		ok "'boot_b' reserved ($LABEL)"
+	else
+		bad "'boot_b' missing — kernel-slot A/B would need a repartition ($LABEL)"
+	fi
+
+	# The partition INDICES are what the two boards must agree on: the
+	# sw-description below names /dev/mmcblk0p9 and p10, and the initramfs
+	# resolves by PARTNAME. If a partition moved index on one board only, one
+	# of the two would install its update onto the wrong thing.
+	if [ "$BOARD" = nand ]; then
+		idxfail=0
+		parse_table "$FROZEN_EMMC"; emmc_names="${NAMES[*]}"
+		parse_table "$FROZEN_NAND"; nand_names="${NAMES[*]}"
+		if [ "$emmc_names" = "$nand_names" ]; then
+			ok "both tables carry the same partitions in the same order (so the same indices)"
+		else
+			bad "the two tables' partition order differs — one sw-description cannot be right for both"
+			note "eMMC: $emmc_names"
+			note "NAND: $nand_names"
+			idxfail=1
+		fi
+		[ $idxfail -eq 0 ] || true
+		parse_table "$FROZEN"
+	fi
+
+	# Contiguous, starting at 0, no gaps or overlaps.
+	gapfail=0; cursor=0
+	for i in "${!NAMES[@]}"; do
+		if [ "${OFFSETS[$i]}" -ne "$cursor" ]; then
+			bad "partition gap/overlap before '${NAMES[$i]}' ($LABEL): expected offset $cursor, table says ${OFFSETS[$i]}"
+			gapfail=1
+		fi
+		cursor=$((OFFSETS[i] + SIZES[i]))
+	done
+	[ $gapfail -eq 0 ] && ok "table is contiguous from offset 0 ($LABEL)"
+
+	TOTAL=$cursor
+
+	# Every offset and size on a 256 KiB erase-block boundary. Required on the
+	# NAND (a UBI partition that starts or ends mid-erase-block does not
+	# attach). It is deliberately NOT applied to the eMMC.
+	#
+	# 2026-09-02: it once was, on the reasoning that identical structure across
+	# the two boards makes one sw-description correct for both. That reasoning
+	# was wrong and it bricked an Ultra. Satisfying the 256 KiB rule on eMMC
+	# meant moving idblock from 32K to 256K, and the RV1106 BootROM is masked
+	# silicon: it loads the first-stage loader from a FIXED offset (sector 64 =
+	# 32 KiB) and never reads the partition table. The board went dark before
+	# U-Boot -- no kernel, no init, so no RNDIS adapter, no SSH, no HTTP.
+	#
+	# eMMC is a block device behind a controller. It has no erase-block
+	# alignment requirement at all, so this rule buys nothing there and costs
+	# the one offset the silicon actually mandates.
+	if [ "$BOARD" = nand ]; then
+		alignfail=0
+		for i in "${!NAMES[@]}"; do
+			if [ $((OFFSETS[i] % NAND_ERASE_BLOCK)) -ne 0 ]; then
+				bad "'${NAMES[$i]}' starts at ${OFFSETS[$i]}, not a multiple of the $(human "$NAND_ERASE_BLOCK") erase block ($LABEL)"
+				alignfail=1
+			fi
+			if [ $((SIZES[i] % NAND_ERASE_BLOCK)) -ne 0 ]; then
+				bad "'${NAMES[$i]}' is $(human "${SIZES[$i]}"), not a multiple of the $(human "$NAND_ERASE_BLOCK") erase block ($LABEL)"
+				alignfail=1
+			fi
+		done
+		[ $alignfail -eq 0 ] && ok "every offset and size is $(human "$NAND_ERASE_BLOCK")-aligned ($LABEL)"
+	fi
+
+	# The one offset the RV1106 BootROM mandates on eMMC. Non-negotiable:
+	# the loader must live at 32 KiB or the board does not boot at all.
+	if [ "$BOARD" = emmc ]; then
+		idb_off=""
+		for i in "${!NAMES[@]}"; do
+			[ "${NAMES[$i]}" = idblock ] && idb_off="${OFFSETS[$i]}"
+		done
+		if [ -z "$idb_off" ]; then
+			bad "no 'idblock' partition in the eMMC table -- the board cannot boot ($LABEL)"
+		elif [ "$idb_off" -ne $((32 * 1024)) ]; then
+			bad "'idblock' starts at $idb_off, not 32768 (32 KiB). The RV1106 BootROM reads the loader from that fixed offset and ignores the partition table -- this layout will not boot ($LABEL)"
+		else
+			ok "'idblock' sits at the BootROM's mandatory 32 KiB offset ($LABEL)"
+		fi
+	fi
+
+	if [ "$BOARD" = nand ]; then
+		# Exact, not a floor: the NAND table is sized to consume the chip.
+		if [ "$TOTAL" -eq "$NAND_TOTAL" ]; then
+			ok "table totals $(human "$TOTAL") — exactly the Max's 256 MB SPI NAND, no tail"
+		elif [ "$TOTAL" -lt "$NAND_TOTAL" ]; then
+			ok "table totals $(human "$TOTAL") — fits the Max's $(human "$NAND_TOTAL") SPI NAND"
+			note "$(human $((NAND_TOTAL - TOTAL))) unallocated. The re-cut sized this table to"
+			note "consume the chip exactly; a tail means a partition shrank and"
+			note "nothing claimed the space."
+		else
+			bad "table totals $(human "$TOTAL"), past the Max's $(human "$NAND_TOTAL") SPI NAND — will not fit that board"
+		fi
+	else
+		if [ "$TOTAL" -le "$EMMC_USABLE_FLOOR" ]; then
+			ok "table totals $(human "$TOTAL") — fits the Ultra's conservative $(human "$EMMC_USABLE_FLOOR") eMMC floor"
+			note "$(human $((EMMC_USABLE_FLOOR - TOTAL))) left unallocated on the Ultra. That tail is the only"
+			note "post-freeze escape hatch: a partition APPENDED there shifts no existing"
+			note "index, so it is the one layout change a fielded unit could survive."
+			note "It does NOT exist on the Max, whose chip its table consumes exactly."
+		else
+			bad "table totals $(human "$TOTAL"), past the $(human "$EMMC_USABLE_FLOOR") usable eMMC floor"
+		fi
+	fi
+done
+
+# The remaining sections check the artifacts of a BUILD, and a build is of one
+# board at a time. They run against the eMMC table, which is the profile this
+# tree lunches by default; the SocToolKit maps and env.img are eMMC artifacts.
+FROZEN=$FROZEN_EMMC
 parse_table "$FROZEN"
-[ ${#NAMES[@]} -gt 0 ] || { echo "the frozen table did not parse — this is a bug in this script"; exit 2; }
-
-echo "== Frozen A/B partition layout =="
-for i in "${!NAMES[@]}"; do
-	note "$(printf 'p%-2d %-10s @ 0x%08X  %s' $((i + 1)) "${NAMES[$i]}" "${OFFSETS[$i]}" "$(human "${SIZES[$i]}")")"
-done
-
-# ── 1. The board config is the frozen table, exactly ────────────────────────
-if [ ! -f "$BOARDCFG" ]; then
-	bad "$BOARDCFG missing — the A/B board profile is the thing being frozen"
-else
-	actual=$(sed -n 's/^export RK_PARTITION_CMD_IN_ENV="\(.*\)"$/\1/p' "$BOARDCFG")
-	if [ "$actual" = "$FROZEN" ]; then
-		ok "board profile matches the frozen table"
-	else
-		bad "board profile does NOT match the frozen table"
-		echo "         frozen: $FROZEN"
-		echo "         config: ${actual:-<not found>}"
-	fi
-fi
-
-# ── 2. Invariants the table itself must satisfy ─────────────────────────────
-# These do not depend on the constant above being right, so they still bite if
-# somebody edits the constant instead of thinking.
-
-# `misc` must not carry a slot suffix: spl_ab_append_part_slot() special-cases
-# the literal name, and a `misc_a` would be invisible to the bootloader.
-if [ "$(count_of misc)" = "1" ]; then
-	ok "'misc' present exactly once and unsuffixed (spl_ab_append_part_slot special-cases the name)"
-else
-	bad "'misc' must appear exactly once, unsuffixed"
-fi
-
-# Slots must be the same size — the updater writes one image to either one.
-sa=$(size_of rootfs_a) || sa=""
-sb=$(size_of rootfs_b) || sb=""
-if [ -n "$sa" ] && [ "$sa" = "$sb" ]; then
-	ok "rootfs_a and rootfs_b are the same size ($(human "$sa") each)"
-else
-	bad "rootfs_a/rootfs_b missing or unequal (a=${sa:-none} b=${sb:-none})"
-fi
-
-# oem and userdata must survive a slot switch, so they must be single-copy.
-for p in oem userdata; do
-	if [ "$(count_of "$p")" = "1" ] && ! idx_of "${p}_a" >/dev/null 2>&1; then
-		ok "'$p' is single-copy (must survive a slot switch — Phase 0)"
-	else
-		bad "'$p' must be single-copy, with no slot suffix"
-	fi
-done
-
-# boot_b is reserved and empty in v1; it exists so kernel-slot A/B can ship
-# later THROUGH the updater instead of needing a repartition.
-if idx_of boot_b >/dev/null; then
-	ok "'boot_b' reserved (kernel-slot A/B stays shippable post-freeze)"
-else
-	bad "'boot_b' missing — kernel-slot A/B would need a repartition, i.e. a truck roll"
-fi
-
-# Contiguous, starting at 0, no gaps or overlaps.
-gapfail=0; cursor=0
-for i in "${!NAMES[@]}"; do
-	if [ "${OFFSETS[$i]}" -ne "$cursor" ]; then
-		bad "partition gap/overlap before '${NAMES[$i]}': expected offset $cursor, table says ${OFFSETS[$i]}"
-		gapfail=1
-	fi
-	cursor=$((OFFSETS[i] + SIZES[i]))
-done
-[ $gapfail -eq 0 ] && ok "table is contiguous from offset 0 (no gaps, no overlaps)"
-
-TOTAL=$cursor
-if [ "$TOTAL" -le "$EMMC_USABLE_FLOOR" ]; then
-	ok "table totals $(human "$TOTAL") — fits the conservative $(human "$EMMC_USABLE_FLOOR") usable floor for the 8 GB eMMC"
-	note "$(human $((EMMC_USABLE_FLOOR - TOTAL))) left unallocated at the tail. That tail is the only"
-	note "post-freeze escape hatch: a partition APPENDED there shifts no existing"
-	note "index, so it is the one layout change a fielded unit could survive."
-else
-	bad "table totals $(human "$TOTAL"), past the $(human "$EMMC_USABLE_FLOOR") usable floor"
-fi
+echo
 
 # ── 3. SocToolKit flashing maps — hand-maintained byte offsets ──────────────
 # The factory station writes by ABSOLUTE OFFSET. A stale entry here does not
@@ -289,10 +450,29 @@ else
 	skip "packed env.img — no build present"
 fi
 
-if [ -f "$IMAGEDIR/rootfs.img" ] && command -v debugfs >/dev/null 2>&1; then
-	lm=$(debugfs -R "cat /etc/init.d/S20linkmount" "$IMAGEDIR/rootfs.img" 2>/dev/null)
-	if [ -z "$lm" ]; then
-		skip "S20linkmount inside rootfs.img — could not read it"
+# The reader has to match the rootfs FILESYSTEM, which is no longer always
+# ext4: the 2026-09-01 re-cut moved both boards' rootfs to squashfs (it packs
+# the tree to 33 M where ext4 needed 116 M, which is what makes a 64 M slot
+# possible). debugfs reads ext4 and returns nothing at all on a squashfs image
+# — so leaving it as the only reader would have turned this check into ten
+# confident failures on a perfectly good image, which is how a gate gets
+# disabled. rootfs-image-lib.sh probes the format and picks the tool; it is
+# shared with the other gates rather than open-coded here, because the first
+# version of this block WAS open-coded and used `unsquashfs -cat`, which the
+# SDK's own 4.3 unsquashfs (ahead of the host's on build.sh's PATH) does not
+# have. It passed when run from a shell and silently skipped under
+# `./build.sh partitions`.
+if [ ! -f "$IMAGEDIR/rootfs.img" ]; then
+	skip "S20linkmount inside rootfs.img — no build present"
+else
+	reader=$(rootfs_reader "$IMAGEDIR/rootfs.img" || true)
+	lm=""
+	[ -n "$reader" ] && lm=$(rootfs_cat_file "$IMAGEDIR/rootfs.img" /etc/init.d/S20linkmount)
+
+	if [ -z "$reader" ]; then
+		skip "S20linkmount inside rootfs.img — no reader for this image format (need unsquashfs or debugfs)"
+	elif [ -z "$lm" ]; then
+		skip "S20linkmount inside rootfs.img — could not read it with $reader"
 	else
 		lfail=0
 		for i in "${!NAMES[@]}"; do
@@ -301,10 +481,8 @@ if [ -f "$IMAGEDIR/rootfs.img" ] && command -v debugfs >/dev/null 2>&1; then
 				lfail=1
 			}
 		done
-		[ $lfail -eq 0 ] && ok "S20linkmount inside rootfs.img: by-name links match the frozen table"
+		[ $lfail -eq 0 ] && ok "S20linkmount inside rootfs.img: by-name links match the frozen table (read with $reader)"
 	fi
-else
-	skip "S20linkmount inside rootfs.img — no build present, or debugfs unavailable"
 fi
 
 # ── 7. Occupancy — does what we pack still fit what we froze? ───────────────

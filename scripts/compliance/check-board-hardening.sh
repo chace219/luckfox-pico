@@ -26,6 +26,10 @@
 set -u
 cd "$(dirname "$0")/../.." || exit 2
 
+# Reader for the packed rootfs — no longer always ext4. See the header of
+# rootfs-image-lib.sh for why this matters to the absence check below.
+. "$(dirname "$0")/rootfs-image-lib.sh"
+
 CFGDIR=project/cfg/BoardConfig_IPC
 OVERLAYDIR=$CFGDIR/overlay
 HARDENING=luckfox-hardening-post.sh
@@ -142,20 +146,25 @@ WIFI_BINARIES="
 	/etc/wpa_supplicant.conf
 "
 IMAGEDIR=${HARDENING_IMAGEDIR:-output/image}
-if [ -f "$IMAGEDIR/rootfs.img" ] && command -v debugfs >/dev/null 2>&1; then
+# This is an ABSENCE check, so it is only worth anything while the image can
+# actually be read: a reader that opens nothing reports the same empty result
+# as a clean image. The rootfs is squashfs since the 2026-09-01 re-cut, which
+# debugfs cannot open at all — see rootfs-image-lib.sh.
+HARDENING_READER=$(rootfs_reader "$IMAGEDIR/rootfs.img" || true)
+if [ -f "$IMAGEDIR/rootfs.img" ] && [ -n "$HARDENING_READER" ]; then
 	shipped=""
 	for wf in $WIFI_BINARIES; do
-		if debugfs -R "stat $wf" "$IMAGEDIR/rootfs.img" 2>/dev/null | grep -q 'Inode:'; then
+		if rootfs_has_file "$IMAGEDIR/rootfs.img" "$wf"; then
 			shipped="$shipped $wf"
 		fi
 	done
 	if [ -n "$shipped" ]; then
 		bad "rootfs.img still ships the Wi-Fi userspace:$shipped — prebuilt, statically linked crypto, outside the SBOM and the CVE gate"
 	else
-		ok "rootfs.img ships none of the wifi_app userspace"
+		ok "rootfs.img ships none of the wifi_app userspace (read with $HARDENING_READER)"
 	fi
 else
-	skip "rootfs.img Wi-Fi check — no build present, or debugfs unavailable"
+	skip "rootfs.img Wi-Fi check — no build present, or no reader for its format (need unsquashfs for squashfs, debugfs for ext4)"
 fi
 
 echo

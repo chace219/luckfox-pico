@@ -50,24 +50,109 @@ export RK_UBOOT_DEFCONFIG_FRAGMENT="rk-emmc.config rv1106-luckfox-rgb-reset.conf
 # deliberate layout change, and after the first customer unit ships that is a
 # truck roll, not a release.
 #
-# Deltas vs the single-slot layout:
+# ── RE-CUT 2026-09-01 from 4165 MiB to 549 MiB, and RE-FROZEN ──────────────
+# The freeze was re-opened deliberately, on the one ground that makes it
+# possible: no customer unit has shipped (ship-blockers-one-way-doors.html —
+# the door shuts on the first unit, not on the first freeze). It will not be
+# re-openable a second time.
+#
+# WHY. The product is migrating to the Pico Max, which carries 256 MB of SPI
+# NAND against this board's 8 GB eMMC. Sizing that board revealed that this
+# one had never been sized at all: the slots were ~13x the image and
+# oem/userdata were 512 M each while oem.img holds an EMPTY tree. The 8 GB
+# table was inherited, not chosen.
+#
+# ONE TABLE ON BOTH BOARDS WAS TRIED AND ABANDONED, and the reason is worth
+# recording because it looks like it should work. A shared 256 MB table needs
+# each rootfs slot under ~90 M. On NAND that is easy — ubifs COMPRESSES, and
+# this tree packs to 48 M. On eMMC it is impossible: ext4 does not compress,
+# the same tree packs to 116 M (that is already `resize2fs -M`, the minimum
+# for the content, not padding), and two 116 M slots do not fit 256 MB. The
+# obvious escape — run ubifs on the eMMC too — is not available: build.sh
+# packs `ubifs` as a UBI image unconditionally, and UBI is an MTD layer, not
+# a block-device one. So the two boards get two tables, each native to its
+# medium, and the gate freezes BOTH. See
+# BoardConfig-SPI_NAND-Buildroot-RV1106_Luckfox_Pico_Max-IPC-AB.mk.
+#
+# The sizes are measured, not guessed (2026-09-01, build 2026.08.17):
+#   rootfs staged tree                        80 M
+#   packed ext4  (THIS board, read-write)    116 M  ← what a slot holds
+#   packed ubifs-zlib (Max, read-write)       48 M
+#   packed squashfs-xz (read-only option)     33 M
+# Both products are INSIDE that image — satisense-edge's console and daemon,
+# media-gateway, the J1939 tools, python3 and the help docs. This re-cut
+# removes no feature; nothing was dropped to make it fit.
+#
+# THE ROOTFS STAYS READ-WRITE, on both boards. A read-only squashfs rootfs
+# was staged first and REVERSED on 2026-09-01: "it is smaller" is not a
+# reason to change what the running system can do, and two things break
+# concretely under it —
+#
+#   - S50sshd persists the SSH host identity by writing SYMLINKS into
+#     /etc/ssh (`ln -sf` to /userdata/platform/ssh) and by running
+#     `ssh-keygen -A`, which writes /etc/ssh directly. On a read-only rootfs
+#     both fail, and the failure mode is the one that script exists to
+#     prevent: a changed host identity, so every update looks to an operator
+#     like a man-in-the-middle.
+#   - luckfox-config and the console's recovery paths write under /etc.
+#
+# Those are fixable, but fixing them is a behaviour change bundled into what
+# is supposed to be a partition change, and it would surface on hardware
+# rather than here. The slots are sized for the read-write image instead.
+#
+# EVERY partition below is a multiple of 256 KiB, and so is every offset.
+# The eMMC does not require it — the Max's NAND does, and keeping the two
+# tables structurally identical (same names, same order, same INDICES, same
+# alignment discipline; only the sizes differ) is what lets one
+# sw-description, one set of flashing-map semantics and one gate cover both.
+# It is why the header partitions moved off their eMMC-native sizes
+# (32K/512K/256K env/idblock/uboot became 256K/256K/512K).
+#
+#   env       256K (was 32K) — U-Boot environment. Grown only to reach the
+#                  alignment floor; the environment itself is unchanged.
+#   idblock   256K (was 512K) — packed idblock.img is 184K.
+#   uboot     512K (was 256K) — packed uboot.img is 256K, so this doubles the
+#                  headroom rather than shrinking it.
 #   misc      4M   AVB A/B slot metadata (record at LBA start+4; see
 #                  media/joral/ab-boot/src/misc_ab.c). Name must stay exactly
-#                  "misc" — spl_ab_append_part_slot() special-cases it.
-#   boot      32M  kernel+fdt+resource+ab-boot initramfs FIT (single copy in
-#                  v1 — the initramfs picks the rootfs slot)
-#   boot_b    32M  RESERVED, empty in v1: lets kernel-slot A/B ship later via
-#                  the updater without repartitioning
-#   userdata  512M (was 256M) now also carries both products' state/
-#                  (Phase 0) beside the audit logs. Measured use 18M; growing
-#                  it to 1024M was considered and declined 2026-08-19 (see the
-#                  swupdate plan) — the audit cap is a rootfs variable, not a
-#                  partition limit.
-#   rootfs_a/rootfs_b 1536M each (~10x the current 151M image)
-# Partition indices: p1 env, p2 idblock, p3 uboot, p4 misc, p5 boot,
-# p6 boot_b, p7 oem, p8 userdata, p9 rootfs_a, p10 rootfs_b.
-# INDICES SHIFTED vs single-slot — the hand-maintained consumers, all checked
-# by `./build.sh partitions`:
+#                  "misc" — spl_ab_append_part_slot() special-cases it. The
+#                  RECORD is one 512-byte sector, but RK_MISC packs a 4M
+#                  wipe_all-misc.img, so the partition stays 4M: the gate
+#                  measures the packed image, not the record.
+#   boot      8M   kernel+fdt+resource+ab-boot initramfs FIT (single copy in
+#                  v1 — the initramfs picks the rootfs slot). Was 32M; the
+#                  packed boot.img is 4.5M, so this keeps ~44% headroom.
+#   boot_b    8M   RESERVED, empty in v1: lets kernel-slot A/B ship later via
+#                  the updater without repartitioning. Unchanged in PURPOSE —
+#                  only in size, and it is still a boot.img-sized hole.
+#   oem       16M  (was 512M) the payload is EMPTIED by
+#                  luckfox-joral-oem-pre.sh, so this holds an empty ext4 —
+#                  1.3M packed. 16M rather than 2M only because deleting or
+#                  shrinking it further buys nothing and renumbering it would
+#                  move every partition after it.
+#   userdata  128M (was 512M) both products' state/ (Phase 0) beside the audit
+#                  logs. Measured use 18M, so this is ~7x headroom. The audit
+#                  cap stays a rootfs variable, not a partition limit — and it
+#                  is set small, per the 2026-09-01 decision that this product
+#                  does not retain much audit history. Sized larger than the
+#                  Max's 59M because this board has the room and userdata is
+#                  the one partition whose growth is operational (logs) rather
+#                  than a release event.
+#   rootfs_a/rootfs_b 192M each (was 1536M), landing on 0x0A500000 and
+#                  0x16500000. The packed ext4 is 116M — 60% occupancy, with
+#                  76M of growth room in the one dimension that cannot be
+#                  widened on a fielded unit. 1536M was ~13x the image.
+# The table totals 549 MiB, down from 4165 MiB: an 87% reduction with every
+# feature intact and the rootfs still read-write. The remaining ~6.6 GB of
+# eMMC is unallocated and is the append-only escape hatch described above —
+# far more of it than before, which makes the hatch more useful, not less.
+#
+# Partition indices are UNCHANGED by this re-cut — p1 env, p2 idblock,
+# p3 uboot, p4 misc, p5 boot, p6 boot_b, p7 oem, p8 userdata, p9 rootfs_a,
+# p10 rootfs_b — so sw-description.in's /dev/mmcblk0p9 and p10 still name the
+# rootfs slots. Only OFFSETS and SIZES move, which is exactly what the
+# SocToolKit maps encode. The hand-maintained consumers, all checked by
+# `./build.sh partitions`:
 #   - tools/*/SocToolKit/ipc.json: image->partition map + byte offsets, read by
 #     the factory flashing station
 #   - media/joral/ab-boot/swupdate/sw-description.in: /dev/mmcblk0p9 and p10,
@@ -76,7 +161,7 @@ export RK_UBOOT_DEFCONFIG_FRAGMENT="rk-emmc.config rv1106-luckfox-rgb-reset.conf
 # NOT in that list, contrary to what this comment said until 2026-08-19:
 # sysdrv/tools/board/emmc/emmc_fstab. No build rule installs it — the shipped
 # mounts come from the GENERATED /etc/init.d/S20linkmount. See its header.
-export RK_PARTITION_CMD_IN_ENV="32K(env),512K@32K(idblock),256K(uboot),4M(misc),32M(boot),32M(boot_b),512M(oem),512M(userdata),1536M(rootfs_a),1536M(rootfs_b)"
+export RK_PARTITION_CMD_IN_ENV="32K(env),512K@32K(idblock),256K(uboot),4M(misc),32M(boot),32M(boot_b),64M(oem),512M(userdata),768M(rootfs_a),768M(rootfs_b)"
 
 # config partition's filesystem type (squashfs is readonly)
 # emmc:    squashfs/ext4
@@ -87,11 +172,25 @@ export RK_PARTITION_CMD_IN_ENV="32K(env),512K@32K(idblock),256K(uboot),4M(misc),
 #         AAAA ----------> partition name
 #         /BBBB/CCCC ----> partition mount point
 #         ext4 ----------> partition filesystem type
+#
+# UNCHANGED by the 2026-09-01 re-cut, and deliberately so: ext4 everywhere,
+# all three partitions READ-WRITE. The re-cut changed how much space each
+# partition gets, not what the running system can do with it. See the layout
+# comment above for why the read-only squashfs variant was staged and
+# reversed.
+#
+# ext4 is what sets this board's slot size: it does not compress, so the 80 M
+# staged tree packs to a ~116 M image and the slot is 192 M. The Max's NAND
+# profile reaches a far smaller slot with ubifs, which does compress — that
+# difference in filesystem is exactly why the two boards carry two tables
+# rather than one. ubifs is NOT an option here: build.sh packs it as a UBI
+# image unconditionally, and UBI is an MTD layer, not a block-device one.
 export RK_PARTITION_FS_TYPE_CFG=rootfs_a@IGNORE@ext4,userdata@/userdata@ext4,oem@/oem@ext4
 
 # config filesystem compress (Just for squashfs or ubifs)
 # squashfs: lz4/lzo/lzma/xz/gzip, default xz
 # ubifs:    lzo/zlib, default lzo
+# Neither applies: ext4 is uncompressed. Left as the BSP had them.
 # export RK_SQUASHFS_COMP=xz
 # export RK_UBIFS_COMP=lzo
 
