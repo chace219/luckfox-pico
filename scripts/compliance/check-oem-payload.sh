@@ -29,11 +29,17 @@
 set -u
 cd "$(dirname "$0")/../.." || exit 2
 
-# The board profiles that ship as Joral products. Both must strip oem; the
-# other 14 configs are BSP boards whose whole function IS the oem payload.
+# Reader for the packed rootfs. Sourced rather than open-coded because the
+# rootfs is no longer always ext4 — see the header of rootfs-image-lib.sh for
+# why a dead reader is specifically dangerous to the ABSENCE checks below.
+. "$(dirname "$0")/rootfs-image-lib.sh"
+
+# The board profiles that ship as Joral products. All must strip oem; the
+# other BSP configs are boards whose whole function IS the oem payload.
 JORAL_CFGS=(
 	project/cfg/BoardConfig_IPC/BoardConfig-EMMC-Buildroot-RV1106_Luckfox_Pico_Ultra-IPC.mk
 	project/cfg/BoardConfig_IPC/BoardConfig-EMMC-Buildroot-RV1106_Luckfox_Pico_Ultra-IPC-AB.mk
+	project/cfg/BoardConfig_IPC/BoardConfig-SPI_NAND-Buildroot-RV1106_Luckfox_Pico_Max-IPC-AB.mk
 )
 OEM_HOOK=project/cfg/BoardConfig_IPC/luckfox-joral-oem-pre.sh
 OVERLAY=project/cfg/BoardConfig_IPC/overlay/overlay-luckfox-buildroot-init/etc/init.d
@@ -162,15 +168,16 @@ else
 	skip "oem.img — no build present, or debugfs unavailable"
 fi
 
-if [ -f "$IMAGEDIR/rootfs.img" ] && command -v debugfs >/dev/null 2>&1; then
-	krel=$(debugfs -R "ls -p /lib/modules" "$IMAGEDIR/rootfs.img" 2>/dev/null |
-		awk -F/ 'NF>3 {print $6}' | grep -vx '\.' | grep -vx '\.\.' | grep -v '^$' | head -n1)
+ROOTFS_READER=$(rootfs_reader "$IMAGEDIR/rootfs.img" || true)
+if [ -f "$IMAGEDIR/rootfs.img" ] && [ -n "$ROOTFS_READER" ]; then
+	note "rootfs.img read with $ROOTFS_READER"
+	krel=$(rootfs_list_dir "$IMAGEDIR/rootfs.img" /lib/modules | head -n1)
 	if [ -z "$krel" ]; then
 		bad "rootfs.img has no /lib/modules/<release> — the rescued modules did not land"
 	else
 		note "module directory: /lib/modules/$krel"
 		for ko in "${KEEP_MODULES[@]}"; do
-			if debugfs -R "stat /lib/modules/$krel/$ko" "$IMAGEDIR/rootfs.img" 2>/dev/null | grep -q 'Inode:'; then
+			if rootfs_has_file "$IMAGEDIR/rootfs.img" "/lib/modules/$krel/$ko"; then
 				ok "rootfs.img carries /lib/modules/$krel/$ko"
 			else
 				bad "rootfs.img is missing /lib/modules/$krel/$ko"
@@ -183,8 +190,12 @@ if [ -f "$IMAGEDIR/rootfs.img" ] && command -v debugfs >/dev/null 2>&1; then
 	# overlay file survives into every later image until something removes it —
 	# found on a unit 2026-08-21, where S23npu and S52npu BOTH shipped and the
 	# old one won by running first.
+	#
+	# This and the /etc/iqfiles check below assert ABSENCE, so they are only
+	# meaningful while the reader above actually works — which is why the
+	# branch requires a reader instead of falling through to "not found".
 	for s in S23npu; do
-		if debugfs -R "stat /etc/init.d/$s" "$IMAGEDIR/rootfs.img" 2>/dev/null | grep -q 'Inode:'; then
+		if rootfs_has_file "$IMAGEDIR/rootfs.img" "/etc/init.d/$s"; then
 			bad "rootfs.img still carries the superseded /etc/init.d/$s — the rename did not reach the image"
 		else
 			ok "no superseded /etc/init.d/$s in rootfs.img"
@@ -192,7 +203,7 @@ if [ -f "$IMAGEDIR/rootfs.img" ] && command -v debugfs >/dev/null 2>&1; then
 	done
 
 	for s in S22oemclean S52npu; do
-		if debugfs -R "stat /etc/init.d/$s" "$IMAGEDIR/rootfs.img" 2>/dev/null | grep -q 'Inode:'; then
+		if rootfs_has_file "$IMAGEDIR/rootfs.img" "/etc/init.d/$s"; then
 			ok "rootfs.img carries /etc/init.d/$s"
 		else
 			bad "rootfs.img is missing /etc/init.d/$s"
@@ -202,13 +213,13 @@ if [ -f "$IMAGEDIR/rootfs.img" ] && command -v debugfs >/dev/null 2>&1; then
 	# The symlink __PACKAGE_OEM leaves behind when it staged ISP tuning files.
 	# With the payload gone it points at nothing, and a dangling symlink in
 	# /etc reads as a failed install rather than a deliberate removal.
-	if debugfs -R "stat /etc/iqfiles" "$IMAGEDIR/rootfs.img" 2>/dev/null | grep -q 'Inode:'; then
+	if rootfs_has_file "$IMAGEDIR/rootfs.img" /etc/iqfiles; then
 		bad "rootfs.img still has the dangling /etc/iqfiles symlink into the stripped payload"
 	else
 		ok "no dangling /etc/iqfiles symlink in rootfs.img"
 	fi
 else
-	skip "rootfs.img — no build present, or debugfs unavailable"
+	skip "rootfs.img — no build present, or no reader for its format (need unsquashfs for squashfs, debugfs for ext4)"
 fi
 
 echo

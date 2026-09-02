@@ -4131,6 +4131,192 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   document would now record it as one.
 
 
+- **2026-09-02 — platform, Annex I #7: the re-cut Ultra table was UNBOOTABLE
+  on hardware; root cause found, fixed, and now gated.** The 2026-09-01 re-cut
+  changed three header partitions on the Ultra from the stock
+  `32K(env),512K@32K(idblock),256K(uboot)` to
+  `256K(env),256K@256K(idblock),512K(uboot)`. The stated reason was to satisfy
+  the 256 KiB erase-block alignment the Pico Max's SPI NAND requires, so that
+  both boards would carry structurally identical tables. **That reasoning was
+  wrong and it bricked a bench Ultra.** eMMC is a block device behind a
+  controller and has no erase-block alignment requirement, so the rule bought
+  nothing there; what it cost was the one offset the silicon does mandate. The
+  RV1106 BootROM is masked ROM: it loads the first-stage loader from a FIXED
+  offset (sector 64 = 32 KiB) and never reads the partition table. Moving
+  `idblock` to 256 KiB put the loader where the BootROM does not look. The
+  board went dark before U-Boot — no kernel, therefore no init, therefore no
+  RNDIS gadget (`S50usbdevice`, `S99usb0config`), which presented on the bench
+  as three apparently separate faults: no boot, no SSH, and no USB network
+  adapter at 172.32.0.93. One cause, three symptoms.
+
+  **Recovery** was never in doubt: maskrom lives in the BootROM and does not
+  depend on flash contents.
+
+  **What the gate did.** `check-partition-layout.sh` applied the 256 KiB
+  alignment rule to BOTH tables, and its own comment recorded the faulty
+  reasoning ("checked on the eMMC too, because keeping the two tables
+  structurally identical..."). The gate therefore ENFORCED the defect rather
+  than catching it — a gate encoding a wrong invariant is worse than no gate,
+  because it converts a mistake into a verified property. Both `ipc.json`
+  flashing maps also carried `idblock` at `0x00040000`, so a SocToolKit GUI
+  flash would have re-bricked the board after the config was fixed.
+
+  **Resolution.** The Ultra header is restored byte-identical to the stock
+  Luckfox table, and the slots are sized with deliberate headroom rather than
+  to a minimum: `32K(env),512K@32K(idblock),256K(uboot),4M(misc),32M(boot),
+  32M(boot_b),64M(oem),512M(userdata),768M(rootfs_a),768M(rootfs_b)` = 2181
+  MiB, ~5 GB of eMMC left unallocated. The rootfs occupies 85 MiB of its 768 M
+  slot (11%). The earlier 96 M-slot option that would have fit 256 MiB was
+  rejected on the ground that 89% slot occupancy is a shipping hazard once the
+  layout freezes: the failure would land at flash time on a customer unit, not
+  at build time.
+
+  **Gate corrections.** (1) The 256 KiB erase-block rule now runs only for
+  `BOARD = nand`. (2) A new eMMC-only check asserts `idblock` begins at exactly
+  32768 and names the BootROM as the reason. Verified by re-injecting the
+  bricking layout: the gate fails with "The RV1106 BootROM reads the loader
+  from that fixed offset and ignores the partition table — this layout will not
+  boot". (3) The comment carrying the faulty reasoning was replaced with this
+  incident record, so the inference is not re-derived. (4) Both `ipc.json`
+  maps regenerated. All 78 checks pass, and the fixed layout is confirmed
+  booting on bench hardware.
+
+  **The general lesson, for the CRA record:** the Max's and the Ultra's tables
+  share names, order and indices — which is what makes one `sw-description`
+  valid for both — but they must NOT share geometry. Their storage media have
+  different physical constraints, and imposing one medium's rule on the other
+  is not harmless symmetry.
+
+
+- **2026-09-01 — platform, Annex I #7 / item 11: the frozen partition layout
+  was RE-CUT AND RE-FROZEN — the Ultra from 4165 MiB to 549 MiB, plus a second
+  table for the Pico Max's 256 MB SPI NAND.** The product is migrating from the
+  Luckfox Pico Ultra (8 GB eMMC) to the Luckfox Pico Max (256 MB SPI NAND).
+  Re-opening one-way door #1 was legitimate on exactly one ground: **the door
+  binds at first customer shipment, not at the date of the freeze, and no
+  customer unit has shipped** (`ship-blockers-one-way-doors.html`). That
+  argument is now spent.
+
+  The Ultra's table (eMMC, ext4), which the gate checks verbatim:
+
+```
+32K(env),512K@32K(idblock),256K(uboot),4M(misc),32M(boot),32M(boot_b),64M(oem),512M(userdata),768M(rootfs_a),768M(rootfs_b)
+```
+
+  549 MiB against the previous 4165 MiB — an **87% reduction** — leaving
+  ~6.6 G of eMMC unallocated as the append-only escape hatch. The Max's table
+  is structurally identical (same partitions, same order, **same indices**,
+  same 256 KiB alignment) and differs only in sizing `userdata` to 59 M and the
+  slots to 80 M, consuming its 256 MB chip exactly. **The Max has no hatch.**
+
+  **Nothing was removed, and that is the substance of the entry.** The question
+  asked was whether features would have to be dropped — audit retention,
+  python3, one of the two products. They do not. Measured 2026-09-01 against
+  build 2026.08.17, with media-gateway, SatiSense Edge (console, daemon and its
+  6.5 M of bundled help docs), the J1939 tools and python3 all present: the
+  staged rootfs is 80 M and packs to **116 M as ext4** (already `resize2fs -M`,
+  the minimum for the content) and **48 M as ubifs-zlib**. The 8 GB-class table
+  was never sized by need — the slots were ~13× the image and `oem`/`userdata`
+  were 512 M each while `oem.img` packs an **empty tree** (the Joral pre-script
+  empties it; the 18 M was ext4 metadata) and `userdata` measured 18 M in use.
+
+  **Which is to say the previous layout's 4165 MiB was not being spent on
+  anything.** The one number that had to be checked rather than assumed was the
+  rootfs, and it was checked by packing it — three times, in three filesystems.
+
+  **TWO TABLES, NOT ONE — and the failed attempt is worth recording.** A single
+  shared 256 MB table was built first and abandoned. It fails on the
+  **filesystem**, not the sizes: the Max's rootfs is ubifs, which *compresses*
+  (48 M); the Ultra's is ext4 on a block device, which does not (116 M), and
+  two 116 M slots do not fit 256 MB. The obvious escape — ubifs on the eMMC
+  too — is not available: `build.sh` packs `ubifs` as a UBI image
+  unconditionally, and UBI is an MTD layer, not a block-device one. So each
+  board gets a table native to its medium, and the gate freezes **both**,
+  checking the shared structure on each rather than inferring it from one.
+
+  **The rootfs stays READ-WRITE on both boards, and this reversed an earlier
+  decision in this same change.** A read-only squashfs rootfs was staged first:
+  33 M, which would have allowed 64 M slots on both boards and a genuinely
+  shared table. It was reversed on review. Two things break under it, and both
+  are the kind that surface on hardware rather than in a diff:
+
+  - `S50sshd` persists the SSH host identity by writing **symlinks into
+    `/etc/ssh`** and by running `ssh-keygen -A`, which writes `/etc/ssh`
+    directly. Read-only, both fail — producing precisely the failure that
+    script exists to prevent: a changed host identity on every update, which
+    trains an operator to click through `REMOTE HOST IDENTIFICATION HAS
+    CHANGED`. That warning was itself the subject of the 2026-08-19 bench
+    finding.
+  - `luckfox-config` and the consoles' recovery paths write under `/etc`.
+
+  Both are fixable. Neither should be fixed *as a side effect of a partition
+  change*: "it is smaller" is not a reason to alter what the running system can
+  do, and the smaller image was buying headroom that nothing had asked for. The
+  slots are sized for the read-write image instead. Recorded rather than
+  silently dropped because the read-only rootfs remains the better Annex I #4
+  position and is worth revisiting **on its own merits**, with the SSH identity
+  path fixed first and a bench pass behind it.
+
+  **The alignment constraint is what changed the header partitions.** Every
+  offset and size on **both** tables is now a multiple of 256 KiB, the
+  erase-block size of the 4K-page SPI NAND class the Max uses; a UBI partition
+  that begins or ends mid-erase-block will not attach. `env`/`idblock`/`uboot`
+  moved from the eMMC-native 32K/512K/256K to 256K/256K/512K because those
+  three were what made every later offset unaligned. The eMMC does not require
+  the alignment and is checked for it anyway: keeping the two tables
+  structurally identical is what makes one `sw-description` and one set of
+  flashing-map semantics correct for both boards, and an eMMC-shaped edit that
+  broke it would leave the Ultra booting while making the Max unbootable — a
+  divergence invisible from either board alone.
+
+  **Partition indices did not move on either table** (p9/p10 are the rootfs
+  slots on both), so `sw-description.in` needed no edit — the same property
+  that was costed in the 2026-08-19 entry when growing `userdata` was
+  considered. Only offsets and sizes moved, and both SocToolKit maps were
+  **regenerated from the eMMC table** rather than hand-edited.
+
+  **The gate was extended rather than relaxed.** It now holds **two** frozen
+  constants and runs the full structural check against each — profile match,
+  `misc` unsuffixed, equal slots, single-copy `oem`/`userdata`, `boot_b`
+  reserved, contiguity, 256 KiB alignment — plus a cross-table check that both
+  carry the same partitions in the same order, which is the property that makes
+  one `sw-description` valid for both. Budgets are per-medium: the NAND table
+  must total 256 MiB exactly, the eMMC table must fit the conservative 7200 MiB
+  floor. Consumers updated in the same change: both frozen constants, both
+  board profiles, both flashing maps, `swupdate-implementation-plan.md` and
+  this document. Verified by injecting drift — an unaligned header, a shrunk
+  slot, and a table edited on one board only are each caught and named.
+
+  **A second defect, found because the filesystem changed.** Three gates read
+  `rootfs.img` with `debugfs`, which reads ext4 and returns *nothing* on any
+  other filesystem. While the read-only squashfs variant was staged, this
+  turned `check-oem-payload.sh`'s **absence** assertions — that the superseded
+  `/etc/init.d/S23npu` and the dangling `/etc/iqfiles` symlink are gone, both
+  real defects that shipped on units — into checks that passed against an image
+  they had never opened. Fixed with a shared `rootfs-image-lib.sh` that probes
+  the format, **proves the reader works** before trusting it, and refuses to
+  answer rather than reporting a false absence. The reversal to read-write
+  ext4/ubifs makes the immediate trigger moot; the latent defect was real and
+  the fix stays. A related find: `check-partition-layout.sh` passed standalone
+  but **silently skipped** under `./build.sh partitions`, because build.sh puts
+  the SDK's own unsquashfs 4.3 (2014, no `-cat`) ahead of the host's on `PATH`.
+  A check that disappears in the invocation everyone actually uses is worse
+  than one that fails.
+
+  **Audit retention.** Confirmed 2026-09-01 that this product does not need to
+  retain much on-device audit history, which removes the only claim on
+  `userdata` that could have argued for a larger partition. The 2026-08-19
+  analysis stands unchanged and is now doubly moot: retention is bounded by
+  `AUDIT_MAX_BYTES` × `AUDIT_KEEP` in the rootfs, not by the partition, so it
+  remains adjustable through an ordinary release on either board.
+
+  **Still open, and not a sizing question.** A/B on SPI NAND is *new work*: the
+  SDK ships an A/B recipe for eMMC only, so the U-Boot slot-select path has to
+  be ported to UBI, and SWUpdate's `ubivol` handler is **not compiled in** today
+  (`swupdate-joral.config` has neither MTD nor ubivol support). The layout being
+  settled is what unblocks that work, not a substitute for it.
+
+
 ## Remaining work (refreshed 2026-08-21 against both trees and `main` on each)
 
 The documentation/build items (SBOM, compliance matrices, Annex II fact sheets) and

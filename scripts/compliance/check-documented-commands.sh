@@ -27,6 +27,9 @@
 set -u
 cd "$(dirname "$0")/../.." || exit 2
 
+# Reader for the packed rootfs — no longer always ext4.
+. "$(dirname "$0")/rootfs-image-lib.sh"
+
 ROOTFS_IMG=${DOC_ROOTFS_IMG:-output/image/rootfs.img}
 
 # Commands the documents actually use on the device. Each is looked up in the
@@ -84,13 +87,17 @@ note() { [ $VERBOSE -eq 1 ] && echo "       $1"; return 0; }
 in_image() {
 	local c=$1 d
 	for d in /bin /sbin /usr/bin /usr/sbin; do
-		debugfs -R "stat $d/$c" "$ROOTFS_IMG" 2>/dev/null | grep -q 'Inode:' && return 0
+		rootfs_has_file "$ROOTFS_IMG" "$d/$c" && return 0
 	done
 	return 1
 }
 
+# The rootfs is squashfs since the 2026-09-01 re-cut, which debugfs cannot
+# read; without a working reader every documented command would be reported
+# absent. See rootfs-image-lib.sh.
+DOC_READER=$(rootfs_reader "$ROOTFS_IMG" || true)
 ABSENT=()
-if [ -f "$ROOTFS_IMG" ] && command -v debugfs >/dev/null 2>&1; then
+if [ -f "$ROOTFS_IMG" ] && [ -n "$DOC_READER" ]; then
 	echo "== Which documented commands exist in the packed image"
 	for c in "${CANDIDATES[@]}"; do
 		if in_image "$c"; then
