@@ -10,4 +10,5 @@ ifneq ($(SYSDRV_DIR_OUT_PC),)
 	cp -f $(CURRENT_DIR)/ubinize   $(SYSDRV_DIR_OUT_PC);
 	cp -f $(CURRENT_DIR)/mkfs_ubi.sh $(SYSDRV_DIR_OUT_PC);
 	cp -f $(CURRENT_DIR)/mkfs_jffs2.sh $(SYSDRV_DIR_OUT_PC);
+	cp -f $(CURRENT_DIR)/check-ubifs-ownership.py $(SYSDRV_DIR_OUT_PC);
 endif

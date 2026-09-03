@@ -1,0 +1,56 @@
+/*
+ * sw-description — SPI NAND (Luckfox Pico Max) variant.
+ *
+ * The eMMC variant is sw-description.in. Two files rather than one
+ * conditional file because the difference is not a parameter: the handler,
+ * the target syntax and the failure modes all differ.
+ *
+ *   eMMC   type = "raw"    device = "/dev/mmcblk0p9"   (block, absolute)
+ *   NAND   type = "ubivol" device = "rootfs_a"         (UBI volume, by NAME)
+ *
+ * The ubivol handler needs CONFIG_MTD + CONFIG_UBIVOL in swupdate-joral.config
+ * and BR2_PACKAGE_MTD in the buildroot defconfig (it stages libmtd/libubi).
+ * Without them SWUpdate builds cleanly and then fails at INSTALL time with an
+ * unknown handler — a build-green, field-broken combination, which is why the
+ * hardening gate checks for the handler rather than trusting the config.
+ *
+ * Volume naming: S20linkmount creates one UBI device per MTD partition
+ * (ubiattach -m N -d N) and one volume inside it named after the partition
+ * (ubimkvol -N $partname). So rootfs_a is mtd8 -> ubi8:rootfs_a. The handler
+ * addresses it by volume name, which is why this file is index-independent
+ * where the eMMC one is not.
+ *
+ * NOT valid until the U-Boot slot-select path works on MTD: spl_ab.c reads
+ * `misc` through struct blk_desc / blk_dread(), and no blk_desc exists for
+ * SPI NAND. Installing with this file today writes the inactive slot
+ * correctly and then boots the old one, because nothing switches slots.
+ */
+software = {
+	version = "@VERSION@";
+	description = "Joral edge platform rootfs (media-gateway + satisense-edge), build @BUILD@";
+
+	stable = {
+		a = {
+			images: ({
+				filename = "rootfs.img";
+				device = "rootfs_a";
+				type = "ubivol";
+				sha256 = "@SHA256@";
+				/* Same reasoning as the eMMC variant: stream to the
+				 * handler instead of staging in /tmp, which is a
+				 * RAM-backed tmpfs far smaller than the image. The
+				 * target is always the INACTIVE slot. */
+				installed-directly = true;
+			});
+		};
+		b = {
+			images: ({
+				filename = "rootfs.img";
+				device = "rootfs_b";
+				type = "ubivol";
+				sha256 = "@SHA256@";
+				installed-directly = true;
+			});
+		};
+	};
+};

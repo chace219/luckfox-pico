@@ -110,7 +110,7 @@ export RK_UBOOT_DEFCONFIG_FRAGMENT=rk-sfc.config
 #
 #   - userdata is 59M here against the Ultra's 128M, for the obvious reason:
 #     this chip has 256 MB total. Measured use is 18M, so it is still >3x.
-export RK_PARTITION_CMD_IN_ENV="256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),16M(oem),60416K(userdata),80M(rootfs_a),80M(rootfs_b)"
+export RK_PARTITION_CMD_IN_ENV="256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),16M(oem),49152K(userdata),80M(rootfs_a),80M(rootfs_b)"
 
 # config partition's filesystem type (squashfs is readonly)
 # emmc:    squashfs/ext4
@@ -181,7 +181,7 @@ export RK_ARCH=arm
 export RK_TOOLCHAIN_CROSS=arm-rockchip830-linux-uclibcgnueabihf
 
 #misc image
-export RK_MISC=wipe_all-misc.img
+export RK_MISC=ab-misc.img
 
 # Uboot defconfig
 export RK_UBOOT_DEFCONFIG=luckfox_rv1106_uboot_defconfig

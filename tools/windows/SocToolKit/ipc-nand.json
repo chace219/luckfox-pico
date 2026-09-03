@@ -1,0 +1,70 @@
+{
+    "items": [
+        {
+            "name": "DownloadBin",
+            "file": "download.bin",
+            "address": "",
+            "state": false
+        },
+        {
+            "name": "env",
+            "file": "env.img",
+            "address": "0x00000000",
+            "state": false
+        },
+        {
+            "name": "idblock",
+            "file": "idblock.img",
+            "address": "0x00040000",
+            "state": false
+        },
+        {
+            "name": "uboot",
+            "file": "uboot.img",
+            "address": "0x00080000",
+            "state": false
+        },
+        {
+            "name": "misc",
+            "file": "misc.img",
+            "address": "0x00100000",
+            "state": false
+        },
+        {
+            "name": "boot",
+            "file": "boot.img",
+            "address": "0x00500000",
+            "state": false
+        },
+        {
+            "name": "boot_b",
+            "file": "boot.img",
+            "address": "0x00D00000",
+            "state": false
+        },
+        {
+            "name": "oem",
+            "file": "oem.img",
+            "address": "0x01500000",
+            "state": false
+        },
+        {
+            "name": "userdata",
+            "file": "userdata.img",
+            "address": "0x02500000",
+            "state": false
+        },
+        {
+            "name": "rootfs_a",
+            "file": "rootfs.img",
+            "address": "0x05500000",
+            "state": false
+        },
+        {
+            "name": "rootfs_b",
+            "file": "rootfs.img",
+            "address": "0x0A500000",
+            "state": false
+        }
+    ]
+}

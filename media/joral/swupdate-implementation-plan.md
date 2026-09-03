@@ -464,7 +464,7 @@ and the rootfs still read-write. The remaining ~6.6 GB of eMMC is unallocated.
 **Pico Max — 256 MB SPI NAND, ubifs** (`BoardConfig-SPI_NAND-Buildroot-RV1106_Luckfox_Pico_Max-IPC-AB.mk`):
 
 ```
-256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),16M(oem),60416K(userdata),80M(rootfs_a),80M(rootfs_b)
+256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),16M(oem),49152K(userdata),80M(rootfs_a),80M(rootfs_b)
 ```
 
 Identical in structure — same partitions, same order, **same indices** — and
