@@ -58,6 +58,65 @@ The initramfs is static userspace with no kernel dependency, so a kernel
 refresh does **not** require rebuilding it. It is re-packed into the new FIT
 automatically.
 
+## Step 0 — lunch the board profile
+
+We ship two boards, and every stage below keys off which one is selected —
+the partition table, the U-Boot fragment, the image packers, the misc.img
+seed, and (since 2026-09-03) the build-artifact half of `./build.sh
+partitions`, which checks the artifacts of *the lunched board* instead of
+assuming eMMC:
+
+| Board | Medium / rootfs | Profile (`project/cfg/BoardConfig_IPC/`) | Factory map (`tools/*/SocToolKit/`) |
+|---|---|---|---|
+| Pico **Ultra** | eMMC, ext4 | `BoardConfig-EMMC-Buildroot-RV1106_Luckfox_Pico_Ultra-IPC-AB.mk` | `ipc-emmc.json` |
+| Pico **Max** | SPI NAND, ubifs | `BoardConfig-SPI_NAND-Buildroot-RV1106_Luckfox_Pico_Max-IPC-AB.mk` | `ipc-nand.json` |
+
+The `-AB` profiles are **not** reachable through the guided hardware/medium
+questions — the menu composes a name without the `-AB` suffix. Take the
+`custom` entry instead:
+
+```sh
+./build.sh lunch
+# hardware version -> [9] custom
+# -> pick the -AB profile from the printed list BY READING IT — the numbers
+#    shift whenever a BoardConfig is added, so never replay a remembered index
+readlink .BoardConfig.mk        # verify: must end in ...-IPC-AB.mk
+```
+
+**The full sequence, either board, from lunch to gates:**
+
+```sh
+./build.sh lunch                        # step 0, once per board switch
+$EDITOR media/joral/RELEASE_VERSION     # step 1 — BEFORE the rootfs build
+./build.sh uboot                        # medium-specific (rk-emmc vs rk-sfc fragment)
+./build.sh kernel
+./build.sh rootfs                       # also rebuilds every module (drv)
+./build.sh media && ./build.sh app      # products + ab-boot; stamps sw-versions
+./build.sh firmware                     # overlays, oem strip, A/B FIT, misc.img
+./build.sh updateimg                    # output/image/update.img for the factory
+
+./build.sh oem && ./build.sh partitions && ./build.sh hardening \
+  && ./build.sh doccmds && ./build.sh cited && ./build.sh cve \
+  && ./build.sh sbom                    # step 5 — all seven must pass
+
+./build.sh swu                          # step 4 — Ultra only today, see below
+```
+
+Flash `output/image/` with SocToolKit using the board's map from the table
+above — the maps were split per board on 2026-09-03 because the old single
+`ipc.json` carried absolute byte offsets, an eMMC notion that has no meaning
+for NAND, and could only ever describe one board.
+
+**When switching between the two profiles**, rebuild U-Boot before repacking
+(`./build.sh uboot`): the profiles select different defconfig fragments
+(`rk-emmc.config` vs `rk-sfc.config`) and different rkbin loader inis, and
+`output/image/` is shared, so a pack over a stale U-Boot build ships the other
+board's loader. If the resulting `output/image/` looks mixed, `./build.sh
+clean uboot` first and repack. `kernel`/`rootfs` output is shared and does not
+need a rebuild on a switch — the medium-specific packing happens in
+`firmware`, which regenerates `env.img`, `misc.img` and the rootfs container
+from the lunched profile.
+
 ## Step 1 — bump the release identity, before building the rootfs
 
 ```sh
@@ -128,6 +187,26 @@ The module path is derived from each module's own vermagic, so it tracks the
 kernel automatically — that line is the cheapest proof the two halves agree.
 
 ## Step 4 — the `.swu`
+
+**Ultra only, today (2026-09-03).** The Max's field-update path is designed
+(`sw-description-nand.in`, the ubivol handler, `CONFIG_MTD`/`CONFIG_UBIVOL`
+in `swupdate-joral.config`) but **not yet wired end to end**, and running
+`./build.sh swu` on a Max build will not produce a shippable package:
+
+- `build_swu` packs `sw-description.in` unconditionally — the **eMMC**
+  manifest, whose raw handler targets `/dev/mmcblk0p9/p10`. Nothing selects
+  `sw-description-nand.in` for a NAND build yet.
+- It reads the release identity out of `rootfs.img` with `debugfs`, which
+  reads ext4. The Max's rootfs is a UBI image, so the read fails and the
+  target refuses to pack (correctly — but it means no Max `.swu` exists).
+- Even hand-packed, the unit would install and never switch: `spl_ab.c`
+  reads `misc` through `blk_dread()`, and no `blk_desc` exists for SPI NAND
+  — the inactive slot is written correctly and the old slot boots anyway.
+  This is recorded at the top of `sw-description-nand.in`.
+
+Until those three land, a Max release ships as `update.img` (reflash) only,
+and the runbook's "two artifacts, two reaches" table has a single row for
+that board.
 
 ```sh
 ./build.sh swu
