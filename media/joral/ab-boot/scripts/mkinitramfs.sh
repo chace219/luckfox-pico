@@ -41,6 +41,18 @@ if file "$MISC_AB" | grep -qv "statically linked"; then
 	exit 1
 fi
 
+# One initramfs serves BOTH boards, and the NAND path (Pico Max) attaches
+# the rootfs slot's UBI device from init — a busybox without the ubiattach
+# applet boots the Ultra fine and drops the Max to a shell, which is exactly
+# the kind of half-working artifact this script exists to refuse. Applet
+# names are plain strings in the binary, so this check works cross-arch.
+if ! strings "$BUSYBOX" | grep -qw ubiattach; then
+	echo "REFUSING: $BUSYBOX has no ubiattach applet (needed for the Max's" >&2
+	echo "SPI NAND rootfs slots). Build busybox from 'make defconfig'," >&2
+	echo "which includes the UBI applets." >&2
+	exit 1
+fi
+
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 
@@ -49,7 +61,8 @@ mkdir -p "$T/bin" "$T/sbin" "$T/usr/bin" "$T/usr/sbin" \
 
 cp "$BUSYBOX" "$T/bin/busybox"
 chmod 755 "$T/bin/busybox"
-for a in sh mount umount echo grep cut sleep switch_root; do
+for a in sh mount umount echo grep cut sleep switch_root \
+	 cat basename dirname ubiattach; do
 	ln -s busybox "$T/bin/$a"
 done
 cp "$MISC_AB" "$T/usr/sbin/misc_ab"

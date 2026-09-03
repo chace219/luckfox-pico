@@ -99,7 +99,7 @@ $EDITOR media/joral/RELEASE_VERSION     # step 1 — BEFORE the rootfs build
   && ./build.sh doccmds && ./build.sh cited && ./build.sh cve \
   && ./build.sh sbom                    # step 5 — all seven must pass
 
-./build.sh swu                          # step 4 — Ultra only today, see below
+./build.sh swu                          # step 4 — manifest/payload follow the board
 ```
 
 Flash `output/image/` with SocToolKit using the board's map from the table
@@ -188,25 +188,32 @@ kernel automatically — that line is the cheapest proof the two halves agree.
 
 ## Step 4 — the `.swu`
 
-**Ultra only, today (2026-09-03).** The Max's field-update path is designed
-(`sw-description-nand.in`, the ubivol handler, `CONFIG_MTD`/`CONFIG_UBIVOL`
-in `swupdate-joral.config`) but **not yet wired end to end**, and running
-`./build.sh swu` on a Max build will not produce a shippable package:
+**Both boards since 2026-09-03; the Max path is implemented but NOT yet
+bench-verified** (checklist below). The target follows the lunched board:
 
-- `build_swu` packs `sw-description.in` unconditionally — the **eMMC**
-  manifest, whose raw handler targets `/dev/mmcblk0p9/p10`. Nothing selects
-  `sw-description-nand.in` for a NAND build yet.
-- It reads the release identity out of `rootfs.img` with `debugfs`, which
-  reads ext4. The Max's rootfs is a UBI image, so the read fails and the
-  target refuses to pack (correctly — but it means no Max `.swu` exists).
-- Even hand-packed, the unit would install and never switch: `spl_ab.c`
-  reads `misc` through `blk_dread()`, and no `blk_desc` exists for SPI NAND
-  — the inactive slot is written correctly and the old slot boots anyway.
-  This is recorded at the top of `sw-description-nand.in`.
+- **Ultra (eMMC)** — manifest `sw-description.in`, raw handler writing the
+  ext4 `rootfs.img` to the inactive slot's block partition; release identity
+  read out of the payload with `debugfs`. Unchanged, bench-proven.
+- **Max (SPI NAND)** — manifest `sw-description-nand.in`, ubivol handler
+  writing INTO the inactive slot's UBI volume by NAME (`rootfs_a` /
+  `rootfs_b` — the A/B NAND build packs one volume per slot, named after
+  its partition, precisely so the handler can tell them apart). The payload
+  is the raw UBIFS LEB stream, extracted byte-for-byte from the flashable
+  `rootfs_a.img` by `scripts/compliance/ubifs-read.py`, which also reads
+  the release identity out of it — the NAND counterpart of `debugfs`.
+  On the unit, slot switching is the same initramfs design as the Ultra
+  (`misc_ab` erase-writes the AVB record on the misc MTD; `init` attaches
+  and mounts the chosen slot's volume). An earlier note here blamed
+  `spl_ab.c`'s missing MTD path; that was a misdiagnosis — SPL never reads
+  `misc` in this design, on either board.
 
-Until those three land, a Max release ships as `update.img` (reflash) only,
-and the runbook's "two artifacts, two reaches" table has a single row for
-that board.
+**Bench checklist before the first Max `.swu` ships** (mirrors the eMMC
+verification the Ultra already passed): flash a Max from the re-cut maps,
+confirm `misc-status` reads the record; stage + apply a `.swu`, confirm the
+inactive volume was written (`ubinfo -a`), the reboot lands in the other
+slot, S99ab-health marks it successful, and a deliberately broken slot
+rolls back after 7 tries. Until that pass is recorded, a Max release ships
+as `update.img` (reflash) only.
 
 ```sh
 ./build.sh swu

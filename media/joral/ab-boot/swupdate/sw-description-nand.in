@@ -14,16 +14,28 @@
  * unknown handler — a build-green, field-broken combination, which is why the
  * hardening gate checks for the handler rather than trusting the config.
  *
- * Volume naming: S20linkmount creates one UBI device per MTD partition
- * (ubiattach -m N -d N) and one volume inside it named after the partition
- * (ubimkvol -N $partname). So rootfs_a is mtd8 -> ubi8:rootfs_a. The handler
- * addresses it by volume name, which is why this file is index-independent
- * where the eMMC one is not.
+ * Volume naming: the rootfs slot volumes come from the BUILD, not from
+ * S20linkmount — build_mkimg packs the rootfs tree twice on an A/B NAND
+ * layout, ubinizing one volume named rootfs_a and one named rootfs_b, and
+ * the factory map flashes rootfs_a.img/rootfs_b.img to the matching
+ * partitions. The distinct names are LOAD-BEARING: this handler addresses a
+ * volume by NAME across every attached UBI device, so two slots both
+ * carrying a volume called "rootfs" would leave one of them unaddressable.
+ * That naming also makes this file index-independent where the eMMC one is
+ * not. (S20linkmount's ubiattach/ubimkvol path still provisions the EMPTY
+ * ubifs partitions — oem, userdata — on first boot.)
  *
- * NOT valid until the U-Boot slot-select path works on MTD: spl_ab.c reads
- * `misc` through struct blk_desc / blk_dread(), and no blk_desc exists for
- * SPI NAND. Installing with this file today writes the inactive slot
- * correctly and then boots the old one, because nothing switches slots.
+ * Slot selection is the same initramfs design as the Ultra (SPL and U-Boot
+ * untouched — see initramfs/init): misc_ab reads and erase-writes the AVB
+ * record on the misc MTD char device, init attaches the chosen slot's UBI
+ * device and mounts volume 0 by node. An earlier revision of this header
+ * claimed the blocker was spl_ab.c's blk_dread() on MTD; that was a
+ * misdiagnosis — SPL never reads misc in this design, on either board.
+ *
+ * The payload named below is the raw UBIFS LEB stream (ubiupdatevol
+ * semantics, written INTO the existing volume), which ./build.sh swu
+ * extracts byte-for-byte from the flashable rootfs_a.img with
+ * scripts/compliance/ubifs-read.py.
  */
 software = {
 	version = "@VERSION@";
@@ -33,7 +45,11 @@ software = {
 		a = {
 			images: ({
 				filename = "rootfs.img";
-				device = "rootfs_a";
+				/* `volume`, NOT `device`: the parser fills the ubivol
+				 * handler's target from the volume attribute
+				 * (parser.c GET_FIELD_STRING(..., "volume", ...));
+				 * a device= here would install nothing. */
+				volume = "rootfs_a";
 				type = "ubivol";
 				sha256 = "@SHA256@";
 				/* Same reasoning as the eMMC variant: stream to the
@@ -46,7 +62,7 @@ software = {
 		b = {
 			images: ({
 				filename = "rootfs.img";
-				device = "rootfs_b";
+				volume = "rootfs_b";
 				type = "ubivol";
 				sha256 = "@SHA256@";
 				installed-directly = true;

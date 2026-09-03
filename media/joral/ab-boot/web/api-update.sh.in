@@ -98,6 +98,15 @@ find_part() { # by PARTNAME, same method as the initramfs / S99ab-health
 			return 0
 		fi
 	done
+	# SPI NAND (Pico Max): partitions are mtd devices named by mtdparts=.
+	for n in "$R"/sys/class/mtd/mtd*/name; do
+		[ -f "$n" ] || continue
+		case "$n" in */mtd*ro/name) continue ;; esac
+		if [ "$(cat "$n")" = "$1" ]; then
+			echo "$R/dev/$(basename "$(dirname "$n")")"
+			return 0
+		fi
+	done
 	return 1
 }
 

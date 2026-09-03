@@ -56,13 +56,13 @@
         },
         {
             "name": "rootfs_a",
-            "file": "rootfs.img",
+            "file": "rootfs_a.img",
             "address": "0x05500000",
             "state": false
         },
         {
             "name": "rootfs_b",
-            "file": "rootfs.img",
+            "file": "rootfs_b.img",
             "address": "0x0A500000",
             "state": false
         }
