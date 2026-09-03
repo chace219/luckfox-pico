@@ -1,0 +1,891 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Article 14 Readiness</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --ground: #EFF1EC;
+    --surface: #FBFCF8;
+    --sunk: #E5E8E0;
+    --ink: #151813;
+    --ink-2: #3D443A;
+    --muted: #6A7266;
+    --rule: #D3D8CC;
+    --rule-soft: #E2E6DC;
+    --accent: #0E4F4A;
+    --accent-soft: #DDE9E5;
+    --alert: #9E2F1C;
+    --alert-soft: #F3E1DA;
+
+    --measure: 66ch;
+    --step-0: 1rem;
+    --step-1: 1.125rem;
+    --step-2: 1.35rem;
+    --step-3: 1.75rem;
+    --step-4: 2.4rem;
+    --step-5: 3.2rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0F1210;
+      --surface: #171B17;
+      --sunk: #1D221D;
+      --ink: #E7EBE2;
+      --ink-2: #BCC4B7;
+      --muted: #8D9689;
+      --rule: #2C332C;
+      --rule-soft: #232823;
+      --accent: #63C9BB;
+      --accent-soft: #17302D;
+      --alert: #E88568;
+      --alert-soft: #33201A;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0F1210;
+    --surface: #171B17;
+    --sunk: #1D221D;
+    --ink: #E7EBE2;
+    --ink-2: #BCC4B7;
+    --muted: #8D9689;
+    --rule: #2C332C;
+    --rule-soft: #232823;
+    --accent: #63C9BB;
+    --accent-soft: #17302D;
+    --alert: #E88568;
+    --alert-soft: #33201A;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: var(--step-0);
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: clamp(1.5rem, 4vw, 4rem) clamp(1.1rem, 4vw, 3rem) 5rem;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 1.75rem;
+    padding-bottom: 2rem;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .stamp {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.6rem 1.25rem;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .stamp b {
+    font-weight: 600;
+    color: var(--alert);
+  }
+
+  h1 {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-weight: 500;
+    font-size: clamp(2.1rem, 6vw, var(--step-5));
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: 0;
+    max-width: 18ch;
+  }
+
+  .standfirst {
+    font-size: var(--step-2);
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 58ch;
+    margin: 0;
+    text-wrap: pretty;
+  }
+
+  /* ---------- countdown ---------- */
+
+  .countdown {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin-top: 2.5rem;
+  }
+
+  .countdown > div {
+    background: var(--surface);
+    padding: 1rem 1.25rem;
+    flex: 1 1 12rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .countdown dt,
+  .k {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .countdown dd {
+    margin: 0;
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-size: var(--step-3);
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .countdown .hot dd { color: var(--alert); }
+
+  /* ---------- section grid ---------- */
+
+  section {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.5rem 2.5rem;
+    padding: 3.25rem 0 0;
+  }
+
+  @media (min-width: 880px) {
+    section {
+      grid-template-columns: 8.5rem minmax(0, 1fr);
+    }
+    .sec-label { grid-column: 1; }
+    .sec-body { grid-column: 2; }
+  }
+
+  .sec-label {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-top: 0.55rem;
+  }
+
+  .sec-body { max-width: var(--measure); }
+  .sec-body > * + * { margin-top: 1.1rem; }
+
+  h2 {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-weight: 500;
+    font-size: var(--step-4);
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    margin: 0 0 0.4rem;
+  }
+
+  h3 {
+    font-family: "IBM Plex Sans", sans-serif;
+    font-weight: 600;
+    font-size: var(--step-1);
+    line-height: 1.35;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  p { margin: 0; text-wrap: pretty; }
+
+  a {
+    color: var(--accent);
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+  }
+  a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  strong { font-weight: 600; }
+
+  code, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.88em;
+  }
+
+  code {
+    background: var(--sunk);
+    padding: 0.1em 0.34em;
+    border-radius: 2px;
+  }
+
+  hr {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    margin: 0;
+  }
+
+  /* ---------- clock ladder ---------- */
+
+  .clocks {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .clock {
+    background: var(--surface);
+    display: grid;
+    grid-template-columns: 5.5rem minmax(0, 1fr);
+    gap: 0 1.1rem;
+    padding: 1rem 1.15rem;
+    align-items: start;
+  }
+
+  .clock .t {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-weight: 600;
+    font-size: 1.05rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--alert);
+    letter-spacing: -0.01em;
+    padding-top: 0.1rem;
+  }
+
+  .clock p { color: var(--ink-2); font-size: 0.95rem; }
+  .clock h3 { margin-bottom: 0.15rem; }
+
+  /* ---------- steps ---------- */
+
+  ol.steps {
+    list-style: none;
+    counter-reset: step;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  ol.steps > li {
+    counter-increment: step;
+    background: var(--surface);
+    padding: 1.15rem 1.25rem;
+    display: grid;
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: 0 1rem;
+  }
+
+  ol.steps > li::before {
+    content: counter(step);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--accent);
+    padding-top: 0.12rem;
+  }
+
+  ol.steps > li > div > * + * { margin-top: 0.45rem; }
+  ol.steps p { color: var(--ink-2); font-size: 0.95rem; }
+
+  /* ---------- pull quote ---------- */
+
+  .pull {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-size: var(--step-3);
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    text-wrap: balance;
+    border-top: 1px solid var(--ink);
+    border-bottom: 1px solid var(--ink);
+    padding: 1.25rem 0;
+    margin: 0;
+  }
+
+  /* ---------- misreadings ---------- */
+
+  .misread {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .misread > div {
+    background: var(--surface);
+    padding: 1rem 1.2rem;
+  }
+
+  .misread .said {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-size: 1.06rem;
+    line-height: 1.35;
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  .misread .said::before { content: "\201C"; }
+  .misread .said::after { content: "\201D"; }
+
+  .misread p:last-child {
+    margin-top: 0.45rem;
+    font-size: 0.95rem;
+    color: var(--ink-2);
+  }
+
+  .misread .no {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--alert);
+    font-weight: 600;
+  }
+
+  /* ---------- callouts ---------- */
+
+  .note {
+    background: var(--accent-soft);
+    border-top: 1px solid var(--accent);
+    padding: 1rem 1.15rem 1.1rem;
+  }
+
+  .warn {
+    background: var(--alert-soft);
+    border-top: 1px solid var(--alert);
+    padding: 1rem 1.15rem 1.1rem;
+  }
+
+  .note > * + *, .warn > * + * { margin-top: 0.5rem; }
+
+  .note .k, .warn .k { display: block; margin-bottom: 0.35rem; }
+  .warn .k { color: var(--alert); }
+
+  /* ---------- tables ---------- */
+
+  .tablewrap { overflow-x: auto; }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 30rem;
+    font-size: 0.94rem;
+  }
+
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 0.7rem 0.9rem 0.7rem 0;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+
+  thead th {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  td:first-child { font-weight: 500; padding-right: 1.4rem; }
+  td .who {
+    display: block;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 0.2rem;
+  }
+
+  ul.plain {
+    margin: 0;
+    padding-left: 1.15rem;
+    display: grid;
+    gap: 0.55rem;
+  }
+  ul.plain li { padding-left: 0.15rem; }
+
+  /* ---------- gap cards ---------- */
+
+  .gaps {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .gap {
+    background: var(--surface);
+    padding: 1.1rem 1.25rem;
+  }
+  .gap > * + * { margin-top: 0.4rem; }
+  .gap p { color: var(--ink-2); font-size: 0.95rem; }
+
+  .owner {
+    display: inline-block;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.64rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 0.12rem 0.42rem;
+    border-radius: 2px;
+    vertical-align: 0.12em;
+  }
+
+  /* ---------- schedule ---------- */
+
+  .sched {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .day {
+    background: var(--surface);
+    display: grid;
+    grid-template-columns: 7.5rem minmax(0, 1fr);
+    gap: 0 1.1rem;
+    padding: 0.95rem 1.2rem;
+  }
+
+  .day .d {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.74rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-top: 0.22rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .day.final { background: var(--alert-soft); }
+  .day.final .d { color: var(--alert); }
+
+  .day p { font-size: 0.95rem; color: var(--ink-2); }
+  .day strong { color: var(--ink); }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+    font-size: 0.85rem;
+    color: var(--muted);
+    max-width: var(--measure);
+  }
+  footer > * + * { margin-top: 0.6rem; }
+  footer a { color: var(--muted); }
+
+  @media (max-width: 560px) {
+    .clock, .day { grid-template-columns: 1fr; gap: 0.35rem; }
+    ol.steps > li { grid-template-columns: 1.6rem minmax(0, 1fr); }
+  }
+</style>
+<style>
+  /* standalone / print: a single light rendering, so an emailed copy and a
+     printed copy are the same document */
+  @page { size: A4; margin: 16mm 15mm 18mm; }
+  @media print {
+    :root {
+      --ground: #FFFFFF;
+      --surface: #FFFFFF;
+      --sunk: #F0F2EC;
+      --ink: #111411;
+      --ink-2: #33392F;
+      --muted: #5E6659;
+      --rule: #BFC6B8;
+      --rule-soft: #D9DED2;
+      --accent: #0E4F4A;
+      --accent-soft: #E7F0ED;
+      --alert: #8E2A18;
+      --alert-soft: #F6E7E1;
+    }
+    body {
+      font-size: 10.5pt;
+      line-height: 1.5;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .page { max-width: none; padding: 0; }
+    section { padding-top: 1.5rem; }
+    .sec-body > * + * { margin-top: 0.9rem; }
+    .sec-label { break-after: avoid; }
+    h2 { break-after: avoid-page; }
+    h3 { break-after: avoid-page; }
+    .clock, .gap, ol.steps > li, .day, .note, .warn,
+    .misread > div, .pull, .countdown, tr { break-inside: avoid; }
+    hr { margin-top: 0.4rem; }
+    h1 { font-size: 26pt; }
+    h2 { font-size: 15pt; }
+    a { text-decoration: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="masthead">
+    <div class="stamp">
+      <span>Regulation (EU) 2024/2847 &mdash; Article 14</span>
+      <span>Prepared for Carl &mdash; CTO, Joral LLC</span>
+      <span>25 Aug 2026</span>
+      <span><b>17 days to obligation</b></span>
+    </div>
+    <h1>The 24&#8209;hour clock starts 11 September</h1>
+    <p class="standfirst">What actually becomes binding that day, why it is not optional, and the six things product management and counsel have to put in place before it &mdash; none of which is a coding problem.</p>
+  </header>
+
+  <dl class="countdown">
+    <div class="hot">
+      <dt>Obligation begins</dt>
+      <dd>11 Sep 2026</dd>
+    </div>
+    <div>
+      <dt>What binds</dt>
+      <dd>Article 14</dd>
+    </div>
+    <div>
+      <dt>Engineering work owed</dt>
+      <dd>None</dd>
+    </div>
+    <div>
+      <dt>Effort to close</dt>
+      <dd>~2 hours</dd>
+    </div>
+  </dl>
+
+  <section>
+    <div class="sec-label">01 &middot; The law</div>
+    <div class="sec-body">
+      <h2>What becomes binding, precisely</h2>
+      <p>The Cyber Resilience Act came into force in December 2024 with most of its weight deferred to <strong>11 December 2027</strong> &mdash; CE marking, the technical file, the essential requirements in Annex&nbsp;I. One article was pulled forward. From <strong>11 September 2026</strong>, Article&nbsp;14 obliges a manufacturer to report <strong>actively exploited vulnerabilities</strong> and <strong>severe incidents</strong> in its products to ENISA and to the coordinating national CSIRT, through the EU single reporting platform, on a fixed clock:</p>
+
+      <div class="clocks">
+        <div class="clock">
+          <div class="t">24 h</div>
+          <div>
+            <h3>Early warning</h3>
+            <p>From the moment we <em>become aware</em>. Not from the moment we understand it, reproduce it, or have a fix. A short notice that something is being exploited is enough &mdash; and is required.</p>
+          </div>
+        </div>
+        <div class="clock">
+          <div class="t">72 h</div>
+          <div>
+            <h3>Notification</h3>
+            <p>The product, the general nature of the exploit and the vulnerability, and any corrective or mitigating measures available or advised.</p>
+          </div>
+        </div>
+        <div class="clock">
+          <div class="t">14 d</div>
+          <div>
+            <h3>Final report</h3>
+            <p>Within 14 days of a corrective or mitigating measure being available. For a <em>severe incident</em> rather than a vulnerability, the final report window is one month, and covers root cause and mitigation.</p>
+          </div>
+        </div>
+      </div>
+
+      <p>Article&nbsp;14 carries a fourth duty that is easy to miss and lands in the same hours: <strong>we must also inform affected users</strong> of the vulnerability or incident and of any mitigation they can apply. If we do not do it in reasonable time, the CSIRT may do it for us &mdash; which means our customers would learn of a problem in our product from a government notice.</p>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="sec-label">02 &middot; Why mandatory</div>
+    <div class="sec-body">
+      <h2>Why this is not a best practice</h2>
+
+      <p>Every other line on the compliance programme is something we decided to do well. This one is not ours to schedule, scope or defer. It is an obligation the Union places on the <strong>manufacturer</strong> of a product with digital elements &mdash; that is us, by name and by role &mdash; and it takes effect on a fixed date whether or not we are ready, whether or not we are CE marked, and whether or not anyone has asked us about it.</p>
+
+      <p class="pull">A regulation is not a standard we adopt. It is a clock, and we do not start it.</p>
+
+      <ul class="plain">
+        <li><strong>It is a regulation, not a directive.</strong> It applies directly in every member state. There is no national transposition to wait for and no implementation grace period after 11 September.</li>
+        <li><strong>It reaches backwards.</strong> The duty attaches to products we have <em>already</em> placed on the EU market, not only to what we ship next. A unit sold last year is inside the obligation; the customer's contract and its warranty status are irrelevant to it.</li>
+        <li><strong>The trigger is outside our control.</strong> We do not choose when a vulnerability is actively exploited. The 24-hour clock is started by an event we learn about, at whatever hour we learn about it.</li>
+        <li><strong>It is enforced by market surveillance authorities</strong>, whose powers include ordering a product withdrawn from the market. Penalties for breaching the Article&nbsp;13/14 obligations sit in the top band of the CRA's fine structure &mdash; the figure is the kind of number counsel should confirm rather than take from a memo, but the order of magnitude is existential for a company our size.</li>
+        <li><strong>Failure is visible.</strong> Missing a CE mark is discovered in an audit. Missing a 24-hour report is discovered in the middle of a live exploitation event, in front of the customer it affects.</li>
+      </ul>
+
+      <h3>Three ways this gets misread</h3>
+
+      <div class="misread">
+        <div>
+          <p class="said">We are not CE marked yet, so the CRA does not reach us until 2027.</p>
+          <p><span class="no">No.</span> Article&nbsp;14 was deliberately pulled forward, separately from everything else. The 2027 date governs marking, the technical file and the Annex&nbsp;I requirements. The reporting duty is not waiting for them.</p>
+        </div>
+        <div>
+          <p class="said">Our customer agreements cover how we handle security issues.</p>
+          <p><span class="no">No.</span> The duty runs to ENISA and a national CSIRT, not to the customer. No contract we sign with a buyer discharges it, and no buyer can waive it on our behalf.</p>
+        </div>
+        <div>
+          <p class="said">We will deal with it if it ever happens.</p>
+          <p><span class="no">No.</span> The whole obligation is a 24-hour clock. There is no version of &ldquo;deal with it then&rdquo; that fits inside one working day if the mailbox, the duty officer, the CSIRT routing and the platform login all have to be created first.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="sec-label">03 &middot; Correction</div>
+    <div class="sec-body">
+      <h2>One thing our own plan gets slightly wrong</h2>
+      <p>Both <code>cra-compliance-plan.md</code> and the owner-facing summary describe 11&nbsp;September as the date from which <em>&ldquo;a researcher must have a published way to tell us&rdquo;</em>. That framing is off, and it is worth fixing before it drives the work.</p>
+      <div class="note">
+        <span class="k">What the two dates actually cover</span>
+        <p>The duty to <strong>run a coordinated disclosure policy and publish a contact address</strong> is Annex&nbsp;I Part&nbsp;II points 5 and 6 &mdash; and Annex&nbsp;I applies from <strong>11 December 2027</strong>. What lands on <strong>11 September 2026</strong> is the <strong>outbound</strong> reporting duty: us, to ENISA and a CSIRT, on a 24&#8209;hour clock.</p>
+      </div>
+      <p>This does not weaken the case for doing the mailbox this week &mdash; it strengthens it. The mailbox is not the obligation; it is the <strong>tripwire that makes the obligation performable</strong>. The realistic way a small manufacturer first learns that a vulnerability in its fielded units is being exploited is that somebody writes and says so. A 24-hour clock we cannot hear start is a 24-hour clock we miss.</p>
+      <p>But it does mean the three steps currently on the plan &mdash; create mailbox, publish files, verify from outside &mdash; are <strong>necessary and not sufficient</strong>. They build the tripwire. They do not build the response. Section&nbsp;05 is what is missing.</p>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="sec-label">04 &middot; This week</div>
+    <div class="sec-body">
+      <h2>The mailbox, in this order</h2>
+      <p>Unchanged from the existing plan, because the existing plan is right about it. The ordering is load-bearing.</p>
+
+      <ol class="steps">
+        <li>
+          <div>
+            <h3>Create <span class="mono">security@joralllc.com</span> as a Workspace group</h3>
+            <p>A group, not a personal alias &mdash; a personal address fails the first time that person is on leave. Members: product management <strong>and at least one engineer</strong>. Alias <span class="mono">psirt@</span> to the same group; it costs nothing and catches reporters who follow PSIRT convention. Confirm delivery from outside the domain.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>Publish the two prepared files</h3>
+            <p><span class="mono">security.txt</span> at <span class="mono">/.well-known/security.txt</span> over HTTPS as <span class="mono">text/plain</span> &mdash; not an attachment, not redirected to a marketing page. The policy at exactly <span class="mono">https://joralllc.com/security-policy</span>, because that is the URL <span class="mono">security.txt</span> names. Both files are written, validated by a 16-check script, and waiting in <code>media/joral/disclosure/</code>.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>Verify from outside the company</h3>
+            <p>Fetch both URLs from a network that is not ours, and send a test report to the address from a personal account. Until mail is actually received, the row is not closed.</p>
+          </div>
+        </li>
+      </ol>
+
+      <div class="warn">
+        <span class="k">Do not publish before the mailbox exists</span>
+        <p>A researcher who writes to an advertised address and hears nothing concludes we do not answer. What they typically do next is publish the vulnerability rather than report it &mdash; which converts a private report into a public zero-day and, after 11 September, into a reportable event with a 24-hour clock already running.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="sec-label">05 &middot; The gap</div>
+    <div class="sec-body">
+      <h2>Five things the current plan does not cover</h2>
+      <p>Each is a decision or an errand. None needs engineering time, and none takes longer than the meeting it is decided in.</p>
+
+      <div class="gaps">
+        <div class="gap">
+          <h3>A named duty officer, and a deputy <span class="owner">PM</span></h3>
+          <p>A 24-hour clock needs a person, not a group. Name who reads the mailbox each working day, who covers holidays and weekends, and who has standing authority to file an early warning <em>without</em> waiting for the CTO. Nothing in the 24-hour report commits us to a finding &mdash; it says we are aware and looking &mdash; so gating it on the CTO&rsquo;s availability is the single most likely way we miss it.</p>
+        </div>
+        <div class="gap">
+          <h3>Establish which CSIRT we report to <span class="owner">Legal</span></h3>
+          <p>Reports go to ENISA <em>and</em> the CSIRT designated as coordinator, which follows the manufacturer's main establishment in the Union &mdash; or the establishment of its EU authorised representative, for a manufacturer based outside it. As a US company, we need counsel to tell us which CSIRT that is for us, and whether an authorised representative is required or advisable. This is the one item with a real chance of taking longer than an hour, so start it first.</p>
+        </div>
+        <div class="gap">
+          <h3>Get access to the single reporting platform before we need it <span class="owner">PM</span></h3>
+          <p>The report is filed through the EU single reporting platform, which is due to be operational on the same date. Whatever registration or account it requires, do it in a quiet week. Nobody should be creating a login for the first time inside a 24-hour window.</p>
+        </div>
+        <div class="gap">
+          <h3>Draft the two notices in advance <span class="owner">PM</span></h3>
+          <p>A fill-in-the-blanks early warning, and a customer notice for the Article&nbsp;14(8) duty to inform affected users. Both are twenty minutes of writing now and an hour we will not have later. The customer notice needs a distribution list &mdash; who we email when a fielded unit is affected &mdash; which we should confirm exists.</p>
+        </div>
+        <div class="gap">
+          <h3>One 30-minute drill, before 11 September <span class="owner">PM + Eng</span></h3>
+          <p>Send a fabricated report to the new mailbox and walk it end to end: who saw it, how fast, which builds are affected, what the early warning would have said, who signs it, who tells the customer. Every serious defect this programme has found came from running something rather than reading it. This is the same principle applied to the process rather than the product.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="sec-label">06 &middot; Owners</div>
+    <div class="sec-body">
+      <h2>Who moves what</h2>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>Item</th><th>Owner</th><th>Effort</th><th>Bound to 11 Sep</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Mailbox, publish, verify</td>
+              <td>Product management<span class="who">+ web</span></td>
+              <td>1 hour</td>
+              <td>Yes</td>
+            </tr>
+            <tr>
+              <td>Duty officer + deputy named</td>
+              <td>Product management</td>
+              <td>A decision</td>
+              <td>Yes</td>
+            </tr>
+            <tr>
+              <td>CSIRT routing / authorised rep</td>
+              <td>Legal</td>
+              <td>Counsel time</td>
+              <td>Yes &mdash; start first</td>
+            </tr>
+            <tr>
+              <td>Reporting-platform access</td>
+              <td>Product management</td>
+              <td>Under an hour</td>
+              <td>Yes</td>
+            </tr>
+            <tr>
+              <td>Notice templates + customer list</td>
+              <td>Product management</td>
+              <td>30 minutes</td>
+              <td>Yes</td>
+            </tr>
+            <tr>
+              <td>Tabletop drill</td>
+              <td>PM + one engineer</td>
+              <td>30 minutes</td>
+              <td>Yes</td>
+            </tr>
+            <tr>
+              <td>Sign firmware signing policy; key ceremony</td>
+              <td>Carl<span class="who">CTO</span></td>
+              <td>Signature + 1 hour</td>
+              <td>No &mdash; blocks first shipment</td>
+            </tr>
+            <tr>
+              <td>Confirm five-year support period</td>
+              <td>Carl<span class="who">CTO</span></td>
+              <td>A decision</td>
+              <td>No &mdash; blocks first shipment</td>
+            </tr>
+            <tr>
+              <td>EULA review, jurisdiction, <span class="mono">support@</span></td>
+              <td>Legal</td>
+              <td>Counsel time</td>
+              <td>No</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The bottom three are the existing item&nbsp;2 of the remaining-work list, unchanged. They belong in the same conversation because it is one meeting, not three &mdash; but only the top six are dated.</p>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="sec-label">07 &middot; Schedule</div>
+    <div class="sec-body">
+      <h2>Seventeen days</h2>
+      <div class="sched">
+        <div class="day">
+          <div class="d">This week</div>
+          <div><p><strong>Mail counsel</strong> the CSIRT-routing and authorised-representative question. It is the only item whose duration we do not control, so it goes first even though it is the least visible.</p></div>
+        </div>
+        <div class="day">
+          <div class="d">Same day</div>
+          <div><p><strong>Create the Workspace group</strong>, name the duty officer and deputy in the same message. Then publish the two files, then verify from outside.</p></div>
+        </div>
+        <div class="day">
+          <div class="d">One meeting</div>
+          <div><p><strong>Carl signs</strong> the firmware signing policy and confirms the five-year support period as CTO; the two product questions &mdash; audit-log forwarding, scaling-factor rejection &mdash; get answered in the same hour. Not deadline work, but it is the meeting that is already needed.</p></div>
+        </div>
+        <div class="day">
+          <div class="d">By 4 Sep</div>
+          <div><p><strong>Platform access obtained, templates drafted, customer distribution list confirmed.</strong> A week of slack before the date, deliberately.</p></div>
+        </div>
+        <div class="day">
+          <div class="d">By 9 Sep</div>
+          <div><p><strong>Run the drill.</strong> Fix whatever it exposes &mdash; it will expose something, and the point of running it two days early is that there is room to.</p></div>
+        </div>
+        <div class="day final">
+          <div class="d">11 Sep 2026</div>
+          <div><p><strong>Obligation begins.</strong> Nothing should happen on this day. That is the objective.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="sec-label">08 &middot; Assets</div>
+    <div class="sec-body">
+      <h2>What makes this cheap for us</h2>
+      <p>A 24-hour clock is expensive for a manufacturer that cannot answer <em>&ldquo;which builds are affected?&rdquo;</em> in the first hour. We can, and that was deliberate:</p>
+      <ul class="plain">
+        <li>Every release carries a <strong>bill of materials tied to its build identifier</strong>, cross-checked against the CVE report so the two cannot describe different images. A component named in a report maps to a build list without an investigation.</li>
+        <li>Every release is <strong>screened against public vulnerability databases</strong> at the build gate, so &ldquo;did we already know?&rdquo; has a recorded answer.</li>
+        <li>The <strong>signed A/B update path is proven on hardware</strong>, including the downgrade refusal &mdash; so &ldquo;a corrective measure is available&rdquo; is a thing we can actually make true inside the 14-day window, once the key ceremony has happened.</li>
+        <li>The <strong>fix-note format is already written</strong> into both products' policies: affected builds by identifier, impact in plain language, the corrective update, free of charge. That is most of an Article&nbsp;14(8) customer notice.</li>
+        <li>Both disclosure files are <strong>validated by a script that fails the build</strong> if the published address ever drifts from the six shipped surfaces that carry it &mdash; and fails 60 days before the <span class="mono">security.txt</span> expiry lapses.</li>
+      </ul>
+      <p>All eight Annex&nbsp;I Part&nbsp;I product properties are met and demonstrated on hardware. The gap is not the product. It is that nobody is currently on the hook to open an inbox.</p>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="sec-label">09 &middot; Open</div>
+    <div class="sec-body">
+      <h2>Questions this memo cannot answer</h2>
+      <ul class="plain">
+        <li><strong>Have we placed a product on the EU market yet?</strong> The Article&nbsp;14 duty attaches to products placed on the Union market. If no unit has been, the clock has nothing to attach to on 11 September &mdash; and attaches the moment the first one ships. This changes how alarmed to be; it does not change a single action above, because the mailbox has to exist before first shipment either way.</li>
+        <li><strong>Are we the manufacturer for every unit, or is anyone reselling under their own name?</strong> A distributor who puts their brand on our hardware becomes the manufacturer for CRA purposes, which changes who owes the report.</li>
+        <li><strong>Does an EU authorised representative make sense for us regardless?</strong> Counsel's call, and it is the same conversation as the CSIRT-routing question.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <p>Article and deadline detail from the Commission's CRA reporting-obligations guidance and the Article&nbsp;14 text. Fine bands, CSIRT routing for a non-EU manufacturer, and market-placement status are flagged above as counsel's calls rather than stated as settled.</p>
+  </footer>
+
+</div>
+</body>
+</html>

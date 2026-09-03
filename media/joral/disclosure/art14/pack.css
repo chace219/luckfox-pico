@@ -1,0 +1,53 @@
+/* Joral brand, taken from joralllc.com theme CSS (wp-content/themes/joral):
+   red #ed1f28, hover #7b071b, header white + 5px red rule, footer #3a3a3a + red rule,
+   body Open Sans 14px, h1/h2 'ISOCPEUR V2' bold, article h2 #63655b, h3 red 800, th 2px red rule */
+:root{--red:#ed1f28;--red-dark:#7b071b;--ink:#333;--ink-2:#444;--grey:#63655b;--muted:#888;--rule:#ccc;--rule-soft:#e4e4e4;--panel:#f4f4f4;--panel-2:#efefef;--charcoal:#3a3a3a;--fill:#fff4d6;--fill-ink:#7b071b;--fill-rule:#ed1f28}
+@page{size:A4;margin:16mm 16mm 18mm}
+*{box-sizing:border-box}
+html,body{margin:0;background:#fff;color:var(--ink);font:10.5pt/1.55 "Open Sans",Arial,Helvetica,sans-serif}
+body{max-width:180mm;margin:0 auto;padding:0}
+h1,h2{font-family:"ISOCPEUR V2","Saira Semi Condensed","Open Sans",Arial,sans-serif;font-weight:700;line-height:1.15;margin:1.5em 0 .5em;letter-spacing:.01em}
+h1{font-size:24pt;color:var(--ink);margin-top:.2em}
+h2{font-size:15.5pt;color:var(--grey);text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid var(--red);padding-bottom:.15em;break-after:avoid}
+h3{font:800 11.5pt/1.3 "Open Sans",Arial,sans-serif;color:var(--red);margin:1.3em 0 .4em;break-after:avoid}
+p,ul,ol,table,pre,blockquote{margin:.55em 0}
+ul,ol{padding-left:1.4em}
+li{margin:.2em 0}
+strong{font-weight:700}
+em{color:var(--ink-2)}
+code{font-family:Consolas,"Liberation Mono",Menlo,monospace;font-size:.88em;background:var(--panel);padding:.05em .3em;border-radius:2px}
+pre{background:var(--panel);border-left:4px solid var(--red);padding:.7em .9em;overflow:auto;font-size:8.8pt;line-height:1.4;break-inside:avoid}
+pre code{background:none;padding:0;font-size:inherit}
+table{border-collapse:collapse;width:100%;font-size:9.3pt}
+th,td{padding:.4em .55em;vertical-align:top;text-align:left;border-bottom:1px solid var(--rule-soft)}
+th{border-top:none;border-bottom:2px solid var(--red);font-weight:700;color:var(--ink)}
+tr:nth-child(even) td{background:#fafafa}
+tr{break-inside:avoid}
+hr{border:0;border-top:1px solid var(--rule);margin:1.4em 0}
+blockquote{border-left:4px solid var(--red);margin-left:0;padding:.2em 1em;color:var(--ink-2);background:var(--panel)}
+a{color:var(--red);text-decoration:none}
+.fill{background:var(--fill);color:var(--fill-ink);font-family:Consolas,"Liberation Mono",Menlo,monospace;font-size:.85em;padding:.05em .35em;border-radius:2px;border-bottom:1.5px solid var(--fill-rule)}
+.box{display:inline-block;width:.9em;height:.9em;border:1.5px solid var(--ink-2);border-radius:2px;vertical-align:-.1em;margin-right:.35em}
+p:has(> strong:only-child){break-after:avoid;margin-bottom:.2em}
+p:has(> strong:only-child) + p{margin-top:.2em}
+/* cover — mirrors the site header: white, logo left, 5px red rule */
+.brand{display:flex;align-items:flex-end;justify-content:space-between;border-bottom:5px solid var(--red);padding-bottom:4mm;margin-bottom:6mm}
+.brand img{height:16mm;width:auto}
+.brand .meta{font-size:8.5pt;color:var(--muted);text-align:right;line-height:1.4}
+.brand .meta b{color:var(--ink);font-weight:700}
+.cover h1{font-size:30pt;margin:0 0 .3em}
+.kicker{font-size:8.5pt;letter-spacing:.08em;text-transform:uppercase;color:var(--red);font-weight:700}
+.lede{font-size:12.5pt;line-height:1.45;color:var(--ink-2);max-width:62ch}
+.facts{display:grid;grid-template-columns:1fr 1fr;gap:.5em 2em;margin:1.4em 0;padding:1em 1.2em;background:var(--panel);border-left:4px solid var(--red)}
+.facts div{display:contents}
+.facts dt{font-size:8.5pt;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
+.facts dd{margin:0 0 .3em;font-weight:600;color:var(--ink)}
+.status{margin:1.2em 0;padding:.9em 1.2em;background:var(--charcoal);color:#fff;border-top:4px solid var(--red)}
+.status b{color:#fff}
+.status .k{font-size:8.5pt;text-transform:uppercase;letter-spacing:.08em;color:#bbb;font-weight:700;display:block;margin-bottom:.3em}
+.note{font-size:9.5pt;color:var(--ink-2)}
+.doc{break-before:page}
+.crumb{font-size:8.5pt;color:var(--muted);border-bottom:1px solid var(--rule-soft);padding-bottom:.3em;margin-bottom:.4em}
+.doc h1{font-size:20pt}
+.foot{margin-top:12mm;padding-top:3mm;border-top:5px solid var(--red);background:var(--charcoal);color:#bbb;font-size:8.5pt;padding:3mm 4mm}
+.foot b{color:#fff}
