@@ -36,6 +36,7 @@ Nothing here takes an engineering day. What it takes is a decision and an hour.
 |---|---|---|
 | [`security.txt`](security.txt) | `https://joralllc.com/.well-known/security.txt` | product management + web |
 | [`security-policy.md`](security-policy.md) | `https://joralllc.com/security-policy` | product management + web |
+| [`art14/`](art14/) | *not published* — the fill-in 24 h / 72 h / 14 d report, the Art. 14(8) customer notice, and the distribution-list checklist, ready for the day | duty officer + product management |
 
 Both are already consistent with what the devices say — each product's
 `SECURITY.md`, both user manuals, and the on-device Help generated from them.

@@ -215,7 +215,7 @@ export RK_ARCH=arm
 export RK_TOOLCHAIN_CROSS=arm-rockchip830-linux-uclibcgnueabihf
 
 #misc image
-export RK_MISC=wipe_all-misc.img
+export RK_MISC=ab-misc.img
 
 # Uboot defconfig
 export RK_UBOOT_DEFCONFIG=luckfox_rv1106_uboot_defconfig

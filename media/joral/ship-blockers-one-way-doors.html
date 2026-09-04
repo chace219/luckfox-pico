@@ -1,0 +1,895 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The One-Way Doors</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --ground: #EFF1EC;
+    --surface: #FBFCF8;
+    --sunk: #E5E8E0;
+    --ink: #151813;
+    --ink-2: #3D443A;
+    --muted: #6A7266;
+    --rule: #D3D8CC;
+    --rule-soft: #E2E6DC;
+    --accent: #0E4F4A;
+    --accent-soft: #DDE9E5;
+    --alert: #9E2F1C;
+    --alert-soft: #F3E1DA;
+
+    --measure: 66ch;
+    --step-0: 1rem;
+    --step-1: 1.125rem;
+    --step-2: 1.35rem;
+    --step-3: 1.75rem;
+    --step-4: 2.4rem;
+    --step-5: 3.2rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0F1210;
+      --surface: #171B17;
+      --sunk: #1D221D;
+      --ink: #E7EBE2;
+      --ink-2: #BCC4B7;
+      --muted: #8D9689;
+      --rule: #2C332C;
+      --rule-soft: #232823;
+      --accent: #63C9BB;
+      --accent-soft: #17302D;
+      --alert: #E88568;
+      --alert-soft: #33201A;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0F1210;
+    --surface: #171B17;
+    --sunk: #1D221D;
+    --ink: #E7EBE2;
+    --ink-2: #BCC4B7;
+    --muted: #8D9689;
+    --rule: #2C332C;
+    --rule-soft: #232823;
+    --accent: #63C9BB;
+    --accent-soft: #17302D;
+    --alert: #E88568;
+    --alert-soft: #33201A;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: var(--step-0);
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: clamp(1.5rem, 4vw, 4rem) clamp(1.1rem, 4vw, 3rem) 5rem;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 1.75rem;
+    padding-bottom: 2rem;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .stamp {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.6rem 1.25rem;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .stamp b {
+    font-weight: 600;
+    color: var(--alert);
+  }
+
+  h1 {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-weight: 500;
+    font-size: clamp(2.1rem, 6vw, var(--step-5));
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: 0;
+    max-width: 18ch;
+  }
+
+  .standfirst {
+    font-size: var(--step-2);
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 58ch;
+    margin: 0;
+    text-wrap: pretty;
+  }
+
+  /* ---------- countdown ---------- */
+
+  .countdown {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin-top: 2.5rem;
+  }
+
+  .countdown > div {
+    background: var(--surface);
+    padding: 1rem 1.25rem;
+    flex: 1 1 12rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .countdown dt,
+  .k {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .countdown dd {
+    margin: 0;
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-size: var(--step-3);
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .countdown .hot dd { color: var(--alert); }
+
+  /* ---------- section grid ---------- */
+
+  section {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.5rem 2.5rem;
+    padding: 3.25rem 0 0;
+  }
+
+  @media (min-width: 880px) {
+    section {
+      grid-template-columns: 8.5rem minmax(0, 1fr);
+    }
+    .sec-label { grid-column: 1; }
+    .sec-body { grid-column: 2; }
+  }
+
+  .sec-label {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-top: 0.55rem;
+  }
+
+  .sec-body { max-width: var(--measure); }
+  .sec-body > * + * { margin-top: 1.1rem; }
+
+  h2 {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-weight: 500;
+    font-size: var(--step-4);
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    margin: 0 0 0.4rem;
+  }
+
+  h3 {
+    font-family: "IBM Plex Sans", sans-serif;
+    font-weight: 600;
+    font-size: var(--step-1);
+    line-height: 1.35;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  p { margin: 0; text-wrap: pretty; }
+
+  a {
+    color: var(--accent);
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+  }
+  a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  strong { font-weight: 600; }
+
+  code, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.88em;
+  }
+
+  code {
+    background: var(--sunk);
+    padding: 0.1em 0.34em;
+    border-radius: 2px;
+  }
+
+  hr {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    margin: 0;
+  }
+
+  /* ---------- clock ladder ---------- */
+
+  .clocks {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .clock {
+    background: var(--surface);
+    display: grid;
+    grid-template-columns: 5.5rem minmax(0, 1fr);
+    gap: 0 1.1rem;
+    padding: 1rem 1.15rem;
+    align-items: start;
+  }
+
+  .clock .t {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-weight: 600;
+    font-size: 1.05rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--alert);
+    letter-spacing: -0.01em;
+    padding-top: 0.1rem;
+  }
+
+  .clock p { color: var(--ink-2); font-size: 0.95rem; }
+  .clock h3 { margin-bottom: 0.15rem; }
+
+  /* ---------- steps ---------- */
+
+  ol.steps {
+    list-style: none;
+    counter-reset: step;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  ol.steps > li {
+    counter-increment: step;
+    background: var(--surface);
+    padding: 1.15rem 1.25rem;
+    display: grid;
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: 0 1rem;
+  }
+
+  ol.steps > li::before {
+    content: counter(step);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--accent);
+    padding-top: 0.12rem;
+  }
+
+  ol.steps > li > div > * + * { margin-top: 0.45rem; }
+  ol.steps p { color: var(--ink-2); font-size: 0.95rem; }
+
+  /* ---------- pull quote ---------- */
+
+  .pull {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-size: var(--step-3);
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    text-wrap: balance;
+    border-top: 1px solid var(--ink);
+    border-bottom: 1px solid var(--ink);
+    padding: 1.25rem 0;
+    margin: 0;
+  }
+
+  /* ---------- misreadings ---------- */
+
+  .misread {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .misread > div {
+    background: var(--surface);
+    padding: 1rem 1.2rem;
+  }
+
+  .misread .said {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-size: 1.06rem;
+    line-height: 1.35;
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  .misread .said::before { content: "\201C"; }
+  .misread .said::after { content: "\201D"; }
+
+  .misread p:last-child {
+    margin-top: 0.45rem;
+    font-size: 0.95rem;
+    color: var(--ink-2);
+  }
+
+  .misread .no {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--alert);
+    font-weight: 600;
+  }
+
+  /* ---------- callouts ---------- */
+
+  .note {
+    background: var(--accent-soft);
+    border-top: 1px solid var(--accent);
+    padding: 1rem 1.15rem 1.1rem;
+  }
+
+  .warn {
+    background: var(--alert-soft);
+    border-top: 1px solid var(--alert);
+    padding: 1rem 1.15rem 1.1rem;
+  }
+
+  .note > * + *, .warn > * + * { margin-top: 0.5rem; }
+
+  .note .k, .warn .k { display: block; margin-bottom: 0.35rem; }
+  .warn .k { color: var(--alert); }
+
+  /* ---------- tables ---------- */
+
+  .tablewrap { overflow-x: auto; }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 30rem;
+    font-size: 0.94rem;
+  }
+
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 0.7rem 0.9rem 0.7rem 0;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+
+  thead th {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  td:first-child { font-weight: 500; padding-right: 1.4rem; }
+  td .who {
+    display: block;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 0.2rem;
+  }
+
+  ul.plain {
+    margin: 0;
+    padding-left: 1.15rem;
+    display: grid;
+    gap: 0.55rem;
+  }
+  ul.plain li { padding-left: 0.15rem; }
+
+  /* ---------- gap cards ---------- */
+
+  .gaps {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .gap {
+    background: var(--surface);
+    padding: 1.1rem 1.25rem;
+  }
+  .gap > * + * { margin-top: 0.4rem; }
+  .gap p { color: var(--ink-2); font-size: 0.95rem; }
+
+  .owner {
+    display: inline-block;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.64rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 0.12rem 0.42rem;
+    border-radius: 2px;
+    vertical-align: 0.12em;
+  }
+
+  /* ---------- schedule ---------- */
+
+  .sched {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .day {
+    background: var(--surface);
+    display: grid;
+    grid-template-columns: 7.5rem minmax(0, 1fr);
+    gap: 0 1.1rem;
+    padding: 0.95rem 1.2rem;
+  }
+
+  .day .d {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.74rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-top: 0.22rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .day.final { background: var(--alert-soft); }
+  .day.final .d { color: var(--alert); }
+
+  .day p { font-size: 0.95rem; color: var(--ink-2); }
+  .day strong { color: var(--ink); }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+    font-size: 0.85rem;
+    color: var(--muted);
+    max-width: var(--measure);
+  }
+  footer > * + * { margin-top: 0.6rem; }
+  footer a { color: var(--muted); }
+
+  @media (max-width: 560px) {
+    .clock, .day { grid-template-columns: 1fr; gap: 0.35rem; }
+    ol.steps > li { grid-template-columns: 1.6rem minmax(0, 1fr); }
+  }
+
+  /* ---------- door board ---------- */
+
+  .board {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .board > div {
+    background: var(--surface);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 7.5rem;
+    gap: 0.35rem 1rem;
+    padding: 0.9rem 1.15rem;
+    align-items: baseline;
+  }
+
+  .board .what { font-weight: 500; }
+  .board .who {
+    grid-column: 1;
+    display: block;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 0;
+  }
+
+  .chip {
+    justify-self: end;
+    grid-row: 1;
+    grid-column: 2;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.64rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    padding: 0.14rem 0.5rem;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+
+  .chip.open {
+    color: var(--alert);
+    border: 1px solid var(--alert);
+    background: var(--alert-soft);
+    font-weight: 600;
+  }
+
+  .chip.shut {
+    color: var(--muted);
+    border: 1px solid var(--rule);
+  }
+
+  @media (max-width: 560px) {
+    .board > div { grid-template-columns: minmax(0, 1fr) 6.5rem; }
+  }
+
+</style>
+<style>
+  /* standalone / print: a single light rendering, so an emailed copy and a
+     printed copy are the same document */
+  @page { size: A4; margin: 16mm 15mm 18mm; }
+  @media print {
+    :root {
+      --ground: #FFFFFF;
+      --surface: #FFFFFF;
+      --sunk: #F0F2EC;
+      --ink: #111411;
+      --ink-2: #33392F;
+      --muted: #5E6659;
+      --rule: #BFC6B8;
+      --rule-soft: #D9DED2;
+      --accent: #0E4F4A;
+      --accent-soft: #E7F0ED;
+      --alert: #8E2A18;
+      --alert-soft: #F6E7E1;
+    }
+    body {
+      font-size: 10.5pt;
+      line-height: 1.5;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .page { max-width: none; padding: 0; }
+    section { padding-top: 1.5rem; }
+    .sec-body > * + * { margin-top: 0.9rem; }
+    .sec-label { break-after: avoid; }
+    h2 { break-after: avoid-page; }
+    h3 { break-after: avoid-page; }
+    .clock, .gap, ol.steps > li, .day, .note, .warn,
+    .misread > div, .pull, .countdown, tr { break-inside: avoid; }
+    hr { margin-top: 0.4rem; }
+    h1 { font-size: 26pt; }
+    h2 { font-size: 15pt; }
+    a { text-decoration: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="masthead">
+    <div class="stamp">
+      <span>Ship blockers &mdash; no customer unit ships until these clear</span>
+      <span>Prepared for Carl &mdash; CTO, Joral LLC</span>
+      <span>25 Aug 2026</span>
+      <span><b>4 doors open</b></span>
+    </div>
+    <h1>Doors that shut on the first customer unit</h1>
+    <p class="standfirst">Four things that are cheap to get right today and expensive or impossible to change once a unit is in a customer's hands. Two of them are your signature. None of them is engineering work.</p>
+  </header>
+
+  <div class="board">
+    <div>
+      <span class="what">Partition layout frozen</span>
+      <span class="chip shut">Closed 19 Aug</span>
+      <span class="who">Engineering &middot; gated by the build</span>
+    </div>
+    <div>
+      <span class="what">Firmware signing key in custody</span>
+      <span class="chip open">Open</span>
+      <span class="who">Carl &middot; a signature and an hour</span>
+    </div>
+    <div>
+      <span class="what">Declared support period</span>
+      <span class="chip open">Open</span>
+      <span class="who">Carl &middot; same signature</span>
+    </div>
+    <div>
+      <span class="what">Licence, EULA and jurisdiction</span>
+      <span class="chip open">Open</span>
+      <span class="who">Counsel, via Carl</span>
+    </div>
+    <div>
+      <span class="what"><span class="mono">support@joralllc.com</span> exists and answers</span>
+      <span class="chip open">Open</span>
+      <span class="who">Product management &middot; minutes</span>
+    </div>
+  </div>
+
+  <section>
+    <div class="sec-label">01 &middot; The frame</div>
+    <div class="sec-body">
+      <h2>Why these four and not forty</h2>
+      <p>Nothing is in the field. There is no fleet to migrate, no compatibility path to maintain, no truck roll to schedule. That greenfield position is worth more than it sounds, because it reduces the entire pre-shipment question to one line:</p>
+
+      <p class="pull">Which decisions become irreversible the moment the first customer unit ships &mdash; and which can be delivered later, through the update mechanism itself?</p>
+
+      <p>Almost everything is the second kind. The console interface, delta updates, a read-only root filesystem, verified boot, kernel slot protection &mdash; all of it can ship in a later release, precisely <em>because</em> we built an update mechanism first. That is what makes the list on this page short.</p>
+      <p>The four open items are the first kind. Each one is a property of the unit itself, or of the terms it leaves under, and no update reaches back to change it:</p>
+      <ul class="plain">
+        <li><strong>The trust store is burned into the image.</strong> Whatever public keys a unit ships with are the only keys it will ever accept firmware from. Getting that wrong is corrected by a recall, not a release.</li>
+        <li><strong>A licence grant, once distributed, cannot be withdrawn.</strong> The terms the first unit ships under are the terms that unit lives under.</li>
+        <li><strong>The support period starts at first placement on the market.</strong> The clock begins with the first customer unit whether or not we have decided what it says.</li>
+      </ul>
+      <p>Door one &mdash; the partition layout &mdash; was closed on 19&nbsp;August, deliberately ahead of the others, and is now enforced by the build. The rest of this page is the four still open.</p>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="sec-label">02 &middot; The key</div>
+    <div class="sec-body">
+      <h2>The firmware signing key is still a development key</h2>
+      <p>The update mechanism works and has been proven on hardware, end to end: an ordinary operator update, the downgrade refusal firing, a tampered payload rejected, a tampered signature rejected, a wrong key rejected, power cut mid-write, a deliberately broken slot, and factory reset. All of it passed on a real unit.</p>
+      <p>What it signs with today is a <strong>development key generated per checkout</strong> &mdash; marked DEV, never committed, living in a working directory. Shipping a unit that trusts it would mean shipping a unit whose update path is exactly as trustworthy as a laptop. The build already refuses to treat that as shippable, which is why this is on your desk rather than in a backlog.</p>
+
+      <div class="note">
+        <span class="k">The part that is genuinely irreversible</span>
+        <p>The ceremony generates <strong>two</strong> keypairs, and <strong>both</strong> public halves are baked into every image from the very first unit &mdash; one active, one standby that signs nothing until it has to. That standby is what makes a future key compromise a signed update instead of a recall. It cannot be added later: retrofitting a second trust anchor means physical access to every unit in the field.</p>
+      </div>
+
+      <h3>What the hour actually involves</h3>
+      <p>Present: you and one named engineer, who become the two passphrase holders &mdash; two people so that a departure or an accident never strands the fleet.</p>
+
+      <ol class="steps">
+        <li>
+          <div>
+            <h3>Boot a laptop from a fresh live USB with networking disabled</h3>
+            <p>Nothing on that system persists. The ceremony script refuses to run on a machine that has a default route, so the airgap is checked rather than assumed.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>Run the script</h3>
+            <p>It generates both RSA-4096 keypairs and their certificates, assembles the trust bundle that goes into every image, and prints a pre-filled ceremony minute for the technical file.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>Write the private keys to four physical items</h3>
+            <p>Two copies of each key: one set to the office safe, one set off-site. Public halves go to the repository on an ordinary stick.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>Record the minute and power off</h3>
+            <p>Date, the two people present, token serials, and the fingerprints of both public certificates. The live session ends and every trace of the private keys in memory ends with it.</p>
+          </div>
+        </li>
+      </ol>
+
+      <div class="warn">
+        <span class="k">The one item with a lead time</span>
+        <p>The ceremony needs <strong>hardware tokens</strong>, and buying them was deferred in August. Encrypted USB sticks are a documented fallback, but if you want tokens, ordering them is the long pole in this whole page &mdash; and it is a purchase, not a decision. Everything else here can happen the week you sign.</p>
+      </div>
+
+      <p>Afterwards, signing a release costs about fifteen minutes: build, carry the package to the offline laptop, verify its fingerprint, sign, carry the signature back. The build then verifies the result against the public certificates in the repository &mdash; the same check the unit performs &mdash; before the release is allowed out.</p>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="sec-label">03 &middot; The promise</div>
+    <div class="sec-body">
+      <h2>How long we support the product, in writing</h2>
+      <p>The regulation requires us to state publicly how long we will provide security updates. The drafted answer is <strong>five years from the date each product model is first placed on the market</strong>, with the concrete end date printed in the fact sheet, the user manual, and on the website beside the security policy.</p>
+      <p>This blocks shipment for a mechanical reason rather than a legal one: <strong>the first customer shipment is the date the clock starts</strong>, and the manual that goes out with that unit is supposed to state when the period ends. A number we have not agreed cannot be printed.</p>
+
+      <h3>Why five, and why not ten</h3>
+      <ul class="plain">
+        <li><strong>Five is the floor</strong> for industrial equipment with a multi-year service life. Declaring less would not be defensible.</li>
+        <li><strong>Ten would not be honest today.</strong> The kernel and bootloader are the silicon vendor's base, on their support window rather than ours, and the cryptographic foundation we build on reaches end of life in April 2030 &mdash; which already commits us to one migration inside a five-year window. Ten years would stack two or three of those plus a probable vendor-base move, at a cost nobody can price now.</li>
+        <li><strong>The asymmetry favours starting low.</strong> Extending a published period later is good news and always permitted. Shortening one is a breach.</li>
+      </ul>
+
+      <div class="note">
+        <span class="k">Worth knowing before you sign</span>
+        <p>No operating-system base we can build on today is supported for a full five years by its own upstream. That is a property of the hardware platform, not a gap in the plan &mdash; and it is not what the regulation asks for. What it asks for is a written plan for moving to a newer base and evidence we can execute it. We have both, and we performed exactly that migration this month.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="sec-label">04 &middot; The terms</div>
+    <div class="sec-body">
+      <h2>The licence and the end-user agreement</h2>
+      <p>The engineering half is finished: the products are licensed proprietary, the licence is applied across both trees, declared in the bill of materials, and green through both test suites. The end-user agreement is drafted &mdash; and drafted from what is actually true of these products, not from a template.</p>
+
+      <p class="pull">The licence choice was still reversible on 19 August for exactly one reason: no customer unit had shipped.</p>
+
+      <p>Distribution is what makes it permanent. A licence grant that has gone out with a product cannot be withdrawn from that product, so every item below is cheap now and expensive the day after first delivery.</p>
+
+      <div class="gaps">
+        <div class="gap">
+          <h3>Counsel reviews the agreement <span class="owner">Legal</span></h3>
+          <p>It was written from the facts in these trees &mdash; the signed update mechanism, the declared support period, the isolated-network deployment assumption, the third-party components. It has never been read by a lawyer. Note the dependency: it states the support period, so §03 above should be decided before counsel starts rather than during.</p>
+        </div>
+        <div class="gap">
+          <h3>Fill in the jurisdiction <span class="owner">Legal</span></h3>
+          <p>One placeholder in the governing-law clause. It is counsel's call, and it gates their own sign-off.</p>
+        </div>
+        <div class="gap">
+          <h3>Decide how the agreement reaches the customer <span class="owner">Carl</span></h3>
+          <p>Today it exists only in the source trees, and neither manual has a legal section &mdash; so a customer holding a unit has no way to find the terms or the written source offer that goes with them. The cheapest sufficient answer is a &ldquo;Legal and licensing&rdquo; section in each manual. Fold it into the same documentation pass that adds the support end date, since both are missing from the same pages.</p>
+        </div>
+      </div>
+
+      <div class="warn">
+        <span class="k">A discrepancy in our own paperwork, worth correcting</span>
+        <p>The owner-facing summary files this item under <em>&ldquo;not date-bound &mdash; legal&rdquo;</em>, while the licence plan's own table records all of it as blocking first customer shipment. The licence plan is right. Counsel's calendar, not ours, sets how long this takes, which is the argument for starting it in the same week you sign the other two &mdash; not after.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="sec-label">05 &middot; The address</div>
+    <div class="sec-body">
+      <h2>A support address the documents already promise</h2>
+      <p>The end-user agreement directs customers to <span class="mono">support@joralllc.com</span>. The manuals will too. Nobody has confirmed the address exists.</p>
+      <p>This is the same failure as the security mailbox, in a lower key: a document that advertises an address nobody reads is worse than a document with no address, because it converts a customer trying to do the right thing into a customer being ignored. The rule is the same one &mdash; <strong>documents do not ship to customers before the address they name answers mail.</strong></p>
+      <p>Both mailboxes are one Workspace session. The security address has a legal deadline of 11&nbsp;September behind it and is covered in its own memo; this one has only first shipment behind it. There is no reason to do them on separate days.</p>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="sec-label">06 &middot; Not blockers</div>
+    <div class="sec-body">
+      <h2>What is deliberately not on this list</h2>
+      <p>A blocker list is only useful if it is short and true, so here is what was considered and left off.</p>
+
+      <div class="misread">
+        <div>
+          <p class="said">Everything still open in engineering.</p>
+          <p><span class="no">Ships later.</span> The console interface, delta updates, a read-only root filesystem, verified boot, kernel slot protection &mdash; all deliverable through the updater. Also the outstanding broker-authentication test, two ten-minute bench checks, and the first full automated fuzzing run: real work, none of it gating a unit.</p>
+        </div>
+        <div>
+          <p class="said">The two product questions.</p>
+          <p><span class="no">Ships later.</span> Whether the audit log should be forwarded off the device, and whether a nonsensical sensor scaling should be refused at import. Both are small changes once decided, and both arrive by update.</p>
+        </div>
+        <div>
+          <p class="said">The fifteen board variants that have never been switched on.</p>
+          <p><span class="no">Not a shipping question.</span> All sixteen profiles are hardened and checked automatically; we simply do not have the other boards here. It constrains what we can claim about them, not whether the one we do ship can ship.</p>
+        </div>
+        <div>
+          <p class="said">CE marking and the declaration of conformity.</p>
+          <p><span class="no">Different track.</span> Product and legal own those, on the December 2027 timeline. Engineering's job is that every fact they rest on is true and demonstrable, and that part is done and evidenced.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="sec-label">07 &middot; Sequence</div>
+    <div class="sec-body">
+      <h2>The order, which mostly does not matter &mdash; except at the ends</h2>
+      <div class="sched">
+        <div class="day">
+          <div class="d">First</div>
+          <div><p><strong>Order the hardware tokens</strong>, or decide to use encrypted media instead. It is the only item with a delivery time attached, and it costs nothing to start before the meeting.</p></div>
+        </div>
+        <div class="day">
+          <div class="d">One meeting</div>
+          <div><p><strong>Sign both halves of the policy memo</strong> &mdash; key custody and the five-year support period &mdash; and name the engineer who will hold the second passphrase. The memo has a sign-off block with two boxes; that is the whole decision.</p></div>
+        </div>
+        <div class="day">
+          <div class="d">Same week</div>
+          <div><p><strong>Send the agreement to counsel</strong>, with the support period now settled so they are not reviewing a blank. Their calendar is the longest pole after the tokens.</p></div>
+        </div>
+        <div class="day">
+          <div class="d">Same week</div>
+          <div><p><strong>Hold the ceremony</strong> &mdash; about an hour, two people, one offline laptop. Engineering then commits the public certificates, starts the signing log, and switches the release gate over. No code changes.</p></div>
+        </div>
+        <div class="day">
+          <div class="d">Then</div>
+          <div><p><strong>One documentation pass</strong>: support end date and a legal section into both manuals, regenerated into the on-device help and the customer PDFs. Confirm <span class="mono">support@</span> in the same hour as the security mailbox.</p></div>
+        </div>
+        <div class="day final">
+          <div class="d">Only then</div>
+          <div><p><strong>The first customer unit ships</strong> &mdash; on a trust store we control, under terms a lawyer has read, with a support period that has an end date printed in the manual.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="sec-label">08 &middot; Sign-off</div>
+    <div class="sec-body">
+      <h2>What you are actually signing</h2>
+      <p>Two decisions, in one memo that has been waiting since 14&nbsp;August, each already carrying an engineering recommendation:</p>
+      <div class="clocks">
+        <div class="clock">
+          <div class="t">A</div>
+          <div>
+            <h3>Key custody</h3>
+            <p>An offline private key that never touches a networked machine. No signing key on the build server or in CI; no fusing of the silicon, which was rejected as irreversible and aimed at a lesser threat. Two keys, four physical items, two passphrase holders, a written compromise procedure.</p>
+          </div>
+        </div>
+        <div class="clock">
+          <div class="t">B</div>
+          <div>
+            <h3>Support period</h3>
+            <p>Five years of security updates from first placement on the market, with the end date published; extension, if offered, announced no later than twelve months before it.</p>
+          </div>
+        </div>
+      </div>
+      <p>One line in that memo is worth reading twice, because it is the reason any of this is on a CTO's desk rather than an engineer's: <strong>whoever holds the signing key can put software on every unit we ever ship.</strong> The key needs to be harder to steal than any single connected computer at Joral. An hour, once, is what that costs.</p>
+    </div>
+  </section>
+
+  <footer>
+    <p>Facts here are drawn from the drafted signing and support-period memo, the update-mechanism plan and the outbound-licence plan, all of which carry the detail and the dated hardware evidence behind each claim. The one discrepancy between those sources and the owner-facing summary is flagged in &sect;04.</p>
+  </footer>
+
+</div>
+</body>
+</html>

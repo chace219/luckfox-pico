@@ -205,6 +205,41 @@ for d in "${DEFCONFIGS[@]}"; do
 	fi
 done
 
+echo
+echo "== The tracked defconfig masters are what the build actually uses"
+# sysdrv/source/buildroot is gitignored, and the tarball it unpacks does NOT
+# carry luckfox_pico_w_defconfig -- that file reaches the build ONLY because
+# sysdrv/Makefile's buildroot_create copies the master from
+# sysdrv/tools/board/buildroot/. So the master is the source of truth, and an
+# edit made to the derived copy alone builds correctly today and vanishes on
+# the next `make buildroot_create`, silently reverting the image.
+#
+# That is not hypothetical: on 2026-09-04 the entire A/B MTD/UBI block --
+# BR2_PACKAGE_MTD and the UBI tools the SPI NAND update path needs -- existed
+# in the derived copy only. A recreate would have dropped the ubivol handler's
+# libubi dependency and produced a build-green, field-broken image.
+#
+# The check that just ran reads the MASTER; this one asserts the derived copy
+# has not drifted from it, so the audit and the build see the same file.
+BRSRC=sysdrv/source/buildroot
+for d in "${DEFCONFIGS[@]}"; do
+	master=sysdrv/tools/board/buildroot/$d
+	shopt -s nullglob
+	derived=("$BRSRC"/buildroot-*/configs/"$d")
+	shopt -u nullglob
+	if [ ${#derived[@]} -eq 0 ]; then
+		ok "$d — no unpacked buildroot tree present; master is authoritative"
+		continue
+	fi
+	for dv in "${derived[@]}"; do
+		if cmp -s "$master" "$dv"; then
+			ok "$d — tracked master and $(dirname "$dv") agree"
+		else
+			bad "$d — the derived copy differs from the tracked master. The build uses the derived copy NOW but buildroot_create restores the master, so this difference is a silent revert waiting to happen. Copy it back: cp $dv $master"
+		fi
+	done
+done
+
 # Every profile must select one of the defconfigs above; a third one would be
 # unexamined by the check that just ran.
 for f in "${CFGS[@]}"; do

@@ -464,12 +464,14 @@ and the rootfs still read-write. The remaining ~6.6 GB of eMMC is unallocated.
 **Pico Max — 256 MB SPI NAND, ubifs** (`BoardConfig-SPI_NAND-Buildroot-RV1106_Luckfox_Pico_Max-IPC-AB.mk`):
 
 ```
-256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),16M(oem),60416K(userdata),80M(rootfs_a),80M(rootfs_b)
+256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),16M(oem),49152K(userdata),80M(rootfs_a),80M(rootfs_b)
 ```
 
 Identical in structure — same partitions, same order, **same indices** — and
-differing only in the sizes of `userdata` (59 M) and the two rootfs slots
-(80 M each, at `0x06000000` and `0x0B000000`). Exactly 256 MiB, no tail.
+differing only in the sizes of `userdata` (48 M) and the two rootfs slots
+(80 M each, at `0x05500000` and `0x0A500000`). 255 MiB total: the last
+1 MiB of the chip stays unallocated because the flasher rejects a table
+that ends at the last byte (bench, 2026-09-02; the gate enforces the tail).
 
 Notes:
 
@@ -508,9 +510,13 @@ Notes:
   occupancy of their respective slots.
 - **Partition indices did not move.** p9/p10 are still `rootfs_a`/`rootfs_b`
   on **both** tables, so `sw-description.in`'s `/dev/mmcblk0p9` and `p10` are
-  unchanged and one sw-description covers both boards. Only offsets and sizes
-  moved — which is what the SocToolKit maps encode, and they were regenerated
-  from the eMMC table.
+  unchanged. The Max gets its own manifest rather than sharing that one
+  (`sw-description-nand.in`, 2026-09-03): its updater writes a UBI **volume
+  by name**, not a block device by index, so the A/B NAND build packs one
+  volume per slot — named `rootfs_a`/`rootfs_b` after their partitions,
+  because SWUpdate's ubivol handler resolves names globally and two volumes
+  both called "rootfs" would leave one slot unaddressable. Only offsets and
+  sizes moved — which is what the per-board SocToolKit maps encode.
 - **Every offset and size is 256 KiB-aligned on both tables**, the erase-block
   size of the 4K-page SPI NAND class the Max uses; a UBI partition that starts
   or ends mid-erase-block will not attach. This is why `env`/`idblock`/`uboot`
@@ -518,8 +524,9 @@ Notes:
   not require it, but the gate checks it there too: keeping the two tables
   structurally identical is what makes one sw-description correct for both.
 - **The Ultra keeps ~6.6 GB unallocated**; that tail is the append-only escape
-  hatch (a partition appended there shifts no index). **The Max has no tail** —
-  the table consumes its chip exactly.
+  hatch (a partition appended there shifts no index). **The Max keeps 1 MiB** —
+  required by the flasher rather than reserved for growth, but it is a tail
+  all the same.
 - **The draft in this section until 2026-08-19 was wrong** and had been for the
   whole implementation: it wrote `uboot_a`/`uboot_b` and `boot_a`, which the
   board profile never carried and no unit was ever flashed with. Nothing was

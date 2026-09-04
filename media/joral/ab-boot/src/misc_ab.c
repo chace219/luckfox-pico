@@ -58,6 +58,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <mtd/mtd-user.h>
+
 #define AB_MAGIC          "\0AB0"
 #define AB_MAGIC_LEN      4
 #define AB_MAJOR_VERSION  1
@@ -200,7 +204,76 @@ static int ab_read(int fd, ab_data_t *d, int *reinit)
 	return 0;
 }
 
-static int ab_write(int fd, const ab_data_t *d)
+/* On the Pico Max, `misc` is a raw MTD partition and <dev> is its char
+ * device (/dev/mtdN): reads work like any file, but NAND cannot rewrite a
+ * page in place — the enclosing erase block must be erased first. So the
+ * MTD write path is read-modify-erase-write over the WHOLE erase block that
+ * holds the record (block 0 of the partition; the record sits at byte 2048,
+ * far inside even the smallest 128 KiB block).
+ *
+ * The erase->write window is a real, milliseconds-wide corruption hazard a
+ * block device does not have: power loss inside it loses the record. That is
+ * accepted rather than engineered around, because ab_read() already treats a
+ * corrupt record as "reinitialise to factory defaults (A active)" — the same
+ * self-healing the SPL applies — so the worst case is one boot into slot A,
+ * not a brick. Probed with MEMGETINFO at open; a block device or a plain
+ * test file fails the ioctl and takes the plain pwrite path. */
+static int mtd_probe(int fd, mtd_info_t *mtd)
+{
+	struct stat st;
+
+	if (fstat(fd, &st) != 0 || !S_ISCHR(st.st_mode))
+		return 0;
+	if (ioctl(fd, MEMGETINFO, mtd) != 0)
+		return 0;
+	if (AB_BYTE_OFFSET + AB_SECTOR_SIZE > mtd->erasesize) {
+		fprintf(stderr, "misc_ab: erase block (%u) smaller than the "
+			"record offset — unsupported flash geometry\n",
+			mtd->erasesize);
+		return -1;
+	}
+	return 1;
+}
+
+static int ab_write_mtd(int fd, const uint8_t *sect, const mtd_info_t *mtd)
+{
+	erase_info_t ei = { .start = 0, .length = mtd->erasesize };
+	uint8_t *block;
+	ssize_t n;
+	int rc = -1;
+
+	block = malloc(mtd->erasesize);
+	if (!block) {
+		fprintf(stderr, "misc_ab: out of memory\n");
+		return -1;
+	}
+	n = pread(fd, block, mtd->erasesize, 0);
+	if (n != (ssize_t)mtd->erasesize) {
+		fprintf(stderr, "misc_ab: mtd read block 0: %s\n",
+			n < 0 ? strerror(errno) : "short read");
+		goto out;
+	}
+	memcpy(block + AB_BYTE_OFFSET, sect, AB_SECTOR_SIZE);
+	if (ioctl(fd, MEMERASE, &ei) != 0) {
+		/* A failed erase usually means block 0 went bad; there is no
+		 * relocation story for the record, so say so loudly. */
+		fprintf(stderr, "misc_ab: MEMERASE block 0: %s\n",
+			strerror(errno));
+		goto out;
+	}
+	n = pwrite(fd, block, mtd->erasesize, 0);
+	if (n != (ssize_t)mtd->erasesize) {
+		fprintf(stderr, "misc_ab: mtd write block 0: %s\n",
+			n < 0 ? strerror(errno) : "short write");
+		goto out;
+	}
+	rc = 0;
+out:
+	free(block);
+	return rc;
+}
+
+static int ab_write(int fd, const ab_data_t *d, const mtd_info_t *mtd)
 {
 	uint8_t sect[AB_SECTOR_SIZE];
 	ab_data_t out;
@@ -210,6 +283,9 @@ static int ab_write(int fd, const ab_data_t *d)
 	memcpy(&out, d, sizeof(out));
 	put_be32(record_crc(&out), (uint8_t *)&out + offsetof(ab_data_t, crc32));
 	memcpy(sect, &out, sizeof(out));
+
+	if (mtd)
+		return ab_write_mtd(fd, sect, mtd);
 
 	n = pwrite(fd, sect, sizeof(sect), AB_BYTE_OFFSET);
 	if (n != (ssize_t)sizeof(sect)) {
@@ -280,7 +356,9 @@ int main(int argc, char **argv)
 {
 	const char *cmd, *dev;
 	ab_data_t d;
-	int fd, reinit, pick, slot = -1, rc = 1;
+	mtd_info_t mtd_info;
+	const mtd_info_t *mtd = NULL;
+	int fd, reinit, pick, slot = -1, rc = 1, probed;
 
 	if (argc < 3) {
 		usage();
@@ -303,9 +381,17 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	probed = mtd_probe(fd, &mtd_info);
+	if (probed < 0) {
+		close(fd);
+		return 1;
+	}
+	if (probed)
+		mtd = &mtd_info;
+
 	if (strcmp(cmd, "init") == 0) {
 		ab_init(&d);
-		rc = ab_write(fd, &d) ? 1 : 0;
+		rc = ab_write(fd, &d, mtd) ? 1 : 0;
 	} else if (ab_read(fd, &d, &reinit) != 0) {
 		rc = 1;
 	} else if (strcmp(cmd, "status") == 0) {
@@ -329,7 +415,7 @@ int main(int argc, char **argv)
 			    d.slots[pick].tries_remaining > 0)
 				d.slots[pick].tries_remaining--;
 			d.last_boot = (uint8_t)pick;
-			if (ab_write(fd, &d) == 0) {
+			if (ab_write(fd, &d, mtd) == 0) {
 				printf("%c\n", pick ? 'b' : 'a');
 				rc = 0;
 			}
@@ -339,7 +425,7 @@ int main(int argc, char **argv)
 		d.slots[slot].successful_boot = 1;
 		if (d.slots[slot].priority == 0)
 			d.slots[slot].priority = AB_MAX_PRIORITY;
-		rc = ab_write(fd, &d) ? 1 : 0;
+		rc = ab_write(fd, &d, mtd) ? 1 : 0;
 	} else if (strcmp(cmd, "mark-active") == 0) {
 		d.slots[slot].priority = AB_MAX_PRIORITY;
 		d.slots[slot].tries_remaining = AB_MAX_TRIES;
@@ -348,12 +434,12 @@ int main(int argc, char **argv)
 		 * bootable — it is the rollback target. */
 		if (d.slots[1 - slot].priority >= AB_MAX_PRIORITY)
 			d.slots[1 - slot].priority = AB_MAX_PRIORITY - 1;
-		rc = ab_write(fd, &d) ? 1 : 0;
+		rc = ab_write(fd, &d, mtd) ? 1 : 0;
 	} else if (strcmp(cmd, "mark-unbootable") == 0) {
 		d.slots[slot].priority = 0;
 		d.slots[slot].tries_remaining = 0;
 		d.slots[slot].successful_boot = 0;
-		rc = ab_write(fd, &d) ? 1 : 0;
+		rc = ab_write(fd, &d, mtd) ? 1 : 0;
 	} else {
 		usage();
 	}

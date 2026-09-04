@@ -16,14 +16,22 @@
 #      mark-successful` once the services are up; until then every boot
 #      spends a try, and 7 failures roll back to the other slot.
 #
-# Partitions are found by PARTNAME from sysfs, never by index: the kernel's
-# cmdline partition parser (CONFIG_CMDLINE_PARTITION) publishes the
-# blkdevparts= names in each partition's uevent, so this script survives
-# layout changes that would break hardcoded /dev/mmcblk0pN.
+# ONE initramfs serves BOTH boards — it is packed into the boot FIT by
+# build_ab_bootimg for whichever profile is lunched, so nothing here may
+# assume the medium. Partitions are found by NAME, never by index:
+#   Ultra (eMMC):    the kernel's cmdline partition parser publishes the
+#                    blkdevparts= names in each partition's sysfs uevent.
+#                    misc is a block device; rootfs slots are ext4.
+#   Max (SPI NAND):  mtdparts= gives each mtd its partition name in
+#                    /sys/class/mtd/mtdN/name. misc is the mtd CHAR device
+#                    (misc_ab knows how to erase-write it); each rootfs slot
+#                    is a UBI volume (attached here if the kernel's
+#                    ubi.mtd= bootarg did not already do it) holding ubifs.
 #
 # Keep this script BUSYBOX-SH ONLY (no bashisms) and keep it small: it is the
 # one component of the update design that is single-copy and cannot be fixed
-# by an update without touching `boot`.
+# by an update without touching `boot`. The NAND path additionally needs the
+# ubiattach applet — mkinitramfs.sh checks the busybox for it.
 
 PATH=/bin:/sbin:/usr/bin:/usr/sbin
 
@@ -33,7 +41,7 @@ mount -t devtmpfs devtmpfs /dev 2>/dev/null
 
 msg() { echo "ab-boot: $*"; }
 
-# Resolve a blkdevparts partition name to its /dev node via sysfs uevents.
+# Resolve a partition name to its /dev node: eMMC uevents first, then MTD.
 find_part() { # find_part <partname> -> echoes /dev/<node> or returns 1
 	for u in /sys/block/mmcblk*/mmcblk*/uevent; do
 		[ -f "$u" ] || continue
@@ -42,7 +50,51 @@ find_part() { # find_part <partname> -> echoes /dev/<node> or returns 1
 			return 0
 		fi
 	done
+	for n in /sys/class/mtd/mtd*/name; do
+		[ -f "$n" ] || continue
+		case "$n" in */mtd*ro/name) continue ;; esac
+		if [ "$(cat "$n")" = "$1" ]; then
+			echo "/dev/$(basename "$(dirname "$n")")"
+			return 0
+		fi
+	done
 	return 1
+}
+
+# Mount a rootfs slot at /mnt, whatever the medium says it is.
+#   eMMC:  the slot device is a block partition holding ext4.
+#   NAND:  the slot device is /dev/mtdN; attach it as a UBI device (reusing
+#          an attachment the kernel already made from ubi.mtd= bootargs) and
+#          mount volume 0 — the ONLY volume the build's ubinize puts there —
+#          by device node, so mounting never depends on the volume's name.
+mount_slot() { # mount_slot <dev> -> 0 mounted at /mnt
+	case "$1" in
+	/dev/mtd*)
+		mtdnum=${1#/dev/mtd}
+		ubinum=
+		for m in /sys/class/ubi/ubi*/mtd_num; do
+			[ -f "$m" ] || continue
+			if [ "$(cat "$m")" = "$mtdnum" ]; then
+				ubinum=$(basename "$(dirname "$m")")
+				ubinum=${ubinum#ubi}
+				break
+			fi
+		done
+		if [ -z "$ubinum" ]; then
+			# -d <mtdnum>: same numbering convention S20linkmount
+			# uses later for oem/userdata, so numbers never clash.
+			ubiattach /dev/ubi_ctrl -m "$mtdnum" -d "$mtdnum" \
+				>/dev/null 2>&1 || return 1
+			ubinum=$mtdnum
+		fi
+		# devtmpfs may create the volume node a beat after the attach.
+		[ -e "/dev/ubi${ubinum}_0" ] || sleep 1
+		mount -o ro -t ubifs "/dev/ubi${ubinum}_0" /mnt
+		;;
+	*)
+		mount -o ro -t ext4 "$1" /mnt
+		;;
+	esac
 }
 
 fatal() {
@@ -51,7 +103,7 @@ fatal() {
 	exec sh
 }
 
-MISC=$(find_part misc) || fatal "no 'misc' partition — wrong blkdevparts?"
+MISC=$(find_part misc) || fatal "no 'misc' partition — wrong blkdevparts/mtdparts?"
 
 tries=0
 while [ "$tries" -lt 2 ]; do
@@ -61,7 +113,7 @@ while [ "$tries" -lt 2 ]; do
 	msg "slot $SLOT -> $DEV"
 	# ro here; the system's own inittab remounts rw. A rootfs that cannot
 	# even mount read-only has nothing to say for itself.
-	if mount -o ro -t ext4 "$DEV" /mnt; then
+	if mount_slot "$DEV"; then
 		if [ -x /mnt/sbin/init ]; then
 			msg "switching root to $DEV"
 			mount --move /proc /mnt/proc 2>/dev/null || umount /proc

@@ -248,6 +248,99 @@ BR2_PACKAGE_HOST_DTC=y
 # build config below; the embedded webserver stays OFF — the product web
 # consoles drive updates through their own authenticated CGIs, and the
 # firewall ships default-deny (media/joral/swupdate-implementation-plan.md).
+# A/B on SPI NAND: SWUpdate's ubivol handler needs libmtd/libubi, which the
+# mtd package installs to staging (MTD_INSTALL_STAGING=YES). Without this the
+# swupdate build silently omits the handler -- its own Config.in says "Select
+# BR2_PACKAGE_MTD if you want to use swupdate with UBI partitions" -- and a
+# .swu aimed at a UBI volume fails at install time, not build time.
+# Only the four tools the boot path actually calls. Annex I #4 is about attack
+# surface, and these manipulate raw flash: ubiformat and ubirmvol can destroy a
+# running system. Enabling the whole mtd suite (13 binaries) as a side effect of
+# an update feature is exactly the kind of unexamined growth the gate exists to
+# catch, so the set is pinned to what S20linkmount uses:
+#   ubiattach  -- attach the MTD partition, every boot
+#   ubiformat  -- recovery fallback when attach fails (S20linkmount:83)
+#   ubimkvol   -- create the volume on a first boot / after format
+#   ubiblock   -- the read-only block node the rootfs is mounted through
+#   ubinfo     -- READ-ONLY: reports device/volume geometry and data_bytes.
+#                 Added 2026-09-04 for A/B field diagnosis on the Max: after a
+#                 .swu install the question "did the standby volume actually
+#                 get written" has no other answer on the unit, and the sysfs
+#                 substitute (/sys/class/ubi/ubiX_Y/{name,data_bytes}) has to
+#                 be assembled by hand across two directory levels. It opens
+#                 the UBI device O_RDONLY and issues no write ioctl, so it is
+#                 not a raw-flash writer and does not carry the risk the rest
+#                 of this trim exists to exclude.
+# SWUpdate itself shells out to NONE of these; it links libubi directly, which
+# is why the ubivol handler needs the LIBRARY but not the binaries.
+#
+# ubiupdatevol is deliberately NOT added, though it is the other tool a bench
+# operator reaches for. It writes a volume and can truncate one (-t), which is
+# exactly the raw-flash-writer class named below; the ubivol handler performs
+# the real update through libubi without it, so on a shipped image it would be
+# attack surface serving no shipped function. Bench rollback testing corrupts a
+# standby slot with ubirmvol, which is already here.
+BR2_PACKAGE_MTD=y
+BR2_PACKAGE_MTD_UBIATTACH=y
+BR2_PACKAGE_MTD_UBIBLOCK=y
+BR2_PACKAGE_MTD_UBIFORMAT=y
+BR2_PACKAGE_MTD_UBIMKVOL=y
+BR2_PACKAGE_MTD_UBINFO=y
+# Everything else in the mtd suite is DISABLED EXPLICITLY. buildroot defaults
+# these to y, so omitting a symbol does NOT turn it off -- the first attempt at
+# this trim did exactly that and shipped all 13 UBI tools plus nandwrite,
+# nanddump, flash_erase and mtd_debug. Raw-flash writers on a shipped image are
+# an Annex I #4 attack-surface regression, so each one is named:
+# BR2_PACKAGE_MTD_DOCFDISK is not set
+# BR2_PACKAGE_MTD_DOC_LOADBIOS is not set
+# BR2_PACKAGE_MTD_FLASHCP is not set
+# BR2_PACKAGE_MTD_FLASH_ERASE is not set
+# BR2_PACKAGE_MTD_FLASH_LOCK is not set
+# BR2_PACKAGE_MTD_FLASH_OTP_DUMP is not set
+# BR2_PACKAGE_MTD_FLASH_OTP_ERASE is not set
+# BR2_PACKAGE_MTD_FLASH_OTP_INFO is not set
+# BR2_PACKAGE_MTD_FLASH_OTP_LOCK is not set
+# BR2_PACKAGE_MTD_FLASH_OTP_WRITE is not set
+# BR2_PACKAGE_MTD_FLASH_READTEST is not set
+# BR2_PACKAGE_MTD_FLASH_SPEED is not set
+# BR2_PACKAGE_MTD_FLASH_STRESS is not set
+# BR2_PACKAGE_MTD_FLASH_TORTURE is not set
+# BR2_PACKAGE_MTD_FLASH_UNLOCK is not set
+# BR2_PACKAGE_MTD_FTL_CHECK is not set
+# BR2_PACKAGE_MTD_FTL_FORMAT is not set
+# BR2_PACKAGE_MTD_INTEGCK is not set
+# BR2_PACKAGE_MTD_JFFS2DUMP is not set
+# BR2_PACKAGE_MTD_JFFS_UTILS is not set
+# BR2_PACKAGE_MTD_LSMTD is not set
+# BR2_PACKAGE_MTD_MKFSJFFS2 is not set
+# BR2_PACKAGE_MTD_MKFSUBIFS is not set
+# BR2_PACKAGE_MTD_MTDINFO is not set
+# BR2_PACKAGE_MTD_MTDPART is not set
+# BR2_PACKAGE_MTD_MTD_DEBUG is not set
+# BR2_PACKAGE_MTD_NANDBITERRS is not set
+# BR2_PACKAGE_MTD_NANDDUMP is not set
+# BR2_PACKAGE_MTD_NANDFLIPBITS is not set
+# BR2_PACKAGE_MTD_NANDPAGETEST is not set
+# BR2_PACKAGE_MTD_NANDSUBPAGETEST is not set
+# BR2_PACKAGE_MTD_NANDTEST is not set
+# BR2_PACKAGE_MTD_NANDWRITE is not set
+# BR2_PACKAGE_MTD_NFTLDUMP is not set
+# BR2_PACKAGE_MTD_NFTL_FORMAT is not set
+# BR2_PACKAGE_MTD_RECV_IMAGE is not set
+# BR2_PACKAGE_MTD_RFDDUMP is not set
+# BR2_PACKAGE_MTD_RFDFORMAT is not set
+# BR2_PACKAGE_MTD_SERVE_IMAGE is not set
+# BR2_PACKAGE_MTD_SUMTOOL is not set
+# BR2_PACKAGE_MTD_TESTS is not set
+# BR2_PACKAGE_MTD_UBICRC32 is not set
+# BR2_PACKAGE_MTD_UBIDETACH is not set
+# BR2_PACKAGE_MTD_UBIFS_UTILS is not set
+# BR2_PACKAGE_MTD_UBIHEALTHD is not set
+# BR2_PACKAGE_MTD_UBINIZE is not set
+# BR2_PACKAGE_MTD_UBIRENAME is not set
+# BR2_PACKAGE_MTD_UBIRMVOL is not set
+# BR2_PACKAGE_MTD_UBIRSVOL is not set
+# BR2_PACKAGE_MTD_UBIUPDATEVOL is not set
 BR2_PACKAGE_SWUPDATE=y
 BR2_PACKAGE_SWUPDATE_CONFIG="package/swupdate/swupdate-joral.config"
 # BR2_PACKAGE_SWUPDATE_WEBSERVER is not set

@@ -4275,6 +4275,24 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
   considered. Only offsets and sizes moved, and both SocToolKit maps were
   **regenerated from the eMMC table** rather than hand-edited.
 
+  **The two shipped tables, verbatim.** Both are frozen; neither may drift
+  without re-opening one-way door #1.
+
+  Ultra (eMMC, ext4, read-write):
+
+      32K(env),512K@32K(idblock),256K(uboot),4M(misc),32M(boot),32M(boot_b),64M(oem),512M(userdata),768M(rootfs_a),768M(rootfs_b)
+
+  Max (SPI NAND, ubifs-zlib, read-write):
+
+      256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),16M(oem),49152K(userdata),80M(rootfs_a),80M(rootfs_b)
+
+  They share partition names, order and indices -- which is what makes one
+  `sw-description` correct for both -- and deliberately NOT geometry. The
+  header differs because the media differ: the RV1106 BootROM mandates
+  `idblock` at 32 KiB on eMMC, while SPI NAND needs every offset on a 256 KiB
+  erase block. Imposing either rule on the other medium is what bricked a
+  bench Ultra on 2026-09-02.
+
   **The gate was extended rather than relaxed.** It now holds **two** frozen
   constants and runs the full structural check against each — profile match,
   `misc` unsuffixed, equal slots, single-copy `oem`/`userdata`, `boot_b`

@@ -59,7 +59,7 @@ cd "$(dirname "$0")/../.." || exit 2
 # Only the sizes differ. The per-board checks below enforce the structure on
 # each table rather than trusting that they were edited together.
 FROZEN_EMMC="32K(env),512K@32K(idblock),256K(uboot),4M(misc),32M(boot),32M(boot_b),64M(oem),512M(userdata),768M(rootfs_a),768M(rootfs_b)"
-FROZEN_NAND="256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),16M(oem),60416K(userdata),80M(rootfs_a),80M(rootfs_b)"
+FROZEN_NAND="256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),16M(oem),49152K(userdata),80M(rootfs_a),80M(rootfs_b)"
 
 # A "256 MB" NAND is a true 256 MiB of usable pages (unlike a "8 GB" eMMC,
 # whose usable capacity needs a conservative floor), so the NAND table has an
@@ -93,6 +93,9 @@ NAND_TOTAL=$((256 * 1024 * 1024))
 # structurally identical is the property that makes one sw-description and one
 # set of flashing-map semantics correct for both boards.
 NAND_ERASE_BLOCK=$((256 * 1024))
+# Minimum unallocated tail. Luckfox's stock Pro_Max profile leaves 1 MiB on
+# this same chip; a table ending at the last byte is refused by the flasher.
+NAND_TAIL_MIN=$((1024 * 1024))
 
 # Nominal 8 GB eMMC on the Pico Ultra. The eMMC table leaves ~6.6 GB
 # unallocated; that tail is the post-freeze escape hatch (a partition APPENDED
@@ -326,14 +329,17 @@ for BOARD in emmc nand; do
 	fi
 
 	if [ "$BOARD" = nand ]; then
-		# Exact, not a floor: the NAND table is sized to consume the chip.
-		if [ "$TOTAL" -eq "$NAND_TOTAL" ]; then
-			ok "table totals $(human "$TOTAL") — exactly the Max's 256 MB SPI NAND, no tail"
-		elif [ "$TOTAL" -lt "$NAND_TOTAL" ]; then
-			ok "table totals $(human "$TOTAL") — fits the Max's $(human "$NAND_TOTAL") SPI NAND"
-			note "$(human $((NAND_TOTAL - TOTAL))) unallocated. The re-cut sized this table to"
-			note "consume the chip exactly; a tail means a partition shrank and"
-			note "nothing claimed the space."
+		# The chip's LAST erase blocks must stay unallocated. A table that
+		# ends at exactly 0x10000000 is arithmetically valid and still fails
+		# to flash: rkdevtool rejects the final partition with "Partition
+		# ending is larger than flash size" (bench, 2026-09-02). Luckfox's own
+		# Pro_Max profile -- same chip, known good -- totals 255 MiB and leaves
+		# 1 MiB. So the tail is REQUIRED, not slack to be reclaimed, and this
+		# check was previously backwards: it rewarded consuming the whole chip.
+		if [ "$TOTAL" -gt $((NAND_TOTAL - NAND_TAIL_MIN)) ]; then
+			bad "table totals $(human "$TOTAL"), leaving less than the required $(human "$NAND_TAIL_MIN") tail on a $(human "$NAND_TOTAL") chip — the flasher will reject the last partition"
+		elif [ "$TOTAL" -le "$NAND_TOTAL" ]; then
+			ok "table totals $(human "$TOTAL") — fits the Max's $(human "$NAND_TOTAL") SPI NAND with a $(human $((NAND_TOTAL - TOTAL))) tail"
 		else
 			bad "table totals $(human "$TOTAL"), past the Max's $(human "$NAND_TOTAL") SPI NAND — will not fit that board"
 		fi
@@ -351,15 +357,53 @@ for BOARD in emmc nand; do
 done
 
 # The remaining sections check the artifacts of a BUILD, and a build is of one
-# board at a time. They run against the eMMC table, which is the profile this
-# tree lunches by default; the SocToolKit maps and env.img are eMMC artifacts.
-FROZEN=$FROZEN_EMMC
+# board at a time -- so they must follow WHICH board was built, not assume the
+# eMMC one. Until 2026-09-02 they hard-coded $FROZEN_EMMC, which made a
+# perfectly good Max build report two failures (its env.img carries the NAND
+# table and is 256 KiB, both correct for that board). A gate that fails on
+# correct artifacts gets ignored, which is the same end state as no gate.
+#
+# The selected board is .BoardConfig.mk, a symlink build.sh maintains. Fall
+# back to eMMC when it is absent (a bare checkout with no lunch yet).
+BUILT_BOARD=emmc
+BUILT_CFG=$(readlink -f .BoardConfig.mk 2>/dev/null || true)
+if [ -n "$BUILT_CFG" ] && [ -f "$BUILT_CFG" ]; then
+	if grep -q '^export RK_BOOT_MEDIUM=spi_nand' "$BUILT_CFG"; then
+		BUILT_BOARD=nand
+	fi
+fi
+
+if [ "$BUILT_BOARD" = nand ]; then
+	FROZEN=$FROZEN_NAND
+	# The kernel names the NAND partition table differently, and by-name links
+	# on a UBI rootfs are not /dev/mmcblk0pN block nodes.
+	ENV_KEY="mtdparts=spi-nand0:"
+	ENV_SLOT_NAME=nand
+	BUILT_LABEL="Max / SPI NAND"
+else
+	FROZEN=$FROZEN_EMMC
+	ENV_KEY="blkdevparts=mmcblk0:"
+	ENV_SLOT_NAME=emmc
+	BUILT_LABEL="Ultra / eMMC"
+fi
 parse_table "$FROZEN"
+note "build artifacts checked against the SELECTED board: $BUILT_LABEL"
 echo
 
 # ── 3. SocToolKit flashing maps — hand-maintained byte offsets ──────────────
 # The factory station writes by ABSOLUTE OFFSET. A stale entry here does not
 # fail a build; it writes an image over the wrong partition on a real unit.
+# These maps carry ABSOLUTE BYTE OFFSETS, which is an eMMC notion: the station
+# seeks to a byte and writes. SPI NAND is written by partition NAME through
+# MTD, and ipc.json has no medium field and no second table -- one flat list of
+# offsets, so it can only ever describe one board. It describes the Ultra.
+# Checking it against whichever board happens to be lunched produced ten
+# failures on a correct Max build, so it is checked only when the eMMC profile
+# is the selected one.
+if [ "$BUILT_BOARD" != emmc ]; then
+	skip "SocToolKit flashing maps — eMMC-only artifacts (absolute byte offsets); selected board is $BUILT_LABEL"
+	IPC_JSONS=""
+fi
 for J in $IPC_JSONS; do
 	if [ ! -f "$J" ]; then
 		bad "$J missing — the factory flashing map"
@@ -411,12 +455,22 @@ fi
 # plan specified uboot_a/uboot_b and boot_a — four partitions no unit has ever
 # carried. Nothing was built from it, which is precisely why nothing caught it.
 for PLAN in $PLANS; do
+	# BOTH tables, not just the lunched one: a document records what we ship,
+	# and we ship two boards. Checking only the selected board would let the
+	# other table rot silently in the docs between builds.
 	if [ ! -f "$PLAN" ]; then
 		skip "$PLAN not present"
-	elif grep -qF "$FROZEN" "$PLAN"; then
-		ok "$PLAN quotes the frozen table verbatim"
 	else
-		bad "$PLAN does not quote the frozen table — the document describes a layout we do not ship"
+		pfail=0
+		grep -qF "$FROZEN_EMMC" "$PLAN" || {
+			bad "$PLAN does not quote the frozen eMMC table — the document describes a layout we do not ship"
+			pfail=1
+		}
+		grep -qF "$FROZEN_NAND" "$PLAN" || {
+			bad "$PLAN does not quote the frozen SPI NAND table — the document describes a layout we do not ship"
+			pfail=1
+		}
+		[ $pfail -eq 0 ] && ok "$PLAN quotes both frozen tables verbatim"
 	fi
 done
 
@@ -432,12 +486,12 @@ done
 # blkdevparts, and the S20linkmount inside rootfs.img holds the by-name links
 # the unit will really use. Neither is touched by a build.sh startup.
 if [ -f "$IMAGEDIR/env.img" ]; then
-	want="blkdevparts=mmcblk0:$FROZEN"
+	want="${ENV_KEY}${FROZEN}"
 	# env.img is a NUL-separated key=value blob, so split on NUL before
 	# matching: a `[^ ]*` pattern runs straight through the terminator and
 	# swallows the next variable, which made this compare unconditionally
 	# unequal — a check that always fails is as useless as one that never does.
-	got=$(tr '\0' '\n' < "$IMAGEDIR/env.img" | grep -ao 'blkdevparts=[^ ]*' | head -1)
+	got=$(tr '\0' '\n' < "$IMAGEDIR/env.img" | grep -aoE '(blkdevparts|mtdparts)=[^ ]*' | head -1)
 	if [ "$got" = "$want" ]; then
 		ok "packed env.img carries the frozen table"
 	else
@@ -470,7 +524,24 @@ else
 	[ -n "$reader" ] && lm=$(rootfs_cat_file "$IMAGEDIR/rootfs.img" /etc/init.d/S20linkmount)
 
 	if [ -z "$reader" ]; then
-		skip "S20linkmount inside rootfs.img — no reader for this image format (need unsquashfs or debugfs)"
+		if [ "$BUILT_BOARD" = nand ]; then
+			# KNOWN GAP, not a passing check. The Max's rootfs.img is a UBI
+			# volume; reading a file out of it needs a UBI/UBIFS extractor no
+			# build host here has (ubireader is not installed, and the SDK
+			# ships only mkfs/ubinize plus an inode-ownership scanner that
+			# cannot resolve paths or contents). So on NAND the by-name links
+			# the unit will really use are NOT verified by this gate.
+			#
+			# Called out rather than left as a bare skip because a silent skip
+			# on an absence-style check is the failure mode this gate already
+			# hit once with debugfs-on-squashfs: it reads as green.
+			skip "S20linkmount inside rootfs.img — NOT VERIFIED on SPI NAND: no UBI reader on this host"
+			note "the by-name symlinks inside the Max's rootfs are unchecked."
+			note "Verify on the unit after flashing: ls -l /dev/block/by-name/"
+			note "and confirm rootfs_a is p9 and rootfs_b is p10."
+		else
+			skip "S20linkmount inside rootfs.img — no reader for this image format (need unsquashfs or debugfs)"
+		fi
 	elif [ -z "$lm" ]; then
 		skip "S20linkmount inside rootfs.img — could not read it with $reader"
 	else

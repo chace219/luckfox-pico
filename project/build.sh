@@ -1006,6 +1006,18 @@ function build_ab_bootimg() {
 		msg_error "failed to build the A/B boot FIT"
 		return 1
 	}
+	# The FIT must fit the SMALLEST boot slot we ship — 8 MiB on the Max's
+	# NAND against 32 MiB on the Ultra — and an oversized image is only
+	# discovered at flash (or worse, truncate-at-flash) time otherwise.
+	local boot_part_bytes fit_bytes
+	boot_part_bytes=$(get_partition_size boot)
+	fit_bytes=$(stat -c %s "$KOUT/boot-ab.img")
+	if [ -n "$boot_part_bytes" ] && [ "$boot_part_bytes" -gt 0 ] && \
+	   [ "$fit_bytes" -gt "$boot_part_bytes" ]; then
+		msg_error "boot-ab.img is $fit_bytes bytes but the boot partition holds $boot_part_bytes"
+		msg_error "shrink the kernel/initramfs — a truncated FIT does not boot"
+		return 1
+	fi
 	cp -f "$KOUT/boot-ab.img" "$RK_PROJECT_OUTPUT_IMAGE/boot.img"
 	cp -f "$KOUT/boot-ab.img" "$ABDIR/build/boot-ab.img"
 	msg_info "boot.img: A/B slot-selector FIT (kernel+fdt+resource+initramfs)"
@@ -1058,8 +1070,49 @@ function build_swu() {
 		SIGFILE="${2:?--sig needs a signature file}"
 	fi
 
+	# The lunched medium decides the manifest AND the payload format:
+	#
+	#   eMMC (Ultra)  raw handler, payload = rootfs.img (the ext4 image,
+	#                 written to a block partition byte-for-byte).
+	#   NAND (Max)    ubivol handler, payload = the raw UBIFS LEB stream
+	#                 (ubiupdatevol semantics — written INTO the slot's
+	#                 existing UBI volume, never over the raw partition).
+	#
+	# The NAND payload is recovered out of the flashable rootfs_a.img with
+	# scripts/compliance/ubifs-read.py rather than taken from the build's
+	# temporaries (mkfs_ubi.sh deletes those): unwrapping the ubinized image
+	# reproduces the mkfs.ubifs output byte-for-byte, so the .swu carries
+	# exactly what the factory flashes, and it inherits the flash geometry
+	# (RK_NAND_BLOCK_SIZE/RK_NAND_PAGE_SIZE defaults) the image was built
+	# for. rootfs_a.img vs rootfs_b.img is immaterial here — the streams
+	# are identical; only the volume NAMES differ, and the manifest picks
+	# the target volume at install time.
+	local SWU_MEDIUM=emmc
+	local SWDESC_IN="$ABDIR/swupdate/sw-description.in"
+	case "$RK_BOOT_MEDIUM" in
+	spi_nand | slc_nand)
+		SWU_MEDIUM=nand
+		SWDESC_IN="$ABDIR/swupdate/sw-description-nand.in"
+		ROOTFS_IMG="$RK_PROJECT_OUTPUT_IMAGE/rootfs_a.img"
+		;;
+	esac
 	[ -f "$ROOTFS_IMG" ] || { msg_error "no $ROOTFS_IMG — run ./build.sh firmware first"; exit 1; }
-	[ -f "$ABDIR/swupdate/sw-description.in" ] || { msg_error "missing $ABDIR/swupdate/sw-description.in"; exit 1; }
+	[ -f "$SWDESC_IN" ] || { msg_error "missing $SWDESC_IN"; exit 1; }
+
+	# Stage the payload under the name the manifest declares. A hardlink on
+	# eMMC (same bytes, no copy); the extracted UBIFS stream on NAND.
+	local PACKDIR="$OUTDIR/.swu-pack"
+	local PAYLOAD="$PACKDIR/rootfs.img"
+	rm -rf "$PACKDIR"
+	mkdir -p "$PACKDIR"
+	if [ "$SWU_MEDIUM" = nand ]; then
+		"$SDK_ROOT_DIR/scripts/compliance/ubifs-read.py" unwrap "$ROOTFS_IMG" "$PAYLOAD" || {
+			msg_error "could not extract the UBIFS stream from $ROOTFS_IMG"
+			exit 1
+		}
+	else
+		ln -f "$ROOTFS_IMG" "$PAYLOAD" 2>/dev/null || cp -f "$ROOTFS_IMG" "$PAYLOAD"
+	fi
 
 	# Release identity and its ordering rules — the same file the device's
 	# console gates downgrades with, so the build and the unit can never
@@ -1078,14 +1131,21 @@ function build_swu() {
 	# debugfs reads the file out of the packed ext4 without mounting it or
 	# being root.
 	local FW_VERSION="" FW_BUILD FW_SHA
-	command -v debugfs >/dev/null 2>&1 || {
-		msg_error "debugfs (e2fsprogs) is required to read the release identity out of"
-		msg_error "$ROOTFS_IMG. Install e2fsprogs; do NOT substitute the staged tree —"
-		msg_error "a version not read from the payload can disagree with it."
-		exit 1
-	}
-	FW_VERSION=$(debugfs -R "cat /etc/sw-versions" "$ROOTFS_IMG" 2>/dev/null |
-		awk '$1 == "rootfs" { print $2; exit }') || FW_VERSION=""
+	if [ "$SWU_MEDIUM" = nand ]; then
+		# Same doctrine, different reader: ubifs-read.py parses the UBIFS
+		# nodes of the payload itself — the NAND counterpart of debugfs.
+		FW_VERSION=$("$SDK_ROOT_DIR/scripts/compliance/ubifs-read.py" cat "$PAYLOAD" /etc/sw-versions 2>/dev/null |
+			awk '$1 == "rootfs" { print $2; exit }') || FW_VERSION=""
+	else
+		command -v debugfs >/dev/null 2>&1 || {
+			msg_error "debugfs (e2fsprogs) is required to read the release identity out of"
+			msg_error "$ROOTFS_IMG. Install e2fsprogs; do NOT substitute the staged tree —"
+			msg_error "a version not read from the payload can disagree with it."
+			exit 1
+		}
+		FW_VERSION=$(debugfs -R "cat /etc/sw-versions" "$ROOTFS_IMG" 2>/dev/null |
+			awk '$1 == "rootfs" { print $2; exit }') || FW_VERSION=""
+	fi
 	if [ -z "$FW_VERSION" ]; then
 		msg_error "the packed rootfs carries no release identity (/etc/sw-versions)"
 		msg_error "rebuild it so ab-boot stamps media/joral/RELEASE_VERSION into the image:"
@@ -1117,13 +1177,15 @@ function build_swu() {
 	# of it: the identity answers "is this newer than what I am running", the
 	# git description answers "exactly which tree built it" for a support case.
 	FW_BUILD=$(git -C "$SDK_ROOT_DIR" describe --always --dirty 2>/dev/null || echo unknown)
-	FW_SHA=$(sha256sum "$ROOTFS_IMG" | cut -d' ' -f1)
+	# Hash the PAYLOAD as packed — on eMMC that is rootfs.img via hardlink,
+	# on NAND the extracted UBIFS stream, i.e. the bytes the unit verifies.
+	FW_SHA=$(sha256sum "$PAYLOAD" | cut -d' ' -f1)
 
 	# @BUILD@ uses | as the delimiter: a git description is the one substitution
 	# here not constrained to [0-9a-f.], so a tag containing a slash would
 	# otherwise break the expression rather than the build.
 	sed -e "s/@VERSION@/$FW_VERSION/" -e "s|@BUILD@|$FW_BUILD|" -e "s/@SHA256@/$FW_SHA/" \
-		"$ABDIR/swupdate/sw-description.in" > "$SWDESC"
+		"$SWDESC_IN" > "$SWDESC"
 
 	if [ -n "$SIGFILE" ]; then
 		cp "$SIGFILE" "$SWDESC.sig"
@@ -1148,9 +1210,15 @@ function build_swu() {
 	sh "$SIGN" verify "$SWDESC" "$SWDESC.sig" "$TRUST" || {
 		msg_error "signature does not verify against the image trust store ($TRUST)"; exit 1; }
 
-	# Pack. SWUpdate requires sw-description as the FIRST cpio member.
+	# Pack. SWUpdate requires sw-description as the FIRST cpio member. The
+	# archive is built from the staging dir so the rootfs.img member is the
+	# PAYLOAD staged above, not whatever output/image/rootfs.img is on this
+	# medium (on NAND those are different things: flashable UBI container
+	# vs. installable UBIFS stream).
+	ln -f "$SWDESC" "$PACKDIR/sw-description"
+	ln -f "$SWDESC.sig" "$PACKDIR/sw-description.sig"
 	local SWU="$OUTDIR/joral-platform-$FW_VERSION.swu"
-	( cd "$OUTDIR" && for f in sw-description sw-description.sig rootfs.img; do
+	( cd "$PACKDIR" && for f in sw-description sw-description.sig rootfs.img; do
 		echo "$f"; done | cpio -o -H crc --quiet > "$SWU" )
 
 	msg_info ".swu: $SWU"
@@ -2713,7 +2781,29 @@ function build_mkimg() {
 		fi
 		;;
 	ubifs)
-		$RK_PROJECT_TOOLS_MKFS_UBIFS $src $(dirname $dst) $part_size $part_name $fs_type $RK_UBIFS_COMP
+		# A/B on SPI NAND: the SLOT VOLUMES MUST CARRY DISTINCT NAMES.
+		# SWUpdate's ubivol handler addresses a volume by NAME across every
+		# attached UBI device (sw-description-nand.in: device = "rootfs_a"),
+		# so two slots both holding a volume called "rootfs" — what a single
+		# pack of this table would produce — are UNADDRESSABLE: the handler
+		# finds whichever attaches first and the other slot can never be
+		# written. So pack the same rootfs tree once per slot, with the
+		# volume named after the partition it is flashed to. mkfs_ubi.sh
+		# takes the volume name as its part-name argument; sizes are equal
+		# by the frozen-layout gate (equal slots).
+		case "$RK_PARTITION_CMD_IN_ENV" in
+		*rootfs_a*)
+			if [ "$part_name" = "$GLOBAL_ROOT_FILESYSTEM_NAME" ]; then
+				$RK_PROJECT_TOOLS_MKFS_UBIFS $src $(dirname $dst) $part_size rootfs_a $fs_type $RK_UBIFS_COMP
+				$RK_PROJECT_TOOLS_MKFS_UBIFS $src $(dirname $dst) $part_size rootfs_b $fs_type $RK_UBIFS_COMP
+			else
+				$RK_PROJECT_TOOLS_MKFS_UBIFS $src $(dirname $dst) $part_size $part_name $fs_type $RK_UBIFS_COMP
+			fi
+			;;
+		*)
+			$RK_PROJECT_TOOLS_MKFS_UBIFS $src $(dirname $dst) $part_size $part_name $fs_type $RK_UBIFS_COMP
+			;;
+		esac
 		;;
 	romfs)
 		if [ $part_name == "boot" ]; then
@@ -2992,8 +3082,24 @@ function build_firmware() {
 
 	mkdir -p ${RK_PROJECT_OUTPUT_IMAGE}
 
-	if [ "$RK_ENABLE_RECOVERY" = "y" -a -f $PROJECT_TOP_DIR/scripts/${RK_MISC:=recovery-misc.img} ]; then
+	# misc.img: copied whenever RK_MISC names a real file, NOT only when
+	# RK_ENABLE_RECOVERY=y. On an A/B board 'misc' is where the SPL keeps the
+	# slot metadata (AvbABData at byte 2048, see common/spl/spl_ab.c) and has
+	# nothing to do with recovery -- gating the copy on recovery meant neither
+	# Joral board ever got a misc.img, so the partition was flashed as erased
+	# flash and spl_ab.c CRC-failed on every boot, silently falling back to
+	# its default path. Found 2026-09-02 when SocToolKit reported misc.img
+	# absent. RK_MISC also pointed at wipe_all-misc.img, which does not exist
+	# anywhere in this tree; scripts/ab-misc.img is generated by
+	# scripts/compliance/make-misc-img.py.
+	if [ -f "$PROJECT_TOP_DIR/scripts/${RK_MISC:=recovery-misc.img}" ]; then
 		cp -fv $PROJECT_TOP_DIR/scripts/$RK_MISC ${RK_PROJECT_OUTPUT_IMAGE}/misc.img
+	elif [ -n "$RK_MISC" ]; then
+		msg_error "RK_MISC=$RK_MISC not found in $PROJECT_TOP_DIR/scripts/"
+		msg_error "'misc' holds the A/B slot metadata; flashing without it leaves"
+		msg_error "erased flash there and the SPL cannot choose a slot."
+		finish_build
+		exit 1
 	fi
 
 	__PACKAGE_ROOTFS
@@ -3055,8 +3161,12 @@ function build_firmware() {
 		if [ "${RK_ENABLE_FASTBOOT}" = "y" ]; then
 			files="${RK_PROJECT_OUTPUT_IMAGE}/userdata.img"
 		else
+			# rootfs_a/rootfs_b: the A/B NAND pack (distinct volume
+			# names per slot). Plain rootfs.img: every other profile.
 			files=("${RK_PROJECT_OUTPUT_IMAGE}/oem.img"
 				"${RK_PROJECT_OUTPUT_IMAGE}/rootfs.img"
+				"${RK_PROJECT_OUTPUT_IMAGE}/rootfs_a.img"
+				"${RK_PROJECT_OUTPUT_IMAGE}/rootfs_b.img"
 				"${RK_PROJECT_OUTPUT_IMAGE}/userdata.img")
 		fi
 
@@ -3069,6 +3179,14 @@ function build_firmware() {
 			fi
 		done
 		find "${RK_PROJECT_OUTPUT_IMAGE}" -type f -name "*.ubi" -exec rm {} +
+		# Tools that expect a rootfs.img (the layout gate's occupancy
+		# check, mk-update_pack) still find one on an A/B NAND build: a
+		# hardlink, so no space is spent and no symlink dangles after the
+		# .ubi cleanup above.
+		if [ -e "${RK_PROJECT_OUTPUT_IMAGE}/rootfs_a.img" ] && \
+		   [ ! -e "${RK_PROJECT_OUTPUT_IMAGE}/rootfs.img" ]; then
+			ln -f "${RK_PROJECT_OUTPUT_IMAGE}/rootfs_a.img" "${RK_PROJECT_OUTPUT_IMAGE}/rootfs.img"
+		fi
 	fi
 
 	# sdcard package
