@@ -40,6 +40,15 @@ find_part() {
 			return 0
 		fi
 	done
+	# SPI NAND (Pico Max): partitions are mtd devices named by mtdparts=.
+	for n in "$R"/sys/class/mtd/mtd*/name; do
+		[ -f "$n" ] || continue
+		case "$n" in */mtd*ro/name) continue ;; esac
+		if [ "$(cat "$n")" = "$1" ]; then
+			echo "$R/dev/$(basename "$(dirname "$n")")"
+			return 0
+		fi
+	done
 	return 1
 }
 inactive_slot() {
@@ -47,7 +56,21 @@ inactive_slot() {
 	cur=$(misc_ab status "$misc" 2>/dev/null | sed -n 's/^last_boot=//p')
 	case "$cur" in a) echo b ;; b) echo a ;; *) return 1 ;; esac
 }
-SEL=$(inactive_slot) || { echo no_slot; exit 3; }
+# Drain the announced body before exiting on an error the caller could not
+# know about. The CGI has ALREADY told httpd to expect this request to consume
+# CONTENT_LENGTH bytes, and the browser is streaming them; exiting here without
+# reading leaves the client writing into a pipe whose reader is gone, so the
+# upload dies as a RESET and the console can only report "network error" --
+# never the actual reason. Discarding the body costs one transfer and lets the
+# real message (no_slot, and any check added later) reach the operator.
+# Bench-confirmed 2026-09-04 on a Pico Max: swu-stage's find_part had no MTD
+# branch, so every upload exited no_slot here and every upload showed as a
+# network error in the browser.
+drain_body() {
+	[ "$len" -gt 0 ] && dd of=/dev/null bs=64k 2>/dev/null
+}
+
+SEL=$(inactive_slot) || { drain_body; echo no_slot; exit 3; }
 
 rm -f "$STAGED"
 umask 022
