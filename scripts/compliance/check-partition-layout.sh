@@ -59,7 +59,7 @@ cd "$(dirname "$0")/../.." || exit 2
 # Only the sizes differ. The per-board checks below enforce the structure on
 # each table rather than trusting that they were edited together.
 FROZEN_EMMC="32K(env),512K@32K(idblock),256K(uboot),4M(misc),32M(boot),32M(boot_b),64M(oem),512M(userdata),768M(rootfs_a),768M(rootfs_b)"
-FROZEN_NAND="256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),16M(oem),49152K(userdata),80M(rootfs_a),80M(rootfs_b)"
+FROZEN_NAND="256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),8M(oem),82M(userdata),72M(rootfs_a),72M(rootfs_b)"
 
 # A "256 MB" NAND is a true 256 MiB of usable pages (unlike a "8 GB" eMMC,
 # whose usable capacity needs a conservative floor), so the NAND table has an

@@ -77,16 +77,20 @@ export RK_UBOOT_DEFCONFIG_FRAGMENT=rk-sfc.config
 #
 # What matters on THIS board specifically:
 #
-#   - The table consumes the Max's 256 MB SPI NAND EXACTLY, with no tail. The
-#     Ultra leaves ~6.6 GB of its eMMC unallocated as an append-only escape
-#     hatch; that hatch DOES NOT EXIST here. On the Max the chip is full.
+#   - The table totals 255 MiB and leaves the chip's LAST 1 MiB unallocated
+#     ON PURPOSE. A table ending at exactly 0x10000000 is arithmetically
+#     valid and still fails to flash: rkdevtool rejects the final partition
+#     (bench, 2026-09-02), and Luckfox's own Pro_Max profile leaves the same
+#     1 MiB. The gate requires it. The Ultra leaves ~6.6 GB of its eMMC
+#     unallocated as an append-only escape hatch; that hatch DOES NOT EXIST
+#     here — the 1 MiB is the flasher's requirement, not spare room.
 #
 #     *** VERIFY THE FITTED PART BEFORE THE FIRST FLASH. *** 256 MB is an
 #     assumption, and this SDK shows it is not a safe one across the range:
 #     the RV1103 SPI NAND profiles (Pico Mini/Plus/WebBee) are built for a
 #     128 MB part, and only the Pro Max profile assumes 256 MB. A revision or
 #     a second-source part could be half of what this table needs, and the
-#     failure is total rather than gradual — 2x80M slots alone do not fit a
+#     failure is total rather than gradual — 2x72M slots alone do not fit a
 #     128 MB chip, so rootfs_b would have no flash behind it. On a unit:
 #         dmesg | grep -i 'spi-nand\|mtd'   -> the chip and its size
 #         cat /proc/mtd                     -> the partitions actually created
@@ -100,17 +104,58 @@ export RK_UBOOT_DEFCONFIG_FRAGMENT=rk-sfc.config
 #     the Ultra used before the re-cut — those three were what made every
 #     later offset unaligned. The gate checks the alignment of both profiles.
 #
-#   - 80M rootfs slots hold a 48M read-write ubifs-zlib image (measured
-#     2026-09-01, build 2026.08.17, both products and python3 included).
-#     The number that matters is occupancy AFTER UBI's own overhead, which the
-#     image size does not show: an 80 MiB volume of 256 KiB PEBs reserves 2
-#     PEBs for the layout volume, ~2% for bad blocks and 1 for wear
-#     levelling, and each PEB carries a 248 KiB LEB — so ~75 M is reachable
-#     and the image sits at ~63% of it.
+#   - 72M rootfs slots (re-cut 2026-09-04 from 80M, to fund userdata — see
+#     below) hold the 55M packed ubifs-zlib UBI image (build 2026.08.17,
+#     both products and python3 included): 76% of the partition. The gate
+#     fails at 80%, so the slots have ~2.6M of image growth left before a
+#     re-cut is forced; that is the price of the userdata below. The number
+#     that matters at runtime is occupancy AFTER UBI's own overhead, which
+#     the image size does not show. The images are built at the SDK's
+#     default NAND geometry (build.sh: RK_NAND_BLOCK_SIZE 0x20000, PAGE
+#     2048 — this profile sets neither), i.e. 128 KiB PEBs carrying 124 KiB
+#     LEBs; a 72 MiB volume is 576 PEBs less 2 for the layout volume, ~2%
+#     for bad blocks and 1 for wear levelling — ~561 LEBs, ~67 M reachable.
+#     (The 256 KiB figure elsewhere in this file is the ALIGNMENT the gate
+#     enforces, which holds for either block size.)
 #
-#   - userdata is 59M here against the Ultra's 128M, for the obvious reason:
-#     this chip has 256 MB total. Measured use is 18M, so it is still >3x.
-export RK_PARTITION_CMD_IN_ENV="256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),16M(oem),49152K(userdata),80M(rootfs_a),80M(rootfs_b)"
+#     What a .swu bakes in, exactly (read out of the payloads' superblocks,
+#     2026-09-04): mkfs.ubifs records two counts — leb_cnt, the LEBs the
+#     image occupies (438 for build 2026.08.17, on BOTH the 80M and the 72M
+#     cut), and max_leb_cnt, the growth ceiling (660 for 80M, 594 for 72M).
+#     ubifs refuses to mount when leb_cnt exceeds the volume (fs/ubifs/sb.c,
+#     "bad LEB count"), and otherwise grows the filesystem at mount to
+#     min(max_leb_cnt, volume) (sb.c: c->leb_cnt = min_t(int,
+#     c->max_leb_cnt, c->vi.size)). So a package is dead on a smaller slot
+#     only when the IMAGE has outgrown it — not merely because it was built
+#     against a bigger table — and an 80M-built .swu still mounts here. The
+#     rule that follows: a re-cut is safe while every shippable image's
+#     leb_cnt fits the new slot's LEBs. Check the superblock, not the file
+#     size.
+#
+#   - oem is 8M (re-cut from 16M). The oem gate strips its payload — oem.img
+#     is 1.9M of empty ubifs — and ubifs needs 17 LEBs at minimum
+#     (UBIFS_MIN_LEB_CNT, fs/ubifs/ubifs-media.h). 8M clears that at either
+#     geometry the build can produce (64 PEBs at 128 KiB, 32 at 256 KiB);
+#     4M would be 32 or 16, and only the 128 KiB case survives — so 8M, to
+#     stay independent of a geometry this profile does not pin.
+#
+#   - userdata is 82M here against the Ultra's 512M. It has to hold a STAGED
+#     .swu: the console uploads to /userdata/update.swu, and swupdate needs a
+#     seekable file (it lseeks its input, core/cpio_utils.c), so the package
+#     cannot stream through a FIFO. The 2026.08.17 package is 53M, and the
+#     CGI insists on len + 4M free before it accepts one — 57M — which the
+#     previous 48M partition could never satisfy: every browser upload on a
+#     Max failed on space (bench, 2026-09-04). 82M is the most the chip
+#     allows with the slots at 72M and oem at 8M, and it is still tight:
+#     ~77M reachable after UBI overhead, less what ubifs keeps for itself,
+#     less the products' state dirs and audit logs (neither rotated), less
+#     the PREVIOUS package — swu-install.sh leaves it in place, and the
+#     CGI's free-space check runs BEFORE swu-stage removes it, so a second
+#     upload is judged against space the first one still holds. Nothing here
+#     has been measured on a Max at steady state; the "18M measured use" an
+#     earlier revision quoted arrived with the 2026-09-02 re-cut and has no
+#     df or du behind it anywhere in the tree.
+export RK_PARTITION_CMD_IN_ENV="256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),8M(oem),82M(userdata),72M(rootfs_a),72M(rootfs_b)"
 
 # config partition's filesystem type (squashfs is readonly)
 # emmc:    squashfs/ext4

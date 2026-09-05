@@ -1215,8 +1215,25 @@ function build_swu() {
 	# PAYLOAD staged above, not whatever output/image/rootfs.img is on this
 	# medium (on NAND those are different things: flashable UBI container
 	# vs. installable UBIFS stream).
-	ln -f "$SWDESC" "$PACKDIR/sw-description"
-	ln -f "$SWDESC.sig" "$PACKDIR/sw-description.sig"
+	#
+	# cp, NOT ln -f, and that is the whole of a bug that shipped: GNU cpio
+	# DEFERS HARDLINKED FILES TO THE END of the archive. It collects each set
+	# of names sharing an inode and emits the set after everything else, so
+	# hardlinking sw-description into the staging dir moved it from first to
+	# LAST no matter what order the file list gives -- and swupdate then
+	# refuses the package with
+	#     "description file name not the first of the list: rootfs.img
+	#      instead of sw-description"
+	# closing the IPC socket, which the caller sees only as
+	# "swupdate_image_write failed: Connection reset by peer" (bench,
+	# 2026-09-04, Pico Max; every .swu this target ever produced was
+	# affected, on BOTH boards).
+	#
+	# These two files are a few KB, so copying costs nothing. rootfs.img is
+	# still placed by hardlink above -- it is the ONLY name for its inode in
+	# this directory, so cpio has no link set to defer.
+	cp -f "$SWDESC" "$PACKDIR/sw-description"
+	cp -f "$SWDESC.sig" "$PACKDIR/sw-description.sig"
 	local SWU="$OUTDIR/joral-platform-$FW_VERSION.swu"
 	( cd "$PACKDIR" && for f in sw-description sw-description.sig rootfs.img; do
 		echo "$f"; done | cpio -o -H crc --quiet > "$SWU" )
