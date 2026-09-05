@@ -464,12 +464,14 @@ and the rootfs still read-write. The remaining ~6.6 GB of eMMC is unallocated.
 **Pico Max — 256 MB SPI NAND, ubifs** (`BoardConfig-SPI_NAND-Buildroot-RV1106_Luckfox_Pico_Max-IPC-AB.mk`):
 
 ```
-256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),16M(oem),49152K(userdata),80M(rootfs_a),80M(rootfs_b)
+256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),8M(oem),82M(userdata),72M(rootfs_a),72M(rootfs_b)
 ```
 
 Identical in structure — same partitions, same order, **same indices** — and
-differing only in the sizes of `userdata` (48 M) and the two rootfs slots
-(80 M each, at `0x05500000` and `0x0A500000`). 255 MiB total: the last
+differing only in sizes: `oem` 8 M, `userdata` 82 M and the two rootfs slots
+72 M each (at `0x06F00000` and `0x0B700000`), against the Ultra's 64 M / 512 M /
+768 M. Re-cut 2026-09-04 from 16 M / 48 M / 80 M: a staged `.swu` (53 M for
+2026.08.17) has to fit in `userdata`, and 48 M never could. 255 MiB total: the last
 1 MiB of the chip stays unallocated because the flasher rejects a table
 that ends at the last byte (bench, 2026-09-02; the gate enforces the tail).
 

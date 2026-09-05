@@ -4284,7 +4284,7 @@ is not closed: `opcua.security` and `web.tls` are still **opt-in**, and the defa
 
   Max (SPI NAND, ubifs-zlib, read-write):
 
-      256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),16M(oem),49152K(userdata),80M(rootfs_a),80M(rootfs_b)
+      256K(env),256K@256K(idblock),512K(uboot),4M(misc),8M(boot),8M(boot_b),8M(oem),82M(userdata),72M(rootfs_a),72M(rootfs_b)
 
   They share partition names, order and indices -- which is what makes one
   `sw-description` correct for both -- and deliberately NOT geometry. The
