@@ -219,8 +219,23 @@ upload)
 		printf '{"ok":false,"error":"body must be 512..268435456 bytes"}'; exit 0
 	fi
 	# Space check before we stream a couple hundred MB at /userdata.
+	#
+	# CREDIT THE PACKAGE ALREADY STAGED. An install does NOT remove the .swu
+	# it installed (swu-install.sh keeps it, deliberately: it is the evidence
+	# of what was applied), and swu-stage only unlinks it AFTER this check has
+	# passed -- so a second upload was measured against space the first one
+	# still occupied. On the Max, where the package is a large fraction of
+	# /userdata, that made the console accept exactly one upload per boot and
+	# then refuse every later one with "not enough space" while the partition
+	# was in fact big enough. We hold the operation lock here, so no install
+	# is reading that file and its bytes are genuinely reclaimable; swu-stage
+	# unlinks it before writing $STAGED.tmp, so the peak on disk is ONE
+	# package, not two.
 	free_kb=$(df -k "$R/userdata" 2>/dev/null | awk 'NR==2{print $4}')
-	if [ -n "$free_kb" ] && [ $((len / 1024 + 4096)) -gt "$free_kb" ]; then
+	staged_kb=0
+	[ -f "$STAGED" ] && staged_kb=$(du -k "$STAGED" 2>/dev/null | awk '{print $1}')
+	case "$staged_kb" in ''|*[!0-9]*) staged_kb=0 ;; esac
+	if [ -n "$free_kb" ] && [ $((len / 1024 + 4096)) -gt $((free_kb + staged_kb)) ]; then
 		printf '{"ok":false,"error":"not enough space on /userdata"}'; exit 0
 	fi
 	# The body goes to the root side on THIS process's stdin: swu-stage reads
