@@ -118,8 +118,8 @@ differs, which matters to the adapter and not to the device tree.
 
 | Net       | GPIO      | Pin # | Ultra header        | Pro/Max header      | Direction               | Mux           |
 |-----------|-----------|:-----:|---------------------|---------------------|-------------------------|---------------|
-| CAN2_CS   | GPIO2_A4  | 68    | bottom, left col    | right col, last row | out, active-low         | `RK_FUNC_GPIO` |
-| CAN2_INT  | GPIO2_A5  | 69    | bottom, left col    | right col, 2nd-last | in, active-low, level   | `RK_FUNC_GPIO` |
+| CAN2_CS   | GPIO2_A4  | 68    | bottom, left col    | **HdrPin 21**       | out, active-low         | `RK_FUNC_GPIO` |
+| CAN2_INT  | GPIO2_A5  | 69    | bottom, left col    | **HdrPin 22**       | in, active-low, level   | `RK_FUNC_GPIO` |
 | CAN2_SCK  | GPIO1_C1  | 49    | shared — tap at J2 13 | shared — tap at J2 13 | out                   | `SPI0_CLK_M0`  |
 | CAN2_MOSI | GPIO1_C2  | 50    | shared — tap at J2 14 | shared — tap at J2 14 | out                   | `SPI0_MOSI_M0` |
 | CAN2_MISO | GPIO1_C3  | 51    | shared — tap at J2 11 | shared — tap at J2 11 | in                    | `SPI0_MISO_M0` |
@@ -159,10 +159,22 @@ re-selected by the other two devices' traffic and corrupted.
 
 ### Pins this consumes
 
-`UART1_M1_TX` and `UART1_M1_RX` are the alternate functions on GPIO2_A4/A5.
-Nothing uses them today — the Ultra's Bluetooth is on `uart1m0` (GPIO1_A3/A4) —
-but **UART1_M1 is no longer available as a future serial port** on either board.
-Recorded here so it is a known trade rather than a later surprise.
+`UART1_M1_TX` and `UART1_M1_RX` are the alternate functions on GPIO2_A4/A5
+(confirmed on the official Pro/Max GPIO diagram: HdrPin 21 = `UART1_TX_M1`,
+HdrPin 22 = `UART1_RX_M1`). Nothing uses them today — the Ultra's Bluetooth is on
+`uart1m0` (GPIO1_A3/A4) — but **UART1_M1 is no longer available as a future serial
+port** on either board. Recorded here so it is a known trade rather than a later
+surprise.
+
+> **Hazard — do not enable `uart1` on the Pro/Max.**
+> `rv1106-luckfox-pico-pro-max-ipc.dtsi` already assigns
+> `&uart1 { pinctrl-0 = <&uart1m1_xfer>; }`, and `uart1m1_xfer` is
+> `<2 RK_PA4 4>` / `<2 RK_PA5 4>` — the CAN2 chip-select and IRQ pins. This is
+> harmless only because `uart1` is `status = "disabled"` in `rv1106.dtsi`, so the
+> mux never applies. Setting `uart1` to `okay` silently re-muxes both CAN2 pins
+> away from GPIO and breaks `can1` with no diagnostic: the chip-select stops
+> toggling and the driver reports `Failed to detect MCP251xFD (osc=0x00000000)`.
+> If uart1 is ever needed, move it to a different mux group first.
 
 Everything else stays free: GPIO2_A6, GPIO2_B0/B1, GPIO1_C4/C5/C7, GPIO4_C0/C1
 (and, on the Ultra, GPIO2_A0–A3 which the Pro/Max spends on the relocated nets).
@@ -199,8 +211,9 @@ interrupts to pin 5 level-low.
 
 ## Pro/Max-specific caveats (from device tree)
 
-1. **SPI0 ships `disabled`** on Pro/Max (`rv1106g-luckfox-pico-pro-max.dts`),
-   vs `okay` on the Ultra. Wiring is the same; only the DT default differs.
+1. **SPI0 is `okay`** on Pro/Max (`rv1106g-luckfox-pico-pro-max.dts`), as on the
+   Ultra, with `num-cs = <3>` and all three devices enabled. (It shipped
+   `disabled` in the stock Luckfox tree; this repo enables it.)
 2. **GPIO1_C3 (SPI MISO)** is used as an SPI-LCD reset in the Pro/Max IPC
    reference (`rv1106-luckfox-pico-pro-max-ipc.dtsi:287`). Only relevant if an
    SPI display is enabled — not used by the LAN/CAN expansion.
