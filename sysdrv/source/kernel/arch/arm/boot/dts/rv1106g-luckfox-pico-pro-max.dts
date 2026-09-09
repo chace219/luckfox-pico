@@ -46,6 +46,9 @@
  *   LAN_IRQ  GPIO1_B3 -> GPIO2_A3      I2C SCL  GPIO1_A0 -> GPIO2_A1
  *                                      I2C SDA  GPIO1_A1 -> GPIO2_A0
  *
+ * All four LAN nets are claimed below.  LAN_RST was the one relocation this
+ * file documented but never implemented - see lan8651_rst_pin.
+ *
  * The SPI bus itself (GPIO1_C1/C2/C3), CAN1's CS (GPIO1_C0) and INT
  * (GPIO2_A7), and CAN2's CS/INT (GPIO2_A4/A5) are the same pins on both
  * boards, so only the adapter wiring differs - not this device tree's shape.
@@ -58,6 +61,27 @@
 
 		lan8651_int_pin: lan8651-int-pin {
 			rockchip,pins = <2 RK_PA3 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
+		/*
+		 * LAN_RST (RESET_N), the fifth relocated net on this board.
+		 * The Ultra puts it on GPIO1_B0, which the Pro/Max header does
+		 * not break out, so Table 2 moves it to GPIO1_C6 (header pin 5).
+		 *
+		 * Until this group existed nothing in the Max include chain
+		 * referenced GPIO1_C6 at all: the pad kept its power-on default
+		 * (input, no drive), leaving the module's RESET_N floating.  The
+		 * Ultra gets away with having no reset-gpios because its wiring
+		 * holds RESET_N high passively; the Max has no such guarantee,
+		 * and a LAN8651 held in reset answers SPI with a near-constant
+		 * zero on MISO - correct clocking, no data.
+		 *
+		 * pull-up keeps RESET_N deasserted in the window between
+		 * power-on and pinctrl running, so the part is not held in reset
+		 * while the kernel boots.
+		 */
+		lan8651_rst_pin: lan8651-rst-pin {
+			rockchip,pins = <1 RK_PC6 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 	};
 
@@ -191,7 +215,8 @@
 		   <&gpio2 RK_PA4 GPIO_ACTIVE_LOW>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0m0_clk &spi0m0_miso &spi0m0_mosi &mcp251xfd_cs_pin
-			     &lan8651_cs_pin &lan8651_int_pin &mcp251xfd_int_pin
+			     &lan8651_cs_pin &lan8651_int_pin &lan8651_rst_pin
+			     &mcp251xfd_int_pin
 			     &mcp251xfd2_cs_pin &mcp251xfd2_int_pin>;
 	/delete-node/ spidev@0;
 	/delete-node/ fbtft@0;
@@ -220,12 +245,35 @@
 		spi-max-frequency = <15000000>;
 		interrupt-parent = <&gpio2>;
 		interrupts = <RK_PA3 IRQ_TYPE_EDGE_FALLING>;
+		/*
+		 * RESET_N on GPIO1_C6 (header pin 5), active low.  lan865x_hw_reset()
+		 * requests this GPIOD_OUT_HIGH (asserted), holds 10 ms, deasserts,
+		 * then settles 50 ms before oa_tc6_init() touches the bus - so the
+		 * part is always reset from a known state at probe.  Without this
+		 * property devm_gpiod_get_optional() returns NULL and the driver
+		 * silently skips the reset entirely, which is what the Max did
+		 * before: RESET_N was never driven, only ever left floating.
+		 */
+		reset-gpios = <&gpio1 RK_PC6 GPIO_ACTIVE_LOW>;
 		microchip,plca-enable;
 		microchip,plca-node-id = <0>;	/* 0 = PLCA coordinator (generates the BEACON) */
 		microchip,plca-node-count = <8>;
 		status = "okay";
 	};
 
+	/*
+	 * CS = GPIO2_A4 (header pin 21), INT = GPIO2_A5 (header pin 22).
+	 *
+	 * HAZARD: rv1106-luckfox-pico-pro-max-ipc.dtsi assigns
+	 *   &uart1 { pinctrl-0 = <&uart1m1_xfer>; }
+	 * and uart1m1_xfer is <2 RK_PA4 4> / <2 RK_PA5 4> - exactly these two pins.
+	 * That is inert only because uart1 is status = "disabled" in rv1106.dtsi.
+	 * Setting uart1 to "okay" re-muxes CS and INT away from GPIO and kills this
+	 * controller with no diagnostic beyond
+	 *   mcp251xfd spi0.2: Failed to detect MCP251xFD (osc=0x00000000)
+	 * because the chip-select simply stops toggling. If uart1 is ever needed,
+	 * move it to another mux group first.
+	 */
 	mcp251xfd2: can@2 {
 		compatible = "microchip,mcp251xfd";
 		reg = <2>;
