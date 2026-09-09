@@ -75,7 +75,14 @@ export RK_ARCH=arm
 export RK_TOOLCHAIN_CROSS=arm-rockchip830-linux-uclibcgnueabihf
 
 #misc image
-export RK_MISC=wipe_all-misc.img
+# Unset deliberately.  This single-slot profile's partition table has no 'misc'
+# partition at all (see RK_PARTITION_CMD_IN_ENV above), so there is nothing to
+# flash a misc.img to.  The stock value here was wipe_all-misc.img, which has
+# never existed anywhere in this tree - harmless while build_firmware only
+# copied misc.img under RK_ENABLE_RECOVERY, but a hard build failure since that
+# copy became unconditional (project/build.sh: "RK_MISC ... not found").  The
+# A/B profile is the one that needs a real misc.img, and it names ab-misc.img.
+export RK_MISC=
 
 # Uboot defconfig
 export RK_UBOOT_DEFCONFIG=luckfox_rv1106_uboot_defconfig
