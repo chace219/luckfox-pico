@@ -225,6 +225,66 @@ else
 	bad "the ubi packer has no setuid restore — chown clears it and the console cannot become root"
 fi
 
+# The checks above are all MECHANISM: they read the packer's source. That is
+# not enough, and this section exists because it was not enough on the bench.
+# The fix was correct in the tracked master AND the image still shipped 755,
+# because sysdrv/tools/pc/mtd-utils/Makefile COPIES mkfs_ubi.sh into
+# output/out/sysdrv_out/pc/ and the build runs that copy — the same tracked-
+# master/derived-copy split the buildroot defconfig has. A source-only gate
+# passes while the artifact is broken.
+#
+# So: pack a tree containing a 4755 file for real, and read the mode back OUT
+# of the packed image. A control file of known mode goes in alongside it, which
+# is what proves the struct offsets rather than assuming them.
+echo "== setuid survives a real ubi pack (end to end)"
+MODEREAD=scripts/compliance/ubifs-mode.py
+if [ ! -x "$UBIPACKER" ] || [ ! -f "$MODEREAD" ]; then
+	bad "$UBIPACKER or $MODEREAD missing"
+else
+	mkdir -p "$TMP/suid/src/usr/sbin" "$TMP/suid/src/etc" "$TMP/suid/out"
+	printf '#!/bin/sh\nexit 0\n' > "$TMP/suid/src/usr/sbin/media-gateway-privop"
+	printf '#!/bin/sh\nexit 0\n' > "$TMP/suid/src/usr/sbin/satisense-privop"
+	chmod 4755 "$TMP/suid/src/usr/sbin/media-gateway-privop" \
+		   "$TMP/suid/src/usr/sbin/satisense-privop"
+	echo hash > "$TMP/suid/src/etc/shadow"
+	chmod 0600 "$TMP/suid/src/etc/shadow"
+	if RK_DEBUG=1 "$UBIPACKER" "$TMP/suid/src" "$TMP/suid/out" \
+		$((128 * 1024 * 1024)) rootfs ubifs lzo >"$TMP/suid/log" 2>&1 \
+		&& [ -f "$TMP/suid/out/rootfs.img" ]; then
+		_modes=$(python3 "$MODEREAD" "$TMP/suid/out/rootfs.img" \
+			/etc/shadow /usr/sbin/media-gateway-privop /usr/sbin/satisense-privop 2>&1)
+		# The control first: if this is not 0600 the offsets are wrong and
+		# every other verdict from this reader is meaningless.
+		if ! echo "$_modes" | grep -q '/etc/shadow .*perm=0600'; then
+			bad "the mode reader is misreading the image (control /etc/shadow is not 0600): $(echo "$_modes" | tr '\n' ' ')"
+		else
+			_suid=$(echo "$_modes" | grep -c 'privop .*perm=4755')
+			if [ "$_suid" -eq 2 ]; then
+				ok "both dispatchers are 4755 in the packed image, not just in the source"
+			else
+				bad "only $_suid of 2 dispatchers kept setuid THROUGH the pack: $(echo "$_modes" | grep privop | tr '\n' ' ')"
+			fi
+		fi
+	else
+		bad "the ubi packer failed: $(tail -3 "$TMP/suid/log" | tr '\n' ' ')"
+	fi
+fi
+
+# The stale-copy trap itself. mkfs_ubi.sh is copied into the output tree by
+# sysdrv/tools/pc/mtd-utils/Makefile, and `cp -f` only re-runs when that target
+# does — so a fix to the tracked master can sit there while every build keeps
+# packing with the old script. That is exactly what happened on 2026-09-10: the
+# fix was committed, the build was clean, and the image still had 755.
+echo "== the derived ubi packer copy is not stale"
+DERIVED=output/out/sysdrv_out/pc/mkfs_ubi.sh
+if [ ! -f "$DERIVED" ]; then
+	ok "no derived copy yet (nothing built) — nothing to be stale"
+elif cmp -s "$UBIPACKER" "$DERIVED"; then
+	ok "output/out/sysdrv_out/pc/mkfs_ubi.sh matches the tracked master"
+else
+	bad "the derived packer copy differs from $UBIPACKER — the build is packing with a STALE script; refresh it with: cp -f $UBIPACKER $DERIVED"
+fi
+
 echo
 echo "$pass passed, $fail failed"
 [ $fail -eq 0 ]
