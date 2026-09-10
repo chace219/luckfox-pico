@@ -3076,12 +3076,42 @@ function __CHECK_PC_TOOLS_FRESH() {
 # uid-1000 ownership bug was inert (nothing runs unprivileged yet), and it goes
 # live the moment CRA hardening unprivileges a daemon. The ownership pass in
 # mkfs_ext4.sh fixed uid/gid and never looked at modes.
+#
+# The privop dispatchers are the OTHER half of this problem and go the other
+# way: they must land setuid-ROOT, and something between `install -m 4755` in
+# each product Makefile and the packed rootfs clears the bit. Traced 2026-09-10:
+# 4755 survives into output/out/media_out/root/, and the same file is 755 in
+# output/out/rootfs_uclibc_rv1106/ after ./build.sh firmware. Every individual
+# step reproduces clean in isolation (cp -rfa keeps it, even overwriting; the
+# cross strip keeps it; the overlay rsync and the hardening hook keep it), so
+# the culprit is somewhere in the packing pass and is not worth another day of
+# bisecting when the mode can simply be re-asserted here, immediately before
+# the image is built.
+#
+# WHY IT MATTERS. Both consoles run as www-data and reach root ONLY through
+# these dispatchers (console-privilege-separation-plan.md). Without the setuid
+# bit every privileged verb fails - `satisense-privop: cannot become root (not
+# installed setuid?)` - so the console cannot stage a .swu, read the A/B misc
+# record, apply config or reboot. On the bench (Max, 2026-09-10) that showed up
+# as a firmware upload dying mid-body with "network error": swu-stage failed
+# instantly, the CGI exited while the browser was still sending, and no
+# fw_upload record was ever written.
+#
+# Asserted rather than assumed: test-image-ownership.sh checks the packed image
+# for these two inodes, so a future packer change that strips the bit again
+# fails the gate instead of shipping a console that cannot do its job.
 function __HARDEN_SECRET_FILE_MODES() {
 	local f
 	for f in etc/shadow etc/gshadow; do
 		if [ -f "$RK_PROJECT_PACKAGE_ROOTFS_DIR/$f" ]; then
 			chmod 0600 "$RK_PROJECT_PACKAGE_ROOTFS_DIR/$f"
 			msg_info "hardened /$f to 0600"
+		fi
+	done
+	for f in usr/sbin/media-gateway-privop usr/sbin/satisense-privop; do
+		if [ -f "$RK_PROJECT_PACKAGE_ROOTFS_DIR/$f" ]; then
+			chmod 4755 "$RK_PROJECT_PACKAGE_ROOTFS_DIR/$f"
+			msg_info "restored setuid root on /$f"
 		fi
 	done
 }
