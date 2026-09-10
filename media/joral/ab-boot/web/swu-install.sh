@@ -81,7 +81,22 @@ if swupdate -i "$STAGED" -e "stable,$TARGET" > "$LOG" 2>&1; then
 			"target=$TARGET from=$FROM to=$TO reason=mark_active"
 	fi
 else
-	ERR=$({ grep -iE "error|fail" "$LOG" | head -n4; tail -n1 "$LOG"; } | tr '\n' ' ')
+	# Prefer SWUpdate's OWN diagnosis over the symptom. When the installer
+	# aborts it returns before the IPC feeder has finished sending, so the
+	# feeder's plain-libc perror -- "swupdate_image_write failed: Connection
+	# reset by peer" -- is what lands LAST in the log. Reporting the tail
+	# therefore reports the broken pipe every time and never the reason for
+	# it: too big for the volume, volume not found, bad node. Those come from
+	# ERROR(), which prefixes "ERROR :" (util.h), so take those lines first
+	# and fall back to the tail only when there are none.
+	#
+	# This used to be `grep -iE "error|fail" | head -n4` plus `tail -n1`,
+	# which on a one-line log printed the SAME sentence twice -- the doubled
+	# message seen on the bench 2026-09-11. Dedupe regardless of source: the
+	# two selections legitimately overlap when the last line is also an error.
+	ERR=$({ grep -F "ERROR :" "$LOG" | head -n4; tail -n1 "$LOG"; } |
+		awk '!seen[$0]++' | tr '\n' ' ')
+	[ -n "${ERR# }" ] || ERR=$(tail -n1 "$LOG")
 	echo "fail $ERR" > "$STATE"
 	audit_log fw_apply fail "$AUSER" \
 		"target=$TARGET from=$FROM to=$TO reason=install"
