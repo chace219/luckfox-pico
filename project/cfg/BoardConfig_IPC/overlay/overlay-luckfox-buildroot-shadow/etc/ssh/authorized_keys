@@ -9,6 +9,15 @@
 # key to /root/.ssh on a live unit without rebuilding.
 #
 # Root login is key-only (PermitRootLogin prohibit-password). Emptying this
-# file without providing another key locks SSH out entirely - serial console
-# becomes the only way in.
+# file without providing another key locks SSH out entirely - and on the Pico
+# Max there is no usable serial console, so the ONLY way back in would be a
+# full reflash over USB. Treat this file as lockout-critical.
+#
+# Two keys are authorized, both Joral build hosts. A second key is not a
+# weakening -- root login is key-only either way -- it removes a single point
+# of lockout. That is not hypothetical: on 2026-09-11 a flashed image
+# authorized only the first key, which the build host does not hold the
+# private half of, and SSH fell through to a password prompt that
+# prohibit-password can never satisfy.
 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOIBo2UBvoBRauTbb2MLm3vbS0xUCAztMEvtNIxEXXwz chace0219@gmail.com
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA9aKTaQPx9XEBinwKUKgMy4fGfXqMleJXXc9RmdS3xn chace0219@gmail.com
