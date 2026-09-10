@@ -3024,12 +3024,15 @@ function __RUN_POST_BUILD_USERDATA_SCRIPT() {
 # ownership pass to run, and a pass that never runs cannot fail loudly. Same
 # shape as the tracked-defconfig gotcha that bit the SWUpdate work twice.
 #
-# A warning rather than a hard failure: this is shared SDK tooling and a
-# checkout may legitimately carry local edits mid-work. But it must not be
-# silent.
+# This warned rather than acted until 2026-09-10, on the reasoning that a
+# checkout may legitimately carry local edits mid-work. That was wrong: a
+# warning in a thousand-line build log is functionally silent, and the trap
+# then cost a SECOND debugging cycle (the privop setuid fix, correct in the
+# tracked master while every build packed with the stale copy and shipped 755
+# dispatchers). It now refreshes the derived copy and says so.
 function __CHECK_PC_TOOLS_FRESH() {
 	local src_dir="$SDK_ROOT_DIR/sysdrv/tools/pc"
-	local stale="" var tool used master
+	local stale="" var tool used master ent ent_master ent_dest
 
 	[ -d "$src_dir" ] || return 0
 
@@ -3047,14 +3050,40 @@ function __CHECK_PC_TOOLS_FRESH() {
 		[ -n "$used" ] || continue
 		master=$(find "$src_dir" -name "$tool" -type f 2>/dev/null | head -n1)
 		[ -n "$master" ] || continue
-		cmp -s "$master" "$used" || stale="$stale ${master#$SDK_ROOT_DIR/}"
+		# Record master and the path that actually resolved, so the refresh
+		# writes over the copy that WINS on PATH rather than a guessed dir.
+		cmp -s "$master" "$used" || stale="$stale ${master#$SDK_ROOT_DIR/}|$used"
 	done
 
 	if [ -n "$stale" ]; then
-		msg_warn "PC packing tools under $out_dir are STALE against sysdrv/tools/pc:"
-		msg_warn "  $stale"
-		msg_warn "This build will pack with the OLD copies. Refresh them with:"
-		msg_warn "  make -C sysdrv pctools"
+		# Refresh rather than warn. This started as a warning, on the reasoning
+		# that a checkout may carry local edits mid-work — but a warning in a
+		# thousand-line build log is functionally silent, and this trap has now
+		# cost two separate debugging cycles: the 2026-08-15 root-ownership fix
+		# above, and the 2026-09-10 privop setuid fix, which was correct in the
+		# tracked master while every build kept packing with the old copy and
+		# shipping 755 dispatchers.
+		#
+		# The tracked master is the source of truth, so copying it over the
+		# derived output is not destructive: output/out/ is build product, and
+		# `make -C sysdrv pctools` would overwrite it identically. What was
+		# destructive was leaving the two out of sync.
+		msg_warn "PC packing tools were STALE against sysdrv/tools/pc:"
+		for ent in $stale; do
+			# $stale is space-accumulated, so trim: a leading space would
+			# otherwise become part of the first entry's path.
+			ent="${ent# }"
+			ent_master="${ent%%|*}"
+			ent_dest="${ent#*|}"
+			msg_warn "  $ent_master -> $ent_dest"
+			if cp -f "$SDK_ROOT_DIR/$ent_master" "$ent_dest"; then
+				msg_info "refreshed $(basename "$ent_master") from the tracked master"
+			else
+				msg_error "could not refresh $ent_dest — this build would pack with the OLD copy."
+				msg_error "  make -C sysdrv pctools"
+				exit 1
+			fi
+		done
 	fi
 }
 
@@ -3076,12 +3105,42 @@ function __CHECK_PC_TOOLS_FRESH() {
 # uid-1000 ownership bug was inert (nothing runs unprivileged yet), and it goes
 # live the moment CRA hardening unprivileges a daemon. The ownership pass in
 # mkfs_ext4.sh fixed uid/gid and never looked at modes.
+#
+# The privop dispatchers are the OTHER half of this problem and go the other
+# way: they must land setuid-ROOT, and something between `install -m 4755` in
+# each product Makefile and the packed rootfs clears the bit. Traced 2026-09-10:
+# 4755 survives into output/out/media_out/root/, and the same file is 755 in
+# output/out/rootfs_uclibc_rv1106/ after ./build.sh firmware. Every individual
+# step reproduces clean in isolation (cp -rfa keeps it, even overwriting; the
+# cross strip keeps it; the overlay rsync and the hardening hook keep it), so
+# the culprit is somewhere in the packing pass and is not worth another day of
+# bisecting when the mode can simply be re-asserted here, immediately before
+# the image is built.
+#
+# WHY IT MATTERS. Both consoles run as www-data and reach root ONLY through
+# these dispatchers (console-privilege-separation-plan.md). Without the setuid
+# bit every privileged verb fails - `satisense-privop: cannot become root (not
+# installed setuid?)` - so the console cannot stage a .swu, read the A/B misc
+# record, apply config or reboot. On the bench (Max, 2026-09-10) that showed up
+# as a firmware upload dying mid-body with "network error": swu-stage failed
+# instantly, the CGI exited while the browser was still sending, and no
+# fw_upload record was ever written.
+#
+# Asserted rather than assumed: test-image-ownership.sh checks the packed image
+# for these two inodes, so a future packer change that strips the bit again
+# fails the gate instead of shipping a console that cannot do its job.
 function __HARDEN_SECRET_FILE_MODES() {
 	local f
 	for f in etc/shadow etc/gshadow; do
 		if [ -f "$RK_PROJECT_PACKAGE_ROOTFS_DIR/$f" ]; then
 			chmod 0600 "$RK_PROJECT_PACKAGE_ROOTFS_DIR/$f"
 			msg_info "hardened /$f to 0600"
+		fi
+	done
+	for f in usr/sbin/media-gateway-privop usr/sbin/satisense-privop; do
+		if [ -f "$RK_PROJECT_PACKAGE_ROOTFS_DIR/$f" ]; then
+			chmod 4755 "$RK_PROJECT_PACKAGE_ROOTFS_DIR/$f"
+			msg_info "restored setuid root on /$f"
 		fi
 	done
 }

@@ -365,16 +365,43 @@ echo "set -e" >> $ROOTFS_IMAGE_FAKEROOT_UBI
 # one is in use. For ubifs the fallback is not enough, and
 # check-ubifs-ownership.py fails the build rather than letting a 1000:1000
 # image out.
+# chown CLEARS setuid/setgid. That is POSIX (chown(2): "the set-user-ID and
+# set-group-ID bits of the file mode shall be cleared upon successful return"),
+# it applies to the `chown -h -R 0:0` above, and it is why the console's privop
+# dispatchers - installed 4755 by each product Makefile, still 4755 in
+# output/out/media_out/root/ - arrived in the image as plain 755.
+#
+# The consoles run as www-data and reach root ONLY through those dispatchers,
+# so losing the bit disables every privileged verb: staging a .swu, reading the
+# A/B misc record, applying config, rebooting. On the bench (Max, 2026-09-10)
+# it presented as a firmware upload dying mid-body with "network error" and no
+# fw_upload record anywhere - a symptom that points nowhere near a file mode.
+#
+# Every step reproduced CLEAN in isolation (cp -rfa keeps the bit, the cross
+# strip keeps it, the overlay rsync keeps it, build.sh's own re-assertion runs
+# and reports success), because the strip happens HERE, inside the fakeroot
+# session, after all of them. So the restore has to be emitted into the same
+# script, after the chown and before the packer runs.
+__emit_setuid_restore() {
+	local p
+	for p in usr/sbin/media-gateway-privop usr/sbin/satisense-privop; do
+		echo "test ! -f $ROOTFS_SRC_DIR/$p || chmod 4755 $ROOTFS_SRC_DIR/$p" \
+			>> $ROOTFS_IMAGE_FAKEROOT_UBI
+	done
+}
+
 if unshare -r true >/dev/null 2>&1; then
 	FAKEROOT_TOOL="`which unshare` -r --"
 	msg_info "using a user namespace for image ownership (static packers, root inode included)"
 	echo "chown -h -R 0:0 $ROOTFS_SRC_DIR" >> $ROOTFS_IMAGE_FAKEROOT_UBI
+	__emit_setuid_restore
 elif which fakeroot; then
 	FAKEROOT_TOOL="`which fakeroot` --"
 	msg_warn "no user namespaces on this host — falling back to fakeroot."
 	msg_warn "fakeroot CANNOT reach the statically linked ubifs/erofs packers;"
 	msg_warn "a ubifs build will fail the ownership check that follows it."
 	echo "chown -h -R 0:0 $ROOTFS_SRC_DIR" >> $ROOTFS_IMAGE_FAKEROOT_UBI
+	__emit_setuid_restore
 else
 	msg_warn "Neither user namespaces nor fakeroot are available."
 	msg_warn "   sudo apt-get install fakeroot   (partial: squashfs only)"
