@@ -3271,6 +3271,29 @@ function build_firmware() {
 		$PACK_TOOL_PATH/lf_blkenvpackage --trim -i ${RK_PROJECT_OUTPUT_IMAGE} -o ${RK_PROJECT_OUTPUT_IMAGE}/sd_update.img
 	fi
 
+	# A .swu packed BEFORE this build is now stale: `swu` derives its payload
+	# from rootfs_a.img, so an existing package still carries the PREVIOUS
+	# rootfs while output/image/ carries the new one. Nothing downstream
+	# notices -- the stale package is signed, verifies, installs cleanly, and
+	# quietly reverts whatever this build changed.
+	#
+	# That is not hypothetical (2026-09-11): the flashable images picked up an
+	# added SSH key, the .swu had been packed an hour earlier without it, and
+	# installing it wrote a slot authorizing only a key the operator did not
+	# hold -- locking SSH out again on a board with no usable serial console.
+	# Warn rather than repack: `swu` may need offline signing (policy A.4), so
+	# it is not this target's business to run it.
+	local __swu
+	for __swu in "$RK_PROJECT_OUTPUT_IMAGE"/*.swu; do
+		[ -e "$__swu" ] || break
+		if [ "$__swu" -ot "$RK_PROJECT_OUTPUT_IMAGE/rootfs_a.img" ] ||
+		   [ "$__swu" -ot "$RK_PROJECT_OUTPUT_IMAGE/rootfs.img" ]; then
+			msg_warn "$(basename "$__swu") is OLDER than the images just built —"
+			msg_warn "  it carries the PREVIOUS rootfs and will undo this build if installed."
+			msg_warn "  Repack it:  ./build.sh swu"
+		fi
+	done
+
 	finish_build
 }
 
