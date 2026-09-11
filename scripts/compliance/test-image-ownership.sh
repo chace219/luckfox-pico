@@ -285,6 +285,31 @@ else
 	bad "the derived packer copy differs from $UBIPACKER — the build is packing with a STALE script; refresh it with: cp -f $UBIPACKER $DERIVED"
 fi
 
+# The SAME trap in the web layer. ab-boot/web/swu-install.sh reads as the
+# master, but NOTHING copies it: each product Makefile installs its own
+# submodule copy (web/cgi-lib/swu-install.sh), so an edit to the ab-boot file
+# alone ships nothing while looking committed. Found 2026-09-11 fixing the
+# install-error reporting. Same shape as the mkfs_ubi.sh trap above, different
+# directory -- so gate it the same way rather than trusting anyone to remember.
+echo "== the product copies of swu-install.sh match the ab-boot master"
+SWUMASTER=media/joral/ab-boot/web/swu-install.sh
+if [ ! -f "$SWUMASTER" ]; then
+	ok "no ab-boot master present — nothing to diverge from"
+else
+	_drift=""
+	for _c in media/joral/satisense-edge/web/cgi-lib/swu-install.sh \
+	          media/joral/media-gateway/src/web/cgi-lib/swu-install.sh; do
+		# A missing copy is a checked-out-shallow submodule, not drift.
+		[ -f "$_c" ] || continue
+		cmp -s "$SWUMASTER" "$_c" || _drift="$_drift $_c"
+	done
+	if [ -z "$_drift" ]; then
+		ok "both product copies of swu-install.sh match $SWUMASTER"
+	else
+		bad "swu-install.sh drifted from the master in:$_drift — these are what actually ship; sync with: for f in$_drift; do cp -f $SWUMASTER \$f; done"
+	fi
+fi
+
 echo
 echo "$pass passed, $fail failed"
 [ $fail -eq 0 ]

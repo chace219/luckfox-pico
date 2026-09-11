@@ -199,24 +199,46 @@ status)
 	;;
 
 upload)
-	[ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}'; exit 0; }
+	# REFUSE-WITH-DRAIN. Every early exit below answers a request whose body the
+	# browser is ALREADY streaming, and a CGI that exits without reading that
+	# body leaves the client writing into a socket whose reader is gone. The
+	# status line we printed never surfaces: XHR reports onerror, the console
+	# says "network error during upload", and the operator is told the network
+	# broke when in fact we said "not enough space" (or "another update is in
+	# progress", or "POST required").
+	#
+	# webauth.sh fixed exactly this for require_auth on 2026-09-04 -- and these
+	# five paths, which run AFTER auth succeeds, were left undrained. Bench,
+	# 2026-09-10 on a Pico Max: upload dies at ~1.6 MB (one socket buffer) with
+	# no HTTP status in the Network tab.
+	#
+	# _drain_body comes from webauth.sh, is guarded by CONTENT_LENGTH, and uses
+	# dd iflag=fullblock -- a socket returns short reads constantly, and without
+	# fullblock the drain stops early and leaves the tail unread, which is the
+	# very condition being avoided.
+	_refuse() { # _refuse <json>
+		_drain_body 2>/dev/null || true
+		printf '%s' "$1"
+		exit 0
+	}
+	[ "$REQUEST_METHOD" = "POST" ] || _refuse '{"ok":false,"error":"POST required"}'
 	# A missing updater is an image-build defect, not a bad signature —
 	# report it as itself (and before streaming a 150 MB body).
 	if ! command -v swupdate >/dev/null 2>&1; then
 		audit_log fw_upload fail "$(current_user)" "reason=swupdate_missing"
-		printf '{"ok":false,"error":"swupdate binary missing from this image — reflash a rootfs built with SWUpdate enabled"}'; exit 0
+		_refuse '{"ok":false,"error":"swupdate binary missing from this image — reflash a rootfs built with SWUpdate enabled"}'
 	fi
 	# One mutating operation at a time: a second upload would interleave into
 	# the same staging file, and an upload must not swap the package out from
 	# under a running install.
 	op_lock || {
-		printf '{"ok":false,"error":"another update operation is in progress — wait for it to finish"}'; exit 0
+		_refuse '{"ok":false,"error":"another update operation is in progress — wait for it to finish"}'
 	}
 	trap op_unlock EXIT INT TERM
 	len="${CONTENT_LENGTH:-0}"
 	case "$len" in ''|*[!0-9]*) len=0 ;; esac
 	if [ "$len" -lt 512 ] || [ "$len" -gt 268435456 ]; then
-		printf '{"ok":false,"error":"body must be 512..268435456 bytes"}'; exit 0
+		_refuse '{"ok":false,"error":"body must be 512..268435456 bytes"}'
 	fi
 	# Space check before we stream a couple hundred MB at /userdata.
 	#
@@ -236,7 +258,7 @@ upload)
 	[ -f "$STAGED" ] && staged_kb=$(du -k "$STAGED" 2>/dev/null | awk '{print $1}')
 	case "$staged_kb" in ''|*[!0-9]*) staged_kb=0 ;; esac
 	if [ -n "$free_kb" ] && [ $((len / 1024 + 4096)) -gt $((free_kb + staged_kb)) ]; then
-		printf '{"ok":false,"error":"not enough space on /userdata"}'; exit 0
+		_refuse '{"ok":false,"error":"not enough space on /userdata"}'
 	fi
 	# The body goes to the root side on THIS process's stdin: swu-stage reads
 	# exactly $len bytes into the fixed staging path, verifies BEFORE accepting
